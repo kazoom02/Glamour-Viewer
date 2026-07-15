@@ -20,6 +20,7 @@ export interface DecodedMaterial {
     mask?: DecodedTexture
     specular?: DecodedTexture
     index?: DecodedTexture
+    ao?: DecodedTexture
     roughness?: DecodedTexture
     metalness?: DecodedTexture
     emissive?: DecodedTexture

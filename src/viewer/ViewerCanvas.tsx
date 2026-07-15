@@ -127,6 +127,10 @@ function addDecodedModel(
     if (slot && attributeMask !== undefined && !isVisibleEquipmentPart(part.attributes, slot, attributeMask)) continue
     const materialPath = model.materialPaths[part.materialIndex]?.toLowerCase() ?? ''
     const decodedMaterial = decodedMaterials[materialPath.replaceAll('\\', '/')]
+    const shaderPackage = decodedMaterial?.shaderPackage.toLowerCase() ?? ''
+    // The game's eye-occlusion shader is a multiply/shadow pass. Rendering it as
+    // an opaque standard material covers the correctly textured iris in white.
+    if (shaderPackage === 'characterocclusion.shpk') continue
     let meshColor = color
     if (/b0001_[a-z]\.mtrl$/.test(materialPath) || /_fac_[a-z]\.mtrl$/.test(materialPath)) meshColor = 0xc99378
     else if (/_iri_[a-z]\.mtrl$/.test(materialPath)) meshColor = 0x6689a7
@@ -137,6 +141,7 @@ function addDecodedModel(
     const diffuse = decodedMaterial?.textures.diffuse
     const normal = decodedMaterial?.textures.normal
     const mask = decodedMaterial?.textures.mask
+    const ao = decodedMaterial?.textures.ao
     const roughness = decodedMaterial?.textures.roughness ?? mask
     const metalness = decodedMaterial?.textures.metalness
     const emissive = decodedMaterial?.textures.emissive
@@ -147,6 +152,8 @@ function addDecodedModel(
       color: diffuse ? 0xffffff : meshColor,
       map: diffuse ? textureFromDecoded(diffuse, true, anisotropy) : null,
       normalMap: normal ? textureFromDecoded(normal, false, anisotropy) : null,
+      aoMap: ao ? textureFromDecoded(ao, false, anisotropy) : null,
+      aoMapIntensity: ao ? 0.65 : 1,
       roughnessMap: roughness ? textureFromDecoded(roughness, false, anisotropy) : null,
       roughness: roughness ? 1 : 0.62,
       metalnessMap: metalness ? textureFromDecoded(metalness, false, anisotropy) : null,
@@ -164,8 +171,11 @@ function addDecodedModel(
     if (normal) material.normalScale.set(1, 1)
     const geometry = new THREE.BufferGeometry()
     geometry.setAttribute('position', new THREE.BufferAttribute(part.positions, 3))
-    if (part.uvs) geometry.setAttribute('uv', new THREE.BufferAttribute(part.uvs, 2))
-    if (part.uvs2) geometry.setAttribute('uv1', new THREE.BufferAttribute(part.uvs2, 2))
+    if (part.uvs) {
+      geometry.setAttribute('uv', new THREE.BufferAttribute(part.uvs, 2))
+      geometry.setAttribute('uv1', new THREE.BufferAttribute(part.uvs, 2))
+    }
+    if (part.uvs2) geometry.setAttribute('uv2', new THREE.BufferAttribute(part.uvs2, 2))
     let skinIndices = part.skinIndices
     if (skinIndices && rig) {
       skinIndices = new Uint16Array(skinIndices).map((globalIndex) => (
@@ -266,8 +276,9 @@ function modelMaterialDiagnostics(
   return model.meshes.flatMap((mesh, index) => {
     const reference = model.materialPaths[mesh.materialIndex]?.replaceAll('\\', '/').toLowerCase() ?? '(missing)'
     const material = materialResult?.materials[reference]
+    const face = label === 'character face'
     const iris = material?.shaderPackage.toLowerCase() === 'iris.shpk' || reference.includes('_iri_')
-    if (!equipment && !iris) return []
+    if (!equipment && !face && !iris) return []
     return [
       `${label} mesh ${index}: materialIndex=${mesh.materialIndex} reference=${reference}`,
       `  shader=${material?.shaderPackage ?? 'unresolved'} vertices=${mesh.positions.length / 3} triangles=${mesh.indices.length / 3}`,
@@ -547,7 +558,7 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
         const materials = Array.isArray(object.material) ? object.material : [object.material]
         materials.forEach((item) => {
           if (item instanceof THREE.MeshStandardMaterial) {
-            new Set([item.map, item.normalMap, item.roughnessMap, item.metalnessMap, item.emissiveMap].filter(Boolean)).forEach((texture) => texture?.dispose())
+            new Set([item.map, item.normalMap, item.aoMap, item.roughnessMap, item.metalnessMap, item.emissiveMap].filter(Boolean)).forEach((texture) => texture?.dispose())
           }
           item.dispose()
         })

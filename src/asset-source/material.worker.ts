@@ -152,8 +152,7 @@ async function loadRequest(
       const parsed = parseMtrl(materialFile.bytes)
       const shader = parsed.shaderPackage.toLowerCase()
       const captureDiagnostics = Boolean(request.slot)
-        || shader === 'iris.shpk'
-        || /_iri_[a-z]\.mtrl$/i.test(materialReference)
+        || request.modelPath.includes('/obj/face/')
       const materialDiagnostics: string[] = captureDiagnostics ? [
         `material ${materialReference}`,
         `  model: ${request.modelPath}`,
@@ -194,7 +193,7 @@ async function loadRequest(
       }
       if (parsed.colorTable) {
         if (usesCharacterColorTable(shader)) {
-          const baked = bakeCharacterMaterial(parsed.colorTable, decoded.textures)
+          const baked = bakeCharacterMaterial(parsed.colorTable, decoded.textures, shader)
           if (baked) Object.assign(decoded.textures, baked)
         }
         decoded.colorTableRows = parsed.colorTable.rows.length
@@ -216,6 +215,7 @@ async function loadRequest(
           `  final normal: ${textureSummary(decoded.textures.normal)}`,
           `  final mask: ${textureSummary(decoded.textures.mask)}`,
           `  final index: ${textureSummary(decoded.textures.index)}`,
+          `  final ao: ${textureSummary(decoded.textures.ao)}`,
           `  final roughness: ${textureSummary(decoded.textures.roughness)}`,
           `  final metalness: ${textureSummary(decoded.textures.metalness)}`,
         )

@@ -4,6 +4,7 @@ import { TEX_FORMAT, type DecodedTexture } from './tex'
 export interface BakedCharacterMaterial {
   diffuse: DecodedTexture
   normal?: DecodedTexture
+  ao: DecodedTexture
   roughness: DecodedTexture
   metalness: DecodedTexture
   emissive: DecodedTexture
@@ -118,6 +119,7 @@ export function bakeCharacterMaterial(
     mask?: DecodedTexture
     index?: DecodedTexture
   },
+  shaderPackage = 'character.shpk',
 ): BakedCharacterMaterial | undefined {
   const selector = table.kind === 'dawntrail' ? textures.index : textures.normal
   if (!selector) return undefined
@@ -125,6 +127,7 @@ export function bakeCharacterMaterial(
   const width = reference.width
   const height = reference.height
   const diffuse = new Uint8Array(width * height * 4)
+  const ao = new Uint8Array(diffuse.length)
   const roughness = new Uint8Array(diffuse.length)
   const metalness = new Uint8Array(diffuse.length)
   const emissive = new Uint8Array(diffuse.length)
@@ -155,24 +158,30 @@ export function bakeCharacterMaterial(
         : 1
       for (let channel = 0; channel < 3; channel += 1) {
         const tableColor = pseudoSqrt(mix(a.diffuse[channel]!, b.diffuse[channel]!))
-        diffuse[target + channel] = clampByte(tableColor * (base[channel]! / 255) * (mask[2] / 255))
+        diffuse[target + channel] = clampByte(tableColor * (base[channel]! / 255))
         emissive[target + channel] = clampByte(pseudoSqrt(mix(a.emissive[channel]!, b.emissive[channel]!)))
       }
       diffuse[target + 3] = clampByte((base[3] / 255) * opacity)
       const rowRoughness = mix(a.roughness, b.roughness)
-      const rough = clampByte(rowRoughness * (textures.mask ? mask[1] / 255 : 1))
+      const maskRoughness = textures.mask ? mask[1] / 255 : 1
+      const rough = clampByte(shaderPackage.toLowerCase() === 'characterlegacy.shpk'
+        ? 1 - maskRoughness
+        : rowRoughness * maskRoughness)
+      const occlusion = textures.mask ? mask[2] : 255
+      ao[target] = ao[target + 1] = ao[target + 2] = occlusion
       roughness[target] = roughness[target + 1] = roughness[target + 2] = rough
       // FFXIV's character shader uses a colored-specular workflow. Feeding its
       // table value directly into Three's metallic workflow removes the diffuse
       // contribution and turns leather/cloth black without an environment map.
       metalness[target] = metalness[target + 1] = metalness[target + 2] = 0
-      emissive[target + 3] = roughness[target + 3] = metalness[target + 3] = 255
+      ao[target + 3] = emissive[target + 3] = roughness[target + 3] = metalness[target + 3] = 255
     }
   }
 
   return {
     diffuse: output(width, height, diffuse),
     normal: textures.normal ? cleanedNormal(textures.normal) : undefined,
+    ao: output(width, height, ao),
     roughness: output(width, height, roughness),
     metalness: output(width, height, metalness),
     emissive: output(width, height, emissive),

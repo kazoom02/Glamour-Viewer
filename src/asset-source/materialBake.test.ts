@@ -30,6 +30,26 @@ describe('character colorset baking', () => {
     expect(Array.from(result.metalness.rgba.slice(0, 3))).toEqual([0, 0, 0])
   })
 
+  it('keeps ambient occlusion separate and converts legacy gloss to roughness', () => {
+    const rows = Array.from({ length: 16 }, () => ({
+      diffuse: [1, 1, 1] as [number, number, number],
+      specular: [0, 0, 0] as [number, number, number],
+      emissive: [0, 0, 0] as [number, number, number],
+      roughness: 0.5,
+      metalness: 0,
+    }))
+    const table: MaterialColorTable = { kind: 'legacy', rows }
+    const result = bakeCharacterMaterial(table, {
+      normal: texture([128, 128, 0, 255]),
+      diffuse: texture([255, 255, 255, 255]),
+      mask: texture([255, 32, 0, 255]),
+    }, 'characterlegacy.shpk')!
+
+    expect(Array.from(result.diffuse.rgba.slice(0, 3))).toEqual([255, 255, 255])
+    expect(Array.from(result.ao.rgba.slice(0, 3))).toEqual([0, 0, 0])
+    expect(Array.from(result.roughness.rgba.slice(0, 3))).toEqual([223, 223, 223])
+  })
+
   it('builds facial-hair color and opacity from normal and mask channels', () => {
     const result = bakeHairMaterial(texture([128, 128, 0, 64]), texture([0, 0, 0, 255]))!
     expect(Array.from(result.diffuse.rgba)).toEqual([130, 64, 13, 64])
