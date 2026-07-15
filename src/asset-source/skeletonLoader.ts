@@ -44,4 +44,10 @@ export function loadLocalSkeleton(
   })
 }
 
+/** Missing optional auxiliary skeletons are valid; malformed or unreadable ones are not. */
+export function isMissingLocalSkeletonError(reason: unknown, path: string): boolean {
+  const message = reason instanceof Error ? reason.message : String(reason)
+  return message.includes(`The selected install does not contain ${path}`)
+}
+
 export type { DecodedSkeleton, DecodedSkeletonBone } from './sklb'

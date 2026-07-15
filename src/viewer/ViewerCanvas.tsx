@@ -15,7 +15,11 @@ import { equipmentAssetPlan } from '../asset-source/equipmentPlan'
 import { loadLocalMaterials, type DecodedMaterial, type MaterialLoadRequest } from '../asset-source/materialLoader'
 import { loadLocalModels, type ModelLoadResult } from '../asset-source/modelLoader'
 import type { DecodedModel } from '../asset-source/mdl'
-import { loadLocalSkeleton, type DecodedSkeleton } from '../asset-source/skeletonLoader'
+import {
+  isMissingLocalSkeletonError,
+  loadLocalSkeleton,
+  type DecodedSkeleton,
+} from '../asset-source/skeletonLoader'
 import { attachSkeleton } from '../asset-source/sklb'
 import { ARMOR_SLOTS, type ArmorSlot, type EquippedArmor } from '../catalog/types'
 
@@ -35,6 +39,7 @@ const PART_COLORS: Record<CharacterPart, number> = {
   legs: 0xc99378,
   feet: 0xc99378,
   face: 0xd5a087,
+  iris: 0x6689a7,
   hair: 0x352a2b,
   tail: 0x4b3837,
   ears: 0x3d3031,
@@ -329,11 +334,14 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
           } catch (reason) {
             failures.push(`face skeleton: ${reason instanceof Error ? reason.message : String(reason)}`)
           }
+          const optionalHairSkeletonPath = hairSkeletonPath(raceCode)
           try {
-            const hairSkeleton = await loadLocalSkeleton(source, hairSkeletonPath(raceCode))
+            const hairSkeleton = await loadLocalSkeleton(source, optionalHairSkeletonPath)
             combinedSkeleton = attachSkeleton(combinedSkeleton, hairSkeleton, 'j_kao')
           } catch (reason) {
-            failures.push(`hair skeleton: ${reason instanceof Error ? reason.message : String(reason)}`)
+            if (!isMissingLocalSkeletonError(reason, optionalHairSkeletonPath)) {
+              failures.push(`hair skeleton: ${reason instanceof Error ? reason.message : String(reason)}`)
+            }
           }
           rig = addCharacterRig(characterGroup, combinedSkeleton)
         } catch (reason) {

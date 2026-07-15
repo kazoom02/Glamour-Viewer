@@ -7,7 +7,7 @@ export const CHARACTER_PRESETS = [
 ] as const
 
 export type CharacterRaceCode = (typeof CHARACTER_PRESETS)[number][0]
-export type CharacterPart = 'torso' | 'hands' | 'legs' | 'feet' | 'face' | 'hair' | 'tail' | 'ears'
+export type CharacterPart = 'torso' | 'hands' | 'legs' | 'feet' | 'face' | 'iris' | 'hair' | 'tail' | 'ears'
 
 export interface CharacterModelPlan {
   part: CharacterPart
@@ -26,6 +26,8 @@ export function characterModelPlan(raceCode: CharacterRaceCode): CharacterModelP
     { part: 'legs', coveredBy: 'legs', path: `chara/equipment/e0000/model/${raceCode}e0000_dwn.mdl` },
     { part: 'feet', coveredBy: 'feet', path: `chara/equipment/e0000/model/${raceCode}e0000_sho.mdl` },
     { part: 'face', path: modelPath(raceCode, 'face', 'f', 'fac') },
+    // Iris geometry is a separate customization model; it is not part of _fac.mdl.
+    { part: 'iris', path: modelPath(raceCode, 'face', 'f', 'iri') },
     { part: 'hair', path: modelPath(raceCode, 'hair', 'h', 'hir') },
   ]
   return result
