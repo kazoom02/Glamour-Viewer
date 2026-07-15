@@ -12,6 +12,7 @@ describe('character colorset baking', () => {
     const rows = Array.from({ length: 32 }, () => ({
       diffuse: [0, 0, 0] as [number, number, number],
       specular: [0, 0, 0] as [number, number, number],
+      specularMask: 1,
       emissive: [0, 0, 0] as [number, number, number],
       roughness: 1,
       metalness: 0,
@@ -26,14 +27,15 @@ describe('character colorset baking', () => {
       diffuse: texture([255, 255, 255, 255]),
       mask: texture([255, 255, 255, 255]),
     })!
-    expect(Array.from(result.diffuse.rgba.slice(0, 3))).toEqual([201, 201, 201])
+    expect(Array.from(result.diffuse.rgba.slice(0, 3))).toEqual([207, 207, 207])
     expect(Array.from(result.metalness.rgba.slice(0, 3))).toEqual([0, 0, 0])
   })
 
-  it('keeps ambient occlusion separate and converts legacy specular power to roughness', () => {
+  it('keeps legacy ambient occlusion, roughness and specular controls separate', () => {
     const rows = Array.from({ length: 16 }, () => ({
       diffuse: [1, 1, 1] as [number, number, number],
-      specular: [0, 0, 0] as [number, number, number],
+      specular: [1, 1, 1] as [number, number, number],
+      specularMask: 0.5,
       emissive: [0, 0, 0] as [number, number, number],
       roughness: 0.5,
       metalness: 0,
@@ -47,13 +49,15 @@ describe('character colorset baking', () => {
 
     expect(Array.from(result.diffuse.rgba.slice(0, 3))).toEqual([255, 255, 255])
     expect(Array.from(result.ao.rgba.slice(0, 3))).toEqual([0, 0, 0])
-    expect(Array.from(result.roughness.rgba.slice(0, 3))).toEqual([223, 223, 223])
+    expect(Array.from(result.roughness.rgba.slice(0, 3))).toEqual([255, 255, 255])
+    expect(result.specularIntensity.rgba[3]).toBe(16)
   })
 
   it('uses modern mask roughness directly instead of multiplying it down', () => {
     const rows = Array.from({ length: 32 }, () => ({
       diffuse: [1, 1, 1] as [number, number, number],
       specular: [0, 0, 0] as [number, number, number],
+      specularMask: 1,
       emissive: [0, 0, 0] as [number, number, number],
       roughness: 0.5,
       metalness: 0,

@@ -88,6 +88,26 @@ function textureFromDecoded(
   return result
 }
 
+function textureFromChannel(
+  texture: NonNullable<DecodedMaterial['textures']['mask']>,
+  channel: 0 | 1 | 2 | 3,
+  outputChannel: 'rgb' | 'alpha',
+  anisotropy: number,
+): THREE.DataTexture {
+  const rgba = new Uint8Array(texture.rgba.length)
+  for (let offset = 0; offset < rgba.length; offset += 4) {
+    const value = texture.rgba[offset + channel]!
+    if (outputChannel === 'rgb') {
+      rgba[offset] = rgba[offset + 1] = rgba[offset + 2] = value
+      rgba[offset + 3] = 255
+    } else {
+      rgba[offset] = rgba[offset + 1] = rgba[offset + 2] = 255
+      rgba[offset + 3] = value
+    }
+  }
+  return textureFromDecoded({ ...texture, rgba }, false, anisotropy)
+}
+
 interface CharacterRig {
   skeleton: THREE.Skeleton
   boneIndex: Map<string, number>
@@ -142,32 +162,65 @@ function addDecodedModel(
     else if (/e0000_(top|dwn|sho|glv)_/.test(materialPath)) meshColor = 0x554b49
     const diffuse = decodedMaterial?.textures.diffuse
     const normal = decodedMaterial?.textures.normal
+    const mask = decodedMaterial?.textures.mask
     const ao = decodedMaterial?.textures.ao
     const roughness = decodedMaterial?.textures.roughness
     const metalness = decodedMaterial?.textures.metalness
     const emissive = decodedMaterial?.textures.emissive
+    const specularColor = decodedMaterial?.textures.specularColor ?? decodedMaterial?.textures.specular
+    const specularIntensity = decodedMaterial?.textures.specularIntensity
     const alphaMode = decodedMaterial?.alphaMode ?? 'opaque'
     const isIris = decodedMaterial?.shaderPackage.toLowerCase() === 'iris.shpk' || /_iri_[a-z]\.mtrl$/.test(materialPath)
     const isFaceMaterial = /mt_c\d{4}f\d{4}/.test(materialPath)
     const fallbackRoughness = shaderPackage === 'skin.shpk'
-      ? 0.72
+      ? 0.76
       : shaderPackage === 'hair.shpk'
-        ? 0.64
+        ? 0.72
         : shaderPackage === 'iris.shpk'
           ? 0.46
-          : 0.68
-    const material = new THREE.MeshStandardMaterial({
+          : 0.74
+    const fallbackSpecularIntensity = shaderPackage === 'skin.shpk'
+      ? 0.32
+      : shaderPackage === 'hair.shpk'
+        ? 0.2
+        : shaderPackage === 'iris.shpk'
+          ? 0.52
+          : 0.28
+    const aoMap = ao
+      ? textureFromDecoded(ao, false, anisotropy)
+      : mask
+        ? textureFromChannel(mask, 2, 'rgb', anisotropy)
+        : null
+    const roughnessMap = roughness
+      ? textureFromDecoded(roughness, false, anisotropy)
+      : mask
+        ? textureFromDecoded(mask, false, anisotropy)
+        : null
+    const specularIntensityMap = specularIntensity
+      ? textureFromDecoded(specularIntensity, false, anisotropy)
+      : mask
+        ? textureFromChannel(mask, 0, 'alpha', anisotropy)
+        : null
+    const material = new THREE.MeshPhysicalMaterial({
       color: diffuse ? 0xffffff : meshColor,
       map: diffuse ? textureFromDecoded(diffuse, true, anisotropy) : null,
       normalMap: normal ? textureFromDecoded(normal, false, anisotropy) : null,
-      aoMap: ao ? textureFromDecoded(ao, false, anisotropy) : null,
-      aoMapIntensity: ao ? 0.65 : 1,
-      roughnessMap: roughness ? textureFromDecoded(roughness, false, anisotropy) : null,
-      roughness: roughness ? 1 : fallbackRoughness,
+      aoMap,
+      aoMapIntensity: aoMap ? 0.65 : 1,
+      roughnessMap,
+      roughness: roughnessMap ? 1 : fallbackRoughness,
       metalnessMap: metalness ? textureFromDecoded(metalness, false, anisotropy) : null,
-      metalness: metalness ? 1 : materialPath.includes('/mt_c') && materialPath.includes('e0000') ? 0 : 0.08,
+      // Character materials use colored specular rather than Three's metallic
+      // workflow. Treating leather or cloth as metal removes their base color.
+      metalness: metalness ? 1 : 0,
       emissiveMap: emissive ? textureFromDecoded(emissive, true, anisotropy) : null,
       emissive: emissive ? 0xffffff : 0x000000,
+      specularColorMap: specularColor ? textureFromDecoded(specularColor, true, anisotropy) : null,
+      specularIntensityMap,
+      specularIntensity: specularIntensityMap ? 1 : fallbackSpecularIntensity,
+      ior: 1.5,
+      clearcoat: 0,
+      sheen: 0,
       alphaTest: diffuse && alphaMode === 'mask' ? 0.5 : 0,
       transparent: alphaMode === 'blend',
       depthWrite: alphaMode !== 'blend',
@@ -344,10 +397,10 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
     const camera = new THREE.PerspectiveCamera(38, 1, 0.01, 100)
     camera.position.set(0.2, 1.05, 4)
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' })
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 3))
     renderer.outputColorSpace = THREE.SRGBColorSpace
-    renderer.toneMapping = THREE.ACESFilmicToneMapping
-    renderer.toneMappingExposure = 1.12
+    renderer.toneMapping = THREE.NeutralToneMapping
+    renderer.toneMappingExposure = 1
     const maxAnisotropy = renderer.capabilities.getMaxAnisotropy()
     host.appendChild(renderer.domElement)
 
@@ -361,11 +414,11 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
     characterGroup.name = `${raceCode}-character`
     scene.add(characterGroup)
 
-    scene.add(new THREE.HemisphereLight(0xf4e8d5, 0x171a22, 2.3))
-    const key = new THREE.DirectionalLight(0xffd9a0, 3.8)
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x20242c, 1.35))
+    const key = new THREE.DirectionalLight(0xffffff, 2.4)
     key.position.set(3, 5, 4)
     scene.add(key)
-    const rim = new THREE.DirectionalLight(0x8db6ff, 1.6)
+    const rim = new THREE.DirectionalLight(0xffffff, 0.65)
     rim.position.set(-4, 2, -3)
     scene.add(rim)
 
@@ -611,6 +664,9 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
         materials.forEach((item) => {
           if (item instanceof THREE.MeshStandardMaterial) {
             new Set([item.map, item.normalMap, item.aoMap, item.roughnessMap, item.metalnessMap, item.emissiveMap].filter(Boolean)).forEach((texture) => texture?.dispose())
+          }
+          if (item instanceof THREE.MeshPhysicalMaterial) {
+            new Set([item.specularColorMap, item.specularIntensityMap].filter(Boolean)).forEach((texture) => texture?.dispose())
           }
           item.dispose()
         })

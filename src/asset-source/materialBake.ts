@@ -8,6 +8,8 @@ export interface BakedCharacterMaterial {
   roughness: DecodedTexture
   metalness: DecodedTexture
   emissive: DecodedTexture
+  specularColor: DecodedTexture
+  specularIntensity: DecodedTexture
 }
 
 export type MaterialAlphaMode = 'opaque' | 'mask' | 'blend'
@@ -28,8 +30,18 @@ function output(width: number, height: number, rgba: Uint8Array): DecodedTexture
   return { width, height, format: TEX_FORMAT.B8G8R8A8, rgba }
 }
 
-function pseudoSqrt(value: number): number {
-  return value < 0 ? -Math.sqrt(-value) : Math.sqrt(value)
+function srgbToLinear(value: number): number {
+  const normalized = Math.min(1, Math.max(0, value / 255))
+  return normalized <= 0.04045
+    ? normalized / 12.92
+    : ((normalized + 0.055) / 1.055) ** 2.4
+}
+
+function linearToSrgb(value: number): number {
+  const normalized = Math.min(1, Math.max(0, value))
+  return normalized <= 0.0031308
+    ? normalized * 12.92
+    : 1.055 * normalized ** (1 / 2.4) - 0.055
 }
 
 function cleanedNormal(texture: DecodedTexture): DecodedTexture {
@@ -117,6 +129,7 @@ export function bakeCharacterMaterial(
     diffuse?: DecodedTexture
     normal?: DecodedTexture
     mask?: DecodedTexture
+    specular?: DecodedTexture
     index?: DecodedTexture
   },
   shaderPackage = 'character.shpk',
@@ -133,6 +146,8 @@ export function bakeCharacterMaterial(
   const roughness = new Uint8Array(diffuse.length)
   const metalness = new Uint8Array(diffuse.length)
   const emissive = new Uint8Array(diffuse.length)
+  const specularColor = new Uint8Array(diffuse.length)
+  const specularIntensity = new Uint8Array(diffuse.length)
 
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
@@ -155,33 +170,42 @@ export function bakeCharacterMaterial(
       const mix = (left: number, right: number) => left + (right - left) * blend
       const base = sample(textures.diffuse, x, y, width, height)
       const mask = sample(textures.mask, x, y, width, height)
+      const specularBase = sample(textures.specular, x, y, width, height)
       const opacity = textures.normal && textures.normal.format !== TEX_FORMAT.BC5
         ? sample(textures.normal, x, y, width, height)[2] / 255
         : 1
       for (let channel = 0; channel < 3; channel += 1) {
-        const tableColor = pseudoSqrt(mix(a.diffuse[channel]!, b.diffuse[channel]!))
-        diffuse[target + channel] = clampByte(tableColor * (base[channel]! / 255))
-        emissive[target + channel] = clampByte(pseudoSqrt(mix(a.emissive[channel]!, b.emissive[channel]!)))
+        const tableDiffuse = Math.max(0, mix(a.diffuse[channel]!, b.diffuse[channel]!))
+        const tableSpecular = Math.max(0, mix(a.specular[channel]!, b.specular[channel]!))
+        diffuse[target + channel] = clampByte(linearToSrgb(tableDiffuse * srgbToLinear(base[channel]!)))
+        emissive[target + channel] = clampByte(linearToSrgb(mix(a.emissive[channel]!, b.emissive[channel]!)))
+        specularColor[target + channel] = clampByte(linearToSrgb(tableSpecular * srgbToLinear(specularBase[channel]!)))
       }
       diffuse[target + 3] = clampByte((base[3] / 255) * opacity)
       const rowRoughness = mix(a.roughness, b.roughness)
-      // Modern masks store roughness directly in green. Legacy masks instead
-      // store specular power in red and gloss intensity in green, so red must be
-      // inverted for an approximate metal/roughness conversion. Preserve the
-      // rougher of the texture and colorset values: multiplying them makes both
-      // values artificially smoother in Three's different lighting model.
+      // Character masks use red for specular power, green for roughness and blue
+      // for ambient occlusion. Preserve the rougher of the texture and colorset
+      // values: multiplying them makes both values artificially smoother in
+      // Three's different lighting model.
       const textureRoughness = textures.mask
-        ? legacyShader ? 1 - mask[0] / 255 : mask[1] / 255
+        ? mask[1] / 255
         : rowRoughness
       const pbrRoughness = Math.max(0.32, rowRoughness, textureRoughness)
       const rough = clampByte(pbrRoughness)
       const occlusion = textures.mask ? mask[2] : 255
+      const rowSpecularMask = legacyShader ? mix(a.specularMask, b.specularMask) : 1
+      const textureSpecularMask = textures.mask ? mask[0] / 255 : 1
+      const specularAlpha = textures.specular ? specularBase[3] / 255 : 1
+      const specularStrength = clampByte(rowSpecularMask * textureSpecularMask * specularAlpha)
       ao[target] = ao[target + 1] = ao[target + 2] = occlusion
       roughness[target] = roughness[target + 1] = roughness[target + 2] = rough
       // FFXIV's character shader uses a colored-specular workflow. Feeding its
       // table value directly into Three's metallic workflow removes the diffuse
       // contribution and turns leather/cloth black without an environment map.
       metalness[target] = metalness[target + 1] = metalness[target + 2] = 0
+      specularIntensity[target] = specularIntensity[target + 1] = specularIntensity[target + 2] = 255
+      specularIntensity[target + 3] = specularStrength
+      specularColor[target + 3] = 255
       ao[target + 3] = emissive[target + 3] = roughness[target + 3] = metalness[target + 3] = 255
     }
   }
@@ -193,5 +217,7 @@ export function bakeCharacterMaterial(
     roughness: output(width, height, roughness),
     metalness: output(width, height, metalness),
     emissive: output(width, height, emissive),
+    specularColor: output(width, height, specularColor),
+    specularIntensity: output(width, height, specularIntensity),
   }
 }

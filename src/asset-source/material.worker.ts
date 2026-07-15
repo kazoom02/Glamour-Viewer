@@ -22,7 +22,9 @@ interface Request {
   requests: MaterialLoadRequest[]
 }
 
-const CACHE_VERSION = 1
+// Bump whenever decoded/baked texture semantics change so IndexedDB cannot
+// retain an older, glossier material interpretation across deployments.
+const CACHE_VERSION = 2
 const memoryCache = new Map<string, DecodedTexture>()
 
 function textureSummary(texture: DecodedTexture | undefined): string {
@@ -218,6 +220,8 @@ async function loadRequest(
           `  final ao: ${textureSummary(decoded.textures.ao)}`,
           `  final roughness: ${textureSummary(decoded.textures.roughness)}`,
           `  final metalness: ${textureSummary(decoded.textures.metalness)}`,
+          `  final specular color: ${textureSummary(decoded.textures.specularColor)}`,
+          `  final specular intensity: ${textureSummary(decoded.textures.specularIntensity)}`,
         )
         diagnostics.push(materialDiagnostics.join('\n'))
       }

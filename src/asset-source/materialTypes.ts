@@ -24,6 +24,8 @@ export interface DecodedMaterial {
     roughness?: DecodedTexture
     metalness?: DecodedTexture
     emissive?: DecodedTexture
+    specularColor?: DecodedTexture
+    specularIntensity?: DecodedTexture
   }
   colorTableRows?: number
   dyeableRows?: number

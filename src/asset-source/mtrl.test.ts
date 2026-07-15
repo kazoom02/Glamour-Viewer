@@ -55,6 +55,7 @@ describe('MTRL parser', () => {
     expect(material.colorTable?.rows).toHaveLength(32)
     expect(material.colorTable?.rows[0]).toMatchObject({
       diffuse: [1, 0.5, 0.25],
+      specularMask: 1,
       roughness: 0.5,
       metalness: 0.25,
     })

@@ -20,6 +20,8 @@ export interface ParsedMaterial {
 export interface MaterialColorRow {
   diffuse: [number, number, number]
   specular: [number, number, number]
+  /** Legacy colorsets expose this explicitly; modern rows use the texture/model masks. */
+  specularMask: number
   emissive: [number, number, number]
   roughness: number
   metalness: number
@@ -134,6 +136,7 @@ function readColorTable(view: DataView, start: number, size: number, flags: numb
     return {
       diffuse: vector(0),
       specular: vector(4),
+      specularMask: dawntrail ? 1 : finiteHalf(view, offset + 3 * 2),
       emissive: vector(8),
       roughness: dawntrail
         ? finiteHalf(view, offset + 16 * 2)
