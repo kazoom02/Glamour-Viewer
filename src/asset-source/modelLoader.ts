@@ -1,10 +1,17 @@
 import type { DecodedModel } from './mdl'
+import type { DecodedSkeleton } from './sklb'
 import type { AssetSource } from './types'
 
 export interface ModelLoadResult {
   path: string
   model?: DecodedModel
   error?: string
+  warning?: string
+}
+
+export interface ModelDeformationRequest {
+  targetRaceCode: string
+  skeleton: DecodedSkeleton
 }
 
 interface WorkerResponse {
@@ -18,6 +25,7 @@ let requestId = 0
 export function loadLocalModels(
   source: Extract<AssetSource, { kind: 'local' }>,
   paths: string[],
+  deformation?: ModelDeformationRequest,
 ): Promise<ModelLoadResult[]> {
   const worker = new Worker(new URL('./model.worker.ts', import.meta.url), { type: 'module' })
   const id = ++requestId
@@ -32,7 +40,7 @@ export function loadLocalModels(
       worker.terminate()
       reject(new Error(event.message || 'The FFXIV model worker failed.'))
     }
-    worker.postMessage({ id, source, paths })
+    worker.postMessage({ id, source, paths, deformation })
   })
 }
 

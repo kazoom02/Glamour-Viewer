@@ -178,6 +178,7 @@ describe('MDL geometry decoding', () => {
     expect(model.materialPaths).toEqual([])
     expect(model.boneNames).toEqual([])
     expect(model.bounds).toEqual({ min: [0, 0, 0], max: [1, 2, 0] })
+    expect(model.lod).toBe(0)
   })
 
   it('decodes extended type-17 blend weights without truncating the declaration', () => {

@@ -281,7 +281,11 @@ function modelMaterialDiagnostics(
   materialResult: Awaited<ReturnType<typeof loadLocalMaterials>>[number] | undefined,
   equipment: boolean,
 ): string[] {
-  return model.meshes.flatMap((mesh, index) => {
+  const deformation = model.deformation
+  const summary = `${label}: LOD${model.lod ?? '?'}${deformation
+    ? ` · PBD c${deformation.sourceRaceCode.toString().padStart(4, '0')}→c${deformation.targetRaceCode.toString().padStart(4, '0')} steps=${deformation.steps} matrixBones=${deformation.matrixBones} vertices=${deformation.vertices}`
+    : ' · native race geometry'}`
+  const meshes = model.meshes.flatMap((mesh, index) => {
     const reference = model.materialPaths[mesh.materialIndex]?.replaceAll('\\', '/').toLowerCase() ?? '(missing)'
     const material = materialResult?.materials[reference]
     const face = label === 'character face'
@@ -294,6 +298,7 @@ function modelMaterialDiagnostics(
       `  skin=${mesh.skinIndices && mesh.skinWeights ? 'yes' : 'no'} attributes=${mesh.attributes?.join(',') || 'none'}`,
     ].join('\n')
   })
+  return [summary, ...meshes]
 }
 
 async function diagnosticReport(source: AssetSource, failures: string[], diagnostics: string[] = []): Promise<string> {
@@ -384,6 +389,7 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
       let characterParts = 0
       let equippedItems = 0
       let rig: CharacterRig | undefined
+      let decodedSkeleton: DecodedSkeleton | undefined
       if (source.kind === 'local') {
         try {
           setStatus(`Reading ${raceCode} base, face, and hair skeletons…`)
@@ -424,6 +430,7 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
               }
             }
           }
+          decodedSkeleton = combinedSkeleton
           rig = addCharacterRig(characterGroup, combinedSkeleton)
         } catch (reason) {
           failures.push(`base skeleton: ${reason instanceof Error ? reason.message : String(reason)}`)
@@ -432,7 +439,10 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
           ...characterPlans.flatMap(characterModelCandidates),
           ...equipmentPlans.flatMap((plan) => plan.candidates),
         ])]
-        const byPath = resultMap(await loadLocalModels(source, paths))
+        const byPath = resultMap(await loadLocalModels(source, paths, decodedSkeleton ? {
+          targetRaceCode: raceCode,
+          skeleton: decodedSkeleton,
+        } : undefined))
         if (disposed) return
 
         const characterModels = characterPlans.flatMap((plan) => {
@@ -483,6 +493,7 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
               rig,
               maxAnisotropy,
             )
+            if (result.warning) failures.push(`${plan.part}: ${result.warning}`)
             if (materialResult?.errors.length) failures.push(...materialResult.errors.map((error) => `${plan.part} ${error}`))
             diagnostics.push(...modelMaterialDiagnostics(`character ${plan.part}`, result.model, materialResult, false))
             characterParts += 1
@@ -506,6 +517,7 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
               rig,
               maxAnisotropy,
             )
+            if (result.warning) failures.push(`${plan.item.name}: ${result.warning}`)
             if (materialResult?.errors.length) failures.push(...materialResult.errors.map((error) => `${plan.item.name} ${error}`))
             diagnostics.push(...modelMaterialDiagnostics(plan.item.name, result.model, materialResult, true))
             equippedItems += 1

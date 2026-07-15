@@ -23,6 +23,15 @@ export interface DecodedModel {
   materialPaths: string[]
   boneNames: string[]
   bounds: { min: [number, number, number]; max: [number, number, number] }
+  /** LOD 0 is the highest-detail geometry authored by the game. */
+  lod?: number
+  deformation?: {
+    sourceRaceCode: number
+    targetRaceCode: number
+    steps: number
+    matrixBones: number
+    vertices: number
+  }
 }
 
 interface VertexElement {
@@ -476,7 +485,7 @@ export function decodeMdl(mdlBuffer: ArrayBuffer): DecodedModel {
   }
 
   assertDecode(decoded.length > 0, 'The MDL contains no decodable meshes.')
-  return { meshes: decoded, materialPaths, boneNames, bounds }
+  return { meshes: decoded, materialPaths, boneNames, bounds, lod }
 }
 
 export async function decodeSqpackModel(payload: ArrayBuffer): Promise<DecodedModel> {
