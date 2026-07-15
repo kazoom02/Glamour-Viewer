@@ -50,7 +50,7 @@ export function App() {
       </header>
 
       <main>
-        <section className="hero">
+        <section className={`hero${source ? ' hero-connected' : ''}`}>
           <div className="hero-copy">
             <p className="eyebrow">Your wardrobe. Your files.</p>
             <h1>Preview a look without uploading your game.</h1>
@@ -61,19 +61,15 @@ export function App() {
               <span>No uploads</span><span>No account</span><span>No asset proxy</span>
             </div>
           </div>
-          <div className="hero-visual" aria-hidden={!source}>
-            {source ? (
-              <Suspense fallback={<div className="viewer-loading">Loading renderer…</div>}>
-                <ViewerCanvas source={source} equipped={equipped} raceCode={raceCode} />
-              </Suspense>
-            ) : (
+          {!source && (
+            <div className="hero-visual" aria-hidden="true">
               <div className="silhouette">
                 <div className="silhouette-head" />
                 <div className="silhouette-body" />
                 <p>Renderer loads after you connect a source</p>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </section>
 
         {sharedSet && (
@@ -122,16 +118,27 @@ export function App() {
         )}
 
         {source && (
-          <Suspense fallback={<div className="catalog-loading">Loading armor catalog…</div>}>
-            <ArmorCatalog
-              source={source}
-              equipped={equipped}
-              raceCode={raceCode}
-              onRaceChange={setRaceCode}
-              onEquip={equip}
-              onRemove={(slot) => setEquipped((current) => ({ ...current, [slot]: undefined }))}
-            />
-          </Suspense>
+          <section className="viewer-workspace" aria-label="Character preview and armor catalog">
+            <div className="workspace-preview">
+              <div className="hero-visual">
+                <Suspense fallback={<div className="viewer-loading">Loading renderer…</div>}>
+                  <ViewerCanvas source={source} equipped={equipped} raceCode={raceCode} />
+                </Suspense>
+              </div>
+            </div>
+            <div className="workspace-catalog">
+              <Suspense fallback={<div className="catalog-loading">Loading armor catalog…</div>}>
+                <ArmorCatalog
+                  source={source}
+                  equipped={equipped}
+                  raceCode={raceCode}
+                  onRaceChange={setRaceCode}
+                  onEquip={equip}
+                  onRemove={(slot) => setEquipped((current) => ({ ...current, [slot]: undefined }))}
+                />
+              </Suspense>
+            </div>
+          </section>
         )}
 
         <section className="share-section">
