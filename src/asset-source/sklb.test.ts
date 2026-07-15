@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decodeSklb } from './sklb'
+import { attachSkeleton, decodeSklb } from './sklb'
 
 function packed(value: number): number[] {
   const negative = value < 0
@@ -64,6 +64,24 @@ function skeletonFixture(): ArrayBuffer {
 }
 
 describe('SKLB decoder', () => {
+  it('attaches auxiliary face bones without duplicating the shared head bone', () => {
+    const pose = {
+      translation: [0, 0, 0] as [number, number, number],
+      rotation: [0, 0, 0, 1] as [number, number, number, number],
+      scale: [1, 1, 1] as [number, number, number],
+    }
+    const merged = attachSkeleton({ bones: [
+      { name: 'n_root', parentIndex: -1, ...pose },
+      { name: 'j_kao', parentIndex: 0, ...pose },
+    ] }, { bones: [
+      { name: 'j_kao', parentIndex: -1, ...pose },
+      { name: 'j_f_eye_l', parentIndex: 0, ...pose },
+    ] }, 'j_kao')
+    expect(merged.bones.map((bone) => [bone.name, bone.parentIndex])).toEqual([
+      ['n_root', -1], ['j_kao', 0], ['j_f_eye_l', 1],
+    ])
+  })
+
   it('extracts bone hierarchy and bind transforms from a Havok tagfile', () => {
     expect(decodeSklb(skeletonFixture())).toEqual({
       bones: [

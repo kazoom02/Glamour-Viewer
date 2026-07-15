@@ -13,6 +13,34 @@ export interface DecodedSkeleton {
   bones: DecodedSkeletonBone[]
 }
 
+/** Attaches an auxiliary face/hair skeleton while reusing duplicate parent bones. */
+export function attachSkeleton(
+  base: DecodedSkeleton,
+  auxiliary: DecodedSkeleton,
+  attachmentBone: string,
+): DecodedSkeleton {
+  const bones = base.bones.map((bone) => ({ ...bone }))
+  const byName = new Map(bones.map((bone, index) => [bone.name, index]))
+  const attachmentIndex = byName.get(attachmentBone)
+  if (attachmentIndex === undefined) throw new Error(`The base skeleton has no ${attachmentBone} attachment bone.`)
+  const remap: number[] = []
+
+  auxiliary.bones.forEach((bone, index) => {
+    const existing = byName.get(bone.name)
+    if (existing !== undefined) {
+      remap[index] = existing
+      return
+    }
+    const parentIndex = bone.parentIndex >= 0
+      ? remap[bone.parentIndex] ?? attachmentIndex
+      : attachmentIndex
+    remap[index] = bones.length
+    byName.set(bone.name, bones.length)
+    bones.push({ ...bone, parentIndex })
+  })
+  return { bones }
+}
+
 interface HavokMember {
   name: string
   type: number

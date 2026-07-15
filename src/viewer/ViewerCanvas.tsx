@@ -5,6 +5,8 @@ import type { AssetSource } from '../asset-source/types'
 import {
   characterModelPlan,
   equipmentModelCandidates,
+  faceSkeletonPath,
+  hairSkeletonPath,
   skeletonPath,
   type CharacterPart,
   type CharacterRaceCode,
@@ -14,6 +16,7 @@ import { loadLocalMaterials, type DecodedMaterial, type MaterialLoadRequest } fr
 import { loadLocalModels, type ModelLoadResult } from '../asset-source/modelLoader'
 import type { DecodedModel } from '../asset-source/mdl'
 import { loadLocalSkeleton, type DecodedSkeleton } from '../asset-source/skeletonLoader'
+import { attachSkeleton } from '../asset-source/sklb'
 import { ARMOR_SLOTS, type ArmorSlot, type EquippedArmor } from '../catalog/types'
 
 interface ViewerCanvasProps {
@@ -318,10 +321,23 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
       let rig: CharacterRig | undefined
       if (source.kind === 'local') {
         try {
-          setStatus(`Reading ${raceCode} skeleton and character models…`)
-          rig = addCharacterRig(characterGroup, await loadLocalSkeleton(source, skeletonPath(raceCode)))
+          setStatus(`Reading ${raceCode} base, face, and hair skeletons…`)
+          let combinedSkeleton = await loadLocalSkeleton(source, skeletonPath(raceCode))
+          try {
+            const faceSkeleton = await loadLocalSkeleton(source, faceSkeletonPath(raceCode))
+            combinedSkeleton = attachSkeleton(combinedSkeleton, faceSkeleton, 'j_kao')
+          } catch (reason) {
+            failures.push(`face skeleton: ${reason instanceof Error ? reason.message : String(reason)}`)
+          }
+          try {
+            const hairSkeleton = await loadLocalSkeleton(source, hairSkeletonPath(raceCode))
+            combinedSkeleton = attachSkeleton(combinedSkeleton, hairSkeleton, 'j_kao')
+          } catch (reason) {
+            failures.push(`hair skeleton: ${reason instanceof Error ? reason.message : String(reason)}`)
+          }
+          rig = addCharacterRig(characterGroup, combinedSkeleton)
         } catch (reason) {
-          failures.push(`skeleton: ${reason instanceof Error ? reason.message : String(reason)}`)
+          failures.push(`base skeleton: ${reason instanceof Error ? reason.message : String(reason)}`)
         }
         const paths = [...new Set([
           ...characterPlans.map((plan) => plan.path),

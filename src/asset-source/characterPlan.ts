@@ -35,6 +35,17 @@ export function skeletonPath(raceCode: CharacterRaceCode): string {
   return `chara/human/${raceCode}/skeleton/base/b0001/skl_${raceCode}b0001.sklb`
 }
 
+/** The currently supported human presets use the shared f0002 auxiliary skeleton. */
+export function faceSkeletonPath(raceCode: CharacterRaceCode): string {
+  const id = '0002'
+  return `chara/human/${raceCode}/skeleton/face/f${id}/skl_${raceCode}f${id}.sklb`
+}
+
+export function hairSkeletonPath(raceCode: CharacterRaceCode, hairId = 1): string {
+  const id = hairId.toString().padStart(4, '0')
+  return `chara/human/${raceCode}/skeleton/hair/h${id}/skl_${raceCode}h${id}.sklb`
+}
+
 export function equipmentModelCandidates(item: ArmorItem, raceCode: CharacterRaceCode): string[] {
   const fallback: CharacterRaceCode = raceCode === 'c0201' ? 'c0201' : 'c0101'
   return [...new Set([equipmentAssetPlan(item, raceCode).modelPath, equipmentAssetPlan(item, fallback).modelPath])]
