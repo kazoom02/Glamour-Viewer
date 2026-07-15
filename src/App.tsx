@@ -5,6 +5,7 @@ import { LocalInstallPanel } from './components/LocalInstallPanel'
 import { formatBytes } from './lib/format'
 import { encodeSharedSet, readSharedSet, type SharedSet } from './lib/share'
 import type { ArmorItem, EquippedArmor } from './catalog/types'
+import { CHARACTER_PRESETS, type CharacterRaceCode } from './asset-source/characterPlan'
 
 const ViewerCanvas = lazy(() => import('./viewer/ViewerCanvas'))
 const ArmorCatalog = lazy(() => import('./components/ArmorCatalog'))
@@ -14,6 +15,7 @@ export function App() {
   const [sharedSet, setSharedSet] = useState<SharedSet | null>(() => readSharedSet())
   const [copied, setCopied] = useState(false)
   const [equipped, setEquipped] = useState<EquippedArmor>({})
+  const [raceCode, setRaceCode] = useState<CharacterRaceCode>('c0201')
 
   useEffect(() => {
     const onHashChange = () => setSharedSet(readSharedSet())
@@ -62,7 +64,7 @@ export function App() {
           <div className="hero-visual" aria-hidden={!source}>
             {source ? (
               <Suspense fallback={<div className="viewer-loading">Loading renderer…</div>}>
-                <ViewerCanvas source={source} equipped={equipped} />
+                <ViewerCanvas source={source} equipped={equipped} raceCode={raceCode} />
               </Suspense>
             ) : (
               <div className="silhouette">
@@ -120,10 +122,26 @@ export function App() {
         )}
 
         {source && (
+          <section className="character-bar" aria-label="Character model">
+            <div>
+              <p className="eyebrow">Character model</p>
+              <strong>Race and gender</strong>
+            </div>
+            <label>
+              <span className="field-label">Preview body</span>
+              <select value={raceCode} onChange={(event) => setRaceCode(event.target.value as CharacterRaceCode)}>
+                {CHARACTER_PRESETS.map(([code, label]) => <option value={code} key={code}>{label}</option>)}
+              </select>
+            </label>
+          </section>
+        )}
+
+        {source && (
           <Suspense fallback={<div className="catalog-loading">Loading armor catalog…</div>}>
             <ArmorCatalog
               source={source}
               equipped={equipped}
+              raceCode={raceCode}
               onEquip={equip}
               onRemove={(slot) => setEquipped((current) => ({ ...current, [slot]: undefined }))}
             />

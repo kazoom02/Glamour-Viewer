@@ -6,6 +6,7 @@ const INDEX2_ENTRY_SIZE = 8
 const MODEL_HEADER_SIZE = 208
 const MAX_MODEL_HEADER_SIZE = 1024 * 1024
 const MAX_MODEL_RANGE_SIZE = 64 * 1024 * 1024
+const CHARACTER_REPOSITORIES = ['ex5', 'ex4', 'ex3', 'ex2', 'ex1', 'ffxiv'] as const
 
 export interface SqpackLocation {
   dataFileId: number
@@ -99,22 +100,28 @@ export function locateIndex2Entry(indexBytes: ArrayBuffer, gamePath: string): Sq
   return { ...match, nextOffset }
 }
 
-function fallbackFile(source: Extract<AssetSource, { kind: 'local' }>, name: string): File {
-  const suffix = `/ffxiv/${name}`.toLowerCase()
+function fallbackFile(source: Extract<AssetSource, { kind: 'local' }>, repository: string, name: string): File | undefined {
+  const suffix = `/${repository}/${name}`.toLowerCase()
   const file = source.files?.find((candidate) => {
     const path = candidate.webkitRelativePath.replaceAll('\\', '/').toLowerCase()
     return path === suffix.slice(1) || path.endsWith(suffix)
   })
-  if (!file) throw new Error(`The selected directory is missing ffxiv/${name}.`)
   return file
 }
 
-async function sourceFile(source: Extract<AssetSource, { kind: 'local' }>, name: string): Promise<File> {
-  if (source.handle) {
-    const repository = await source.handle.getDirectoryHandle('ffxiv')
-    return repository.getFileHandle(name).then((handle) => handle.getFile())
+async function sourceFile(
+  source: Extract<AssetSource, { kind: 'local' }>,
+  repository: string,
+  name: string,
+): Promise<File | undefined> {
+  if (!source.handle) return fallbackFile(source, repository, name)
+  try {
+    const repositoryHandle = await source.handle.getDirectoryHandle(repository)
+    return await repositoryHandle.getFileHandle(name).then((handle) => handle.getFile())
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'NotFoundError') return undefined
+    throw error
   }
-  return fallbackFile(source, name)
 }
 
 function triples(view: DataView, offset: number): number[] {
@@ -189,13 +196,14 @@ function modelRangeSize(header: ModelPayloadHeader): number {
   return furthest
 }
 
-export async function readLocalModelPayload(
+async function readModelAtLocation(
   source: Extract<AssetSource, { kind: 'local' }>,
+  repository: string,
   gamePath: string,
+  location: SqpackLocation,
 ): Promise<ArrayBuffer> {
-  const indexFile = await sourceFile(source, '040000.win32.index2')
-  const location = locateIndex2Entry(await indexFile.arrayBuffer(), gamePath)
-  const datFile = await sourceFile(source, `040000.win32.dat${location.dataFileId}`)
+  const datFile = await sourceFile(source, repository, `040000.win32.dat${location.dataFileId}`)
+  assertRange(datFile, `The selected directory is missing ${repository}/040000.win32.dat${location.dataFileId}.`)
   assertRange(location.offset + MODEL_HEADER_SIZE <= datFile.size, 'The model offset points beyond its SqPack data file.')
 
   const prefix = await datFile.slice(location.offset, location.offset + MODEL_HEADER_SIZE).arrayBuffer()
@@ -209,4 +217,46 @@ export async function readLocalModelPayload(
   }
   assertRange(location.offset + rangeSize <= datFile.size, 'The model payload extends beyond its SqPack data file.')
   return datFile.slice(location.offset, location.offset + rangeSize).arrayBuffer()
+}
+
+export interface LocalModelReader {
+  read(gamePath: string): Promise<ArrayBuffer>
+}
+
+/** Creates one repository-aware reader and retains only character index tables for this worker batch. */
+export function createLocalModelReader(source: Extract<AssetSource, { kind: 'local' }>): LocalModelReader {
+  const indexCache = new Map<string, Promise<ArrayBuffer | undefined>>()
+  const indexBytes = (repository: string) => {
+    let pending = indexCache.get(repository)
+    if (!pending) {
+      pending = sourceFile(source, repository, '040000.win32.index2')
+        .then((file) => file?.arrayBuffer())
+      indexCache.set(repository, pending)
+    }
+    return pending
+  }
+
+  return {
+    async read(gamePath: string) {
+      for (const repository of CHARACTER_REPOSITORIES) {
+        const bytes = await indexBytes(repository)
+        if (!bytes) continue
+        try {
+          const location = locateIndex2Entry(bytes, gamePath)
+          return await readModelAtLocation(source, repository, gamePath, location)
+        } catch (error) {
+          if (error instanceof Error && error.message === `The selected install does not contain ${gamePath}.`) continue
+          throw error
+        }
+      }
+      throw new Error(`The selected install does not contain ${gamePath} in ffxiv or ex1–ex5.`)
+    },
+  }
+}
+
+export async function readLocalModelPayload(
+  source: Extract<AssetSource, { kind: 'local' }>,
+  gamePath: string,
+): Promise<ArrayBuffer> {
+  return createLocalModelReader(source).read(gamePath)
 }

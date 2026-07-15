@@ -3,10 +3,12 @@ import type { AssetSource } from '../asset-source/types'
 import { equipmentAssetPlan } from '../asset-source/equipmentPlan'
 import { ARMOR_SLOTS, type ArmorItem, type EquippedArmor } from '../catalog/types'
 import { searchArmor, xivapiIconUrl } from '../catalog/xivapi'
+import type { CharacterRaceCode } from '../asset-source/characterPlan'
 
 interface Props {
   source: AssetSource
   equipped: EquippedArmor
+  raceCode: CharacterRaceCode
   onEquip: (item: ArmorItem) => void
   onRemove: (slot: ArmorItem['slot']) => void
 }
@@ -19,7 +21,7 @@ const SLOT_LABELS: Record<ArmorItem['slot'], string> = {
   feet: 'Feet',
 }
 
-export default function ArmorCatalog({ source, equipped, onEquip, onRemove }: Props) {
+export default function ArmorCatalog({ source, equipped, raceCode, onEquip, onRemove }: Props) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<ArmorItem[]>([])
   const [version, setVersion] = useState<string>()
@@ -106,12 +108,12 @@ export default function ArmorCatalog({ source, equipped, onEquip, onRemove }: Pr
       <div className="equipment-tray">
         <div className="tray-heading">
           <strong>Current armor</strong>
-          <span>Asset paths target Midlander female (<code>c0201</code>) for the first decoder milestone.</span>
+          <span>Asset paths target <code>{raceCode}</code> with a Midlander fallback.</span>
         </div>
         <div className="equipment-slots">
           {ARMOR_SLOTS.map((slot) => {
             const item = equipped[slot]
-            const plan = item ? equipmentAssetPlan(item) : undefined
+            const plan = item ? equipmentAssetPlan(item, raceCode) : undefined
             return (
               <div className={`equipment-slot ${item ? 'filled' : ''}`} key={slot}>
                 <span>{SLOT_LABELS[slot]}</span>

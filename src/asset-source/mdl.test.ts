@@ -44,6 +44,8 @@ describe('MDL geometry decoding', () => {
     expect(Array.from(model.meshes[0]!.positions)).toEqual([0, 0, 0, 1, 0, 0, 0, 2, 0])
     expect(Array.from(model.meshes[0]!.indices)).toEqual([0, 1, 2])
     expect(model.meshes[0]!.materialIndex).toBe(2)
+    expect(model.materialPaths).toEqual([])
+    expect(model.boneNames).toEqual([])
     expect(model.bounds).toEqual({ min: [0, 0, 0], max: [1, 2, 0] })
   })
 })

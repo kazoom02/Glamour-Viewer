@@ -9,12 +9,17 @@ export interface DecodedModelMesh {
   positions: Float32Array
   normals?: Float32Array
   uvs?: Float32Array
+  skinIndices?: Uint16Array
+  skinWeights?: Float32Array
+  bonePalette?: string[]
   indices: Uint16Array
   materialIndex: number
 }
 
 export interface DecodedModel {
   meshes: DecodedModelMesh[]
+  materialPaths: string[]
+  boneNames: string[]
   bounds: { min: [number, number, number]; max: [number, number, number] }
 }
 
@@ -30,6 +35,7 @@ interface MeshDescriptor {
   vertexCount: number
   indexCount: number
   materialIndex: number
+  boneTableIndex: number
   startIndex: number
   vertexBufferOffsets: number[]
   vertexBufferStrides: number[]
@@ -196,6 +202,14 @@ function readVertex(
   return floats(view, offset, element.dataType)
 }
 
+function readString(view: DataView, buffer: ArrayBuffer, tableStart: number, tableEnd: number, relativeOffset: number): string {
+  const start = tableStart + relativeOffset
+  assertDecode(start < tableEnd, 'An MDL name points beyond the string table.')
+  let end = start
+  while (end < tableEnd && view.getUint8(end) !== 0) end += 1
+  return new TextDecoder().decode(new Uint8Array(buffer, start, end - start))
+}
+
 export function decodeMdl(mdlBuffer: ArrayBuffer): DecodedModel {
   assertDecode(mdlBuffer.byteLength >= MODEL_FILE_HEADER_SIZE, 'The reconstructed MDL header is truncated.')
   const view = new DataView(mdlBuffer)
@@ -224,12 +238,23 @@ export function decodeMdl(mdlBuffer: ArrayBuffer): DecodedModel {
 
   cursor += 4 // string count + padding
   const stringSize = view.getUint32(cursor, true)
-  cursor += 4 + stringSize
+  cursor += 4
+  const stringTableOffset = cursor
+  const stringTableEnd = stringTableOffset + stringSize
+  assertDecode(stringTableEnd <= view.byteLength, 'The MDL string table is truncated.')
+  cursor = stringTableEnd
   assertDecode(cursor + 56 <= view.byteLength, 'The MDL semantic header is truncated.')
   const modelHeader = cursor
   const meshCount = view.getUint16(modelHeader + 4, true)
+  const attributeCount = view.getUint16(modelHeader + 6, true)
+  const submeshCount = view.getUint16(modelHeader + 8, true)
+  const materialCount = view.getUint16(modelHeader + 10, true)
+  const boneCount = view.getUint16(modelHeader + 12, true)
+  const boneTableCount = view.getUint16(modelHeader + 14, true)
   const flags2 = view.getUint8(modelHeader + 27)
   const elementIdCount = view.getUint16(modelHeader + 24, true)
+  const terrainShadowMeshCount = view.getUint8(modelHeader + 26)
+  const terrainShadowSubmeshCount = view.getUint16(modelHeader + 38, true)
   cursor += 56 + elementIdCount * 32
 
   const lods: LodDescriptor[] = []
@@ -246,12 +271,51 @@ export function decodeMdl(mdlBuffer: ArrayBuffer): DecodedModel {
       vertexCount: view.getUint16(cursor, true),
       indexCount: view.getUint32(cursor + 4, true),
       materialIndex: view.getUint16(cursor + 8, true),
+      boneTableIndex: view.getUint16(cursor + 14, true),
       startIndex: view.getUint32(cursor + 16, true),
       vertexBufferOffsets: [view.getUint32(cursor + 20, true), view.getUint32(cursor + 24, true), view.getUint32(cursor + 28, true)],
       vertexBufferStrides: [view.getUint8(cursor + 32), view.getUint8(cursor + 33), view.getUint8(cursor + 34)],
       vertexStreamCount: view.getUint8(cursor + 35),
     })
     cursor += 36
+  }
+
+  cursor += attributeCount * 4
+  cursor += terrainShadowMeshCount * 20
+  cursor += submeshCount * 16
+  cursor += terrainShadowSubmeshCount * 12
+  assertDecode(cursor + materialCount * 4 <= view.byteLength, 'The MDL material-offset table is truncated.')
+  const materialPaths = Array.from({ length: materialCount }, (_, index) => {
+    const relativeOffset = view.getUint32(cursor + index * 4, true)
+    return readString(view, mdlBuffer, stringTableOffset, stringTableEnd, relativeOffset)
+  })
+  cursor += materialCount * 4
+  assertDecode(cursor + boneCount * 4 <= view.byteLength, 'The MDL bone-name table is truncated.')
+  const boneNames = Array.from({ length: boneCount }, (_, index) => (
+    readString(view, mdlBuffer, stringTableOffset, stringTableEnd, view.getUint32(cursor + index * 4, true))
+  ))
+  cursor += boneCount * 4
+
+  const boneTables: number[][] = []
+  const version = view.getUint32(0, true)
+  if (version <= 0x01000005) {
+    assertDecode(cursor + boneTableCount * 132 <= view.byteLength, 'The legacy MDL bone tables are truncated.')
+    for (let table = 0; table < boneTableCount; table += 1) {
+      const start = cursor + table * 132
+      const count = Math.min(view.getUint8(start + 128), 64)
+      boneTables.push(Array.from({ length: count }, (_, index) => view.getUint16(start + index * 2, true)))
+    }
+    cursor += boneTableCount * 132
+  } else {
+    assertDecode(cursor + boneTableCount * 4 <= view.byteLength, 'The MDL v2 bone-table headers are truncated.')
+    const counts = Array.from({ length: boneTableCount }, (_, index) => view.getUint16(cursor + index * 4 + 2, true))
+    cursor += boneTableCount * 4
+    for (const count of counts) {
+      assertDecode(cursor + count * 2 <= view.byteLength, 'An MDL v2 bone palette is truncated.')
+      boneTables.push(Array.from({ length: count }, (_, index) => view.getUint16(cursor + index * 2, true)))
+      cursor += count * 2
+      cursor += (4 - (cursor % 4)) % 4
+    }
   }
 
   const lod = lods.findIndex((candidate, index) => candidate.meshCount > 0 && vertexOffsets[index]! > 0 && indexOffsets[index]! > 0)
@@ -268,11 +332,16 @@ export function decodeMdl(mdlBuffer: ArrayBuffer): DecodedModel {
     const positionElement = declaration.find((element) => element.usage === 0)
     const normalElement = declaration.find((element) => element.usage === 3)
     const uvElement = declaration.find((element) => element.usage === 4 && element.usageIndex === 0)
+    const weightElement = declaration.find((element) => element.usage === 1)
+    const boneElement = declaration.find((element) => element.usage === 2)
     if (!positionElement) continue
 
     const positions = new Float32Array(mesh.vertexCount * 3)
     const normals = normalElement ? new Float32Array(mesh.vertexCount * 3) : undefined
     const uvs = uvElement ? new Float32Array(mesh.vertexCount * 2) : undefined
+    const skinIndices = boneElement ? new Uint16Array(mesh.vertexCount * 4) : undefined
+    const skinWeights = weightElement ? new Float32Array(mesh.vertexCount * 4) : undefined
+    const boneTable = boneTables[mesh.boneTableIndex] ?? []
     for (let vertex = 0; vertex < mesh.vertexCount; vertex += 1) {
       const position = readVertex(view, vertexOffsets[lod]!, mesh, positionElement, vertex)
       positions.set(position.slice(0, 3), vertex * 3)
@@ -286,17 +355,32 @@ export function decodeMdl(mdlBuffer: ArrayBuffer): DecodedModel {
         normals.set(normal, vertex * 3)
       }
       if (uvElement && uvs) uvs.set(readVertex(view, vertexOffsets[lod]!, mesh, uvElement, vertex).slice(0, 2), vertex * 2)
+      if (boneElement && skinIndices) {
+        const localIndices = readVertex(view, vertexOffsets[lod]!, mesh, boneElement, vertex).slice(0, 4)
+        localIndices.forEach((value, component) => { skinIndices[vertex * 4 + component] = boneTable[value] ?? value })
+      }
+      if (weightElement && skinWeights) {
+        const weights = readVertex(view, vertexOffsets[lod]!, mesh, weightElement, vertex).slice(0, 4)
+        if (weightElement.dataType === 5) weights.forEach((value, component) => { weights[component] = value / 255 })
+        const sum = weights.reduce((total, value) => total + value, 0)
+        if (sum > 0) weights.forEach((value, component) => { weights[component] = value / sum })
+        skinWeights.set(weights, vertex * 4)
+      }
     }
 
     const indexStart = indexOffsets[lod]! + mesh.startIndex * 2
     assertDecode(indexStart + mesh.indexCount * 2 <= view.byteLength, 'The MDL mesh index range is truncated.')
     const indices = new Uint16Array(mesh.indexCount)
     for (let index = 0; index < mesh.indexCount; index += 1) indices[index] = view.getUint16(indexStart + index * 2, true)
-    decoded.push({ positions, normals, uvs, indices, materialIndex: mesh.materialIndex })
+    decoded.push({
+      positions, normals, uvs, skinIndices, skinWeights,
+      bonePalette: boneTable.map((index) => boneNames[index] ?? `bone-${index}`),
+      indices, materialIndex: mesh.materialIndex,
+    })
   }
 
   assertDecode(decoded.length > 0, 'The MDL contains no decodable meshes.')
-  return { meshes: decoded, bounds }
+  return { meshes: decoded, materialPaths, boneNames, bounds }
 }
 
 export async function decodeSqpackModel(payload: ArrayBuffer): Promise<DecodedModel> {

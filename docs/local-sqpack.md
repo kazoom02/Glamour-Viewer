@@ -100,7 +100,9 @@ Ironworks is the best reference for the binary structures because it already cov
 
 Keep filesystem traversal and range reads in TypeScript because the File System Access API is asynchronous. Pass the small extracted buffers—not directory handles or whole archives—into WASM.
 
-The current milestone renders solid-color geometry for `c0201` (Midlander female) equipment across the five armor slots. The next layers are MTRL/TEX textures, IMC part masks, race fallbacks, skeleton deformation, EQP/EQDP body hiding, and dyes.
+The current milestone assembles real `e0000` torso/hands/legs/feet models with face and hair models, then replaces covered slots with selected armor. It renders complete standalone `c0101`, `c0201`, and `c0901` bodies in their shared bind pose. MDL material paths, bone names, bone palettes, blend indices, and normalized weights are decoded and transferred from the worker.
+
+The next layers are SKLB/Havok reference-pose and animation decoding, MTRL/TEX textures, IMC part masks, PBD/EQDP deformation for races that reuse Midlander geometry, detailed equipment body-hiding metadata, and dyes.
 
 ## Vercel behavior
 
