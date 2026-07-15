@@ -50,6 +50,15 @@ export function materialAlphaMode(shaderPackage: string, materialReference: stri
   return 'opaque'
 }
 
+/** Only gear-style shaders interpret a MTRL color table as the character PBR lookup. */
+export function usesCharacterColorTable(shaderPackage: string): boolean {
+  const shader = shaderPackage.toLowerCase()
+  return shader === 'character.shpk'
+    || shader === 'characterlegacy.shpk'
+    || shader === 'characterstocking.shpk'
+    || shader === 'characterstockings.shpk'
+}
+
 /** Bakes hair/facial-hair tint and opacity stored across normal and mask textures. */
 export function bakeHairMaterial(
   normal: DecodedTexture | undefined,

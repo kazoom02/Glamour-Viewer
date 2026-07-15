@@ -15,7 +15,6 @@ describe('character asset planning', () => {
       'chara/equipment/e0000/model/c0201e0000_dwn.mdl',
       'chara/equipment/e0000/model/c0201e0000_sho.mdl',
       'chara/human/c0201/obj/face/f0001/model/c0201f0001_fac.mdl',
-      'chara/human/c0201/obj/face/f0001/model/c0201f0001_iri.mdl',
       'chara/human/c0201/obj/hair/h0001/model/c0201h0001_hir.mdl',
     ])
     expect(skeletonPath('c0201')).toBe('chara/human/c0201/skeleton/base/b0001/skl_c0201b0001.sklb')

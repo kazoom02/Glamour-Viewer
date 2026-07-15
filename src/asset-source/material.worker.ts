@@ -1,7 +1,14 @@
 /// <reference lib="webworker" />
 
 import { readImcEntry } from './imc'
-import { bakeCharacterMaterial, bakeHairMaterial, bakeIrisMaterial, bakeSkinNormal, materialAlphaMode } from './materialBake'
+import {
+  bakeCharacterMaterial,
+  bakeHairMaterial,
+  bakeIrisMaterial,
+  bakeSkinNormal,
+  materialAlphaMode,
+  usesCharacterColorTable,
+} from './materialBake'
 import { materialCandidates } from './materialPath'
 import { parseMtrl, type TextureRole } from './mtrl'
 import { createLocalAssetReader, type LocalAssetReader } from './sqpack'
@@ -133,13 +140,15 @@ async function loadRequest(
           errors.push(`[tex:${role}] ${textureReference.path}: ${error instanceof Error ? error.message : String(error)}`)
         }
       }
+      const shader = parsed.shaderPackage.toLowerCase()
       if (parsed.colorTable) {
-        const baked = bakeCharacterMaterial(parsed.colorTable, decoded.textures)
-        if (baked) Object.assign(decoded.textures, baked)
+        if (usesCharacterColorTable(shader)) {
+          const baked = bakeCharacterMaterial(parsed.colorTable, decoded.textures)
+          if (baked) Object.assign(decoded.textures, baked)
+        }
         decoded.colorTableRows = parsed.colorTable.rows.length
         decoded.dyeableRows = parsed.dyeTable?.filter((row) => row.flags !== 0).length ?? 0
       }
-      const shader = parsed.shaderPackage.toLowerCase()
       if (shader === 'hair.shpk') {
         const baked = bakeHairMaterial(decoded.textures.normal, decoded.textures.mask)
         if (baked) Object.assign(decoded.textures, baked)

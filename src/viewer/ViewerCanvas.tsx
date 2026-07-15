@@ -39,7 +39,6 @@ const PART_COLORS: Record<CharacterPart, number> = {
   legs: 0xc99378,
   feet: 0xc99378,
   face: 0xd5a087,
-  iris: 0x6689a7,
   hair: 0x352a2b,
   tail: 0x4b3837,
   ears: 0x3d3031,

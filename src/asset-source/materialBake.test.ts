@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { bakeCharacterMaterial, bakeHairMaterial, materialAlphaMode } from './materialBake'
+import { bakeCharacterMaterial, bakeHairMaterial, materialAlphaMode, usesCharacterColorTable } from './materialBake'
 import type { MaterialColorTable } from './mtrl'
 import { TEX_FORMAT, type DecodedTexture } from './tex'
 
@@ -38,5 +38,12 @@ describe('character colorset baking', () => {
     expect(materialAlphaMode('hair.shpk', face)).toBe('blend')
     expect(materialAlphaMode('skin.shpk', face)).toBe('mask')
     expect(materialAlphaMode('skin.shpk', '/mt_c0101b0001_a.mtrl')).toBe('opaque')
+  })
+
+  it('does not apply the gear colorset baker to iris materials', () => {
+    expect(usesCharacterColorTable('character.shpk')).toBe(true)
+    expect(usesCharacterColorTable('characterstocking.shpk')).toBe(true)
+    expect(usesCharacterColorTable('iris.shpk')).toBe(false)
+    expect(usesCharacterColorTable('skin.shpk')).toBe(false)
   })
 })
