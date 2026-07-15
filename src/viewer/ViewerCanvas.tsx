@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import type { AssetSource } from '../asset-source/types'
 import {
+  auxiliarySkeletonPlan,
   characterModelPlan,
   equipmentModelCandidates,
   faceSkeletonPath,
@@ -395,6 +396,16 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
               failures.push(`hair skeleton: ${reason instanceof Error ? reason.message : String(reason)}`)
             }
           }
+          for (const auxiliary of auxiliarySkeletonPlan(raceCode)) {
+            try {
+              const skeleton = await loadLocalSkeleton(source, auxiliary.path)
+              combinedSkeleton = attachSkeleton(combinedSkeleton, skeleton, auxiliary.attachmentBone)
+            } catch (reason) {
+              if (!isMissingLocalSkeletonError(reason, auxiliary.path)) {
+                failures.push(`${auxiliary.part} skeleton: ${reason instanceof Error ? reason.message : String(reason)}`)
+              }
+            }
+          }
           rig = addCharacterRig(characterGroup, combinedSkeleton)
         } catch (reason) {
           failures.push(`base skeleton: ${reason instanceof Error ? reason.message : String(reason)}`)
@@ -456,7 +467,7 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
             if (materialResult?.errors.length) failures.push(...materialResult.errors.map((error) => `${plan.part} ${error}`))
             diagnostics.push(...modelMaterialDiagnostics(`character ${plan.part}`, result.model, materialResult, false))
             characterParts += 1
-          } else {
+          } else if (!plan.optional) {
             failures.push(`${plan.part}: ${result?.error || 'model not found'}`)
           }
         }
@@ -489,6 +500,7 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
             characterGroup.add(await loadRemoteModel(source, plan.path))
             characterParts += 1
           } catch (reason) {
+            if (plan.optional) continue
             failures.push(`${plan.part}: ${reason instanceof Error ? reason.message : 'model not found'}`)
           }
         }

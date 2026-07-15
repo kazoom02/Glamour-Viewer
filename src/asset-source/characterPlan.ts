@@ -2,17 +2,64 @@ import type { ArmorItem } from '../catalog/types'
 import { equipmentAssetPlan } from './equipmentPlan'
 
 export const CHARACTER_PRESETS = [
-  ['c0101', 'Midlander male'], ['c0201', 'Midlander female'],
-  ['c0901', 'Roegadyn male'],
+  { code: 'c0101', label: 'Hyur Midlander — Male' },
+  { code: 'c0201', label: 'Hyur Midlander — Female' },
+  { code: 'c0301', label: 'Hyur Highlander — Male' },
+  { code: 'c0401', label: 'Hyur Highlander — Female' },
+  { code: 'c0501', label: 'Elezen — Male' },
+  { code: 'c0601', label: 'Elezen — Female' },
+  { code: 'c0701', label: "Miqo'te — Male" },
+  { code: 'c0801', label: "Miqo'te — Female" },
+  { code: 'c0901', label: 'Roegadyn — Male' },
+  { code: 'c1001', label: 'Roegadyn — Female' },
+  { code: 'c1101', label: 'Lalafell — Male' },
+  { code: 'c1201', label: 'Lalafell — Female' },
+  { code: 'c1301', label: 'Au Ra — Male' },
+  { code: 'c1401', label: 'Au Ra — Female' },
+  { code: 'c1501', label: 'Hrothgar — Male' },
+  { code: 'c1601', label: 'Hrothgar — Female' },
+  { code: 'c1701', label: 'Viera — Male' },
+  { code: 'c1801', label: 'Viera — Female' },
 ] as const
 
-export type CharacterRaceCode = (typeof CHARACTER_PRESETS)[number][0]
+export type CharacterRaceCode = (typeof CHARACTER_PRESETS)[number]['code']
 export type CharacterPart = 'torso' | 'hands' | 'legs' | 'feet' | 'face' | 'hair' | 'tail' | 'ears'
 
 export interface CharacterModelPlan {
   part: CharacterPart
   path: string
   coveredBy?: 'body' | 'hands' | 'legs' | 'feet'
+  optional?: boolean
+}
+
+export interface AuxiliarySkeletonPlan {
+  part: 'tail' | 'ears'
+  path: string
+  attachmentBone: 'j_kosi' | 'j_kao'
+}
+
+const TAIL_RACES = new Set<CharacterRaceCode>(['c0701', 'c0801', 'c1301', 'c1401', 'c1501', 'c1601'])
+const EAR_RACES = new Set<CharacterRaceCode>(['c1701', 'c1801'])
+
+const EQUIPMENT_FALLBACKS: Record<CharacterRaceCode, readonly CharacterRaceCode[]> = {
+  c0101: [],
+  c0201: ['c0101'],
+  c0301: ['c0101'],
+  c0401: ['c0201', 'c0101'],
+  c0501: ['c0101'],
+  c0601: ['c0201', 'c0101'],
+  c0701: ['c0101'],
+  c0801: ['c0201', 'c0101'],
+  c0901: ['c0101'],
+  c1001: ['c0201', 'c0101'],
+  c1101: ['c0101'],
+  c1201: ['c1101', 'c0101'],
+  c1301: ['c0101'],
+  c1401: ['c0201', 'c0101'],
+  c1501: ['c0901', 'c0101'],
+  c1601: ['c1001', 'c0201', 'c0101'],
+  c1701: ['c0101'],
+  c1801: ['c0201', 'c0101'],
 }
 
 function modelPath(raceCode: CharacterRaceCode, category: string, prefix: string, suffix: string): string {
@@ -28,6 +75,8 @@ export function characterModelPlan(raceCode: CharacterRaceCode): CharacterModelP
     { part: 'face', path: modelPath(raceCode, 'face', 'f', 'fac') },
     { part: 'hair', path: modelPath(raceCode, 'hair', 'h', 'hir') },
   ]
+  if (TAIL_RACES.has(raceCode)) result.push({ part: 'tail', path: modelPath(raceCode, 'tail', 't', 'til'), optional: true })
+  if (EAR_RACES.has(raceCode)) result.push({ part: 'ears', path: modelPath(raceCode, 'zear', 'z', 'zer'), optional: true })
   return result
 }
 
@@ -35,7 +84,7 @@ export function skeletonPath(raceCode: CharacterRaceCode): string {
   return `chara/human/${raceCode}/skeleton/base/b0001/skl_${raceCode}b0001.sklb`
 }
 
-/** The currently supported human presets use the shared f0002 auxiliary skeleton. */
+/** Playable character faces use the f0002 auxiliary skeleton for their animated face bones. */
 export function faceSkeletonPath(raceCode: CharacterRaceCode): string {
   const id = '0002'
   return `chara/human/${raceCode}/skeleton/face/f${id}/skl_${raceCode}f${id}.sklb`
@@ -46,9 +95,28 @@ export function hairSkeletonPath(raceCode: CharacterRaceCode, hairId = 1): strin
   return `chara/human/${raceCode}/skeleton/hair/h${id}/skl_${raceCode}h${id}.sklb`
 }
 
+export function auxiliarySkeletonPlan(raceCode: CharacterRaceCode): AuxiliarySkeletonPlan[] {
+  const result: AuxiliarySkeletonPlan[] = []
+  if (TAIL_RACES.has(raceCode)) {
+    result.push({
+      part: 'tail',
+      path: `chara/human/${raceCode}/skeleton/tail/t0001/skl_${raceCode}t0001.sklb`,
+      attachmentBone: 'j_kosi',
+    })
+  }
+  if (EAR_RACES.has(raceCode)) {
+    result.push({
+      part: 'ears',
+      path: `chara/human/${raceCode}/skeleton/zear/z0001/skl_${raceCode}z0001.sklb`,
+      attachmentBone: 'j_kao',
+    })
+  }
+  return result
+}
+
 export function equipmentModelCandidates(item: ArmorItem, raceCode: CharacterRaceCode): string[] {
-  // Some early/shared equipment sets omit the female Midlander model and let the
-  // game's racial model table fall back to the canonical c0101 geometry.
-  const fallback: CharacterRaceCode = 'c0101'
-  return [...new Set([equipmentAssetPlan(item, raceCode).modelPath, equipmentAssetPlan(item, fallback).modelPath])]
+  // Older/shared sets can omit a race-specific model. Try a compatible body
+  // family before the canonical male Midlander geometry.
+  return [...new Set([raceCode, ...EQUIPMENT_FALLBACKS[raceCode]])]
+    .map((candidate) => equipmentAssetPlan(item, candidate).modelPath)
 }

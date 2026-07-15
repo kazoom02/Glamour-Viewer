@@ -26,38 +26,44 @@ export default function ArmorCatalog({ source, equipped, raceCode, onRaceChange,
   const [query, setQuery] = useState('')
   const [selectedSlot, setSelectedSlot] = useState<ArmorSlot>('head')
   const [results, setResults] = useState<ArmorItem[]>([])
-  const [nextCursor, setNextCursor] = useState<string>()
+  const [pagesLoaded, setPagesLoaded] = useState(0)
   const [version, setVersion] = useState<string>()
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
   const abortRef = useRef<AbortController>(null)
 
-  async function loadCatalog(search: string, slot: ArmorSlot, append = false, cursor?: string) {
+  async function loadCatalog(search: string, slot: ArmorSlot) {
     abortRef.current?.abort()
     const controller = new AbortController()
+    const itemsById = new Map<number, ArmorItem>()
+    const seenCursors = new Set<string>()
     abortRef.current = controller
     setBusy(true)
     setError(undefined)
-    if (!append) {
-      setResults([])
-      setNextCursor(undefined)
-    }
+    setResults([])
+    setPagesLoaded(0)
     try {
-      const page = cursor
-        ? await continueArmorSearch(cursor, slot, controller.signal)
-        : await searchArmor(search, slot, controller.signal)
-      setResults((current) => {
-        if (!append) return page.items
-        const byId = new Map(current.map((item) => [item.id, item]))
-        page.items.forEach((item) => byId.set(item.id, item))
-        return [...byId.values()]
-      })
-      setNextCursor(page.next)
-      setVersion(page.version)
-      if (!page.items.length && !append) setError(`No ${SLOT_LABELS[slot].toLowerCase()} equipment matched that search.`)
+      let page = await searchArmor(search, slot, controller.signal)
+      let loadedPages = 0
+      while (true) {
+        if (controller.signal.aborted) return
+        loadedPages += 1
+        page.items.forEach((item) => itemsById.set(item.id, item))
+        setResults([...itemsById.values()])
+        setPagesLoaded(loadedPages)
+        setVersion(page.version)
+
+        const cursor = page.next
+        if (!cursor) break
+        if (seenCursors.has(cursor)) throw new Error('XIVAPI returned a repeated catalog cursor.')
+        seenCursors.add(cursor)
+        page = await continueArmorSearch(cursor, slot, controller.signal)
+      }
+      if (!itemsById.size) setError(`No ${SLOT_LABELS[slot].toLowerCase()} equipment matched that search.`)
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === 'AbortError') return
-      setError(caught instanceof Error ? caught.message : 'The armor catalog could not be searched.')
+      const message = caught instanceof Error ? caught.message : 'The armor catalog could not be searched.'
+      setError(itemsById.size ? `${itemsById.size} items loaded before the catalog stopped: ${message}` : message)
     } finally {
       if (abortRef.current === controller) setBusy(false)
     }
@@ -97,7 +103,7 @@ export default function ArmorCatalog({ source, equipped, raceCode, onRaceChange,
               value={raceCode}
               onChange={(event) => onRaceChange(event.target.value as CharacterRaceCode)}
             >
-              {CHARACTER_PRESETS.map(([code, label]) => <option value={code} key={code}>{label}</option>)}
+              {CHARACTER_PRESETS.map(({ code, label }) => <option value={code} key={code}>{label}</option>)}
             </select>
           </label>
           {version && <span className="catalog-version">Game data {version.slice(0, 8)}</span>}
@@ -130,19 +136,22 @@ export default function ArmorCatalog({ source, equipped, raceCode, onRaceChange,
             placeholder={`Search ${SLOT_LABELS[selectedSlot].toLowerCase()} equipment, or leave empty to show all`}
             autoComplete="off"
           />
-          <button className="button primary" disabled={busy || query.trim().length === 1}>
-            {busy ? 'Loading…' : query.trim() ? `Search ${SLOT_LABELS[selectedSlot]}` : `Show all ${SLOT_LABELS[selectedSlot]}`}
+          <button className="button primary" disabled={query.trim().length === 1}>
+            {busy ? `Restart ${SLOT_LABELS[selectedSlot]} load` : query.trim() ? `Search ${SLOT_LABELS[selectedSlot]}` : `Show all ${SLOT_LABELS[selectedSlot]}`}
           </button>
         </div>
       </form>
 
       {error && <p className="error-message catalog-error" role="alert">{error}</p>}
+      {busy && results.length === 0 && (
+        <p className="catalog-loading-status" role="status">Loading the complete {SLOT_LABELS[selectedSlot].toLowerCase()} catalog…</p>
+      )}
 
       {results.length > 0 && (
         <>
         <div className="catalog-results-heading">
           <strong>{SLOT_LABELS[selectedSlot]} equipment</strong>
-          <span>{results.length} loaded{nextCursor ? ' · more available' : ''}</span>
+          <span>{results.length} loaded from {pagesLoaded} {pagesLoaded === 1 ? 'page' : 'pages'}{busy ? ' · loading remaining pages…' : ' · complete'}</span>
         </div>
         <div className="armor-results" aria-label={`${SLOT_LABELS[selectedSlot]} armor results`}>
           {results.map((item) => {
@@ -164,23 +173,13 @@ export default function ArmorCatalog({ source, equipped, raceCode, onRaceChange,
             )
           })}
         </div>
-        {nextCursor && (
-          <button
-            className="button secondary catalog-load-more"
-            type="button"
-            disabled={busy}
-            onClick={() => void loadCatalog(query, selectedSlot, true, nextCursor)}
-          >
-            {busy ? 'Loading…' : `Load more ${SLOT_LABELS[selectedSlot].toLowerCase()} equipment`}
-          </button>
-        )}
         </>
       )}
 
       <div className="equipment-tray">
         <div className="tray-heading">
           <strong>Current armor</strong>
-          <span>Asset paths target <code>{raceCode}</code> with a Midlander fallback.</span>
+          <span>Asset paths target <code>{raceCode}</code> with compatible body-family fallbacks.</span>
         </div>
         <div className="equipment-slots">
           {ARMOR_SLOTS.map((slot) => {

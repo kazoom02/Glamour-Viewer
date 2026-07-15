@@ -142,6 +142,7 @@ h2 { margin: 0; font-size: clamp(28px, 3.2vw, 42px); line-height: 1.1; letter-sp
 .catalog-search { max-width: 780px; margin: 0 0 30px; }
 .catalog-search .field-label { display: block; margin-bottom: 9px; }
 .catalog-error { max-width: 780px; color: var(--danger); background: #2b1b1a; }
+.catalog-loading-status { margin: 0 0 22px; color: var(--muted); font-size: 12px; }
 .catalog-results-heading { display: flex; justify-content: space-between; align-items: baseline; margin: 0 0 12px; }
 .catalog-results-heading span { color: #898b91; font-size: 10px; }
 .armor-results { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; max-height: 535px; padding-right: 5px; overflow: auto; }

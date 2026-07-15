@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { ArmorItem } from '../catalog/types'
-import { characterModelPlan, equipmentModelCandidates, faceSkeletonPath, hairSkeletonPath, skeletonPath } from './characterPlan'
+import {
+  auxiliarySkeletonPlan,
+  CHARACTER_PRESETS,
+  characterModelPlan,
+  equipmentModelCandidates,
+  faceSkeletonPath,
+  hairSkeletonPath,
+  skeletonPath,
+} from './characterPlan'
 
 const bodyItem: ArmorItem = {
   id: 1, name: 'Test coat', modelValue: 190, modelSet: 190, modelVariant: 1,
@@ -8,6 +16,13 @@ const bodyItem: ArmorItem = {
 }
 
 describe('character asset planning', () => {
+  it('exposes every playable race and gender model code', () => {
+    expect(CHARACTER_PRESETS).toHaveLength(18)
+    expect(CHARACTER_PRESETS.map(({ code }) => code)).toEqual(
+      Array.from({ length: 18 }, (_, index) => `c${((index + 1) * 100 + 1).toString().padStart(4, '0')}`),
+    )
+  })
+
   it('builds the base Midlander female model and skeleton paths', () => {
     expect(characterModelPlan('c0201').map((part) => part.path)).toEqual([
       'chara/equipment/e0000/model/c0201e0000_top.mdl',
@@ -34,6 +49,33 @@ describe('character asset planning', () => {
     expect(equipmentModelCandidates(workboots, 'c0201')).toEqual([
       'chara/equipment/e0006/model/c0201e0006_sho.mdl',
       'chara/equipment/e0006/model/c0101e0006_sho.mdl',
+    ])
+  })
+
+  it('adds race-specific default tails, ears, and their auxiliary skeletons', () => {
+    expect(characterModelPlan('c0701').at(-1)).toEqual({
+      part: 'tail',
+      path: 'chara/human/c0701/obj/tail/t0001/model/c0701t0001_til.mdl',
+      optional: true,
+    })
+    expect(auxiliarySkeletonPlan('c0701')).toEqual([{
+      part: 'tail',
+      path: 'chara/human/c0701/skeleton/tail/t0001/skl_c0701t0001.sklb',
+      attachmentBone: 'j_kosi',
+    }])
+    expect(characterModelPlan('c1801').at(-1)).toEqual({
+      part: 'ears',
+      path: 'chara/human/c1801/obj/zear/z0001/model/c1801z0001_zer.mdl',
+      optional: true,
+    })
+  })
+
+  it('uses compatible body families before the universal fallback', () => {
+    expect(equipmentModelCandidates(bodyItem, 'c1601')).toEqual([
+      'chara/equipment/e0190/model/c1601e0190_top.mdl',
+      'chara/equipment/e0190/model/c1001e0190_top.mdl',
+      'chara/equipment/e0190/model/c0201e0190_top.mdl',
+      'chara/equipment/e0190/model/c0101e0190_top.mdl',
     ])
   })
 })
