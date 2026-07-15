@@ -166,8 +166,12 @@ export default function ArmorCatalog({ source, equipped, raceCode, onRaceChange,
                   <strong>{item.name}</strong>
                   <small>{item.jobs} · Model e{item.modelSet.toString().padStart(4, '0')} v{item.modelVariant.toString().padStart(4, '0')}</small>
                 </div>
-                <button className={`button ${isEquipped ? 'equipped' : 'secondary'}`} onClick={() => onEquip(item)} disabled={isEquipped}>
-                  {isEquipped ? 'Equipped' : 'Equip'}
+                <button
+                  className={`button ${isEquipped ? 'equipped' : 'secondary'}`}
+                  type="button"
+                  onClick={() => isEquipped ? onRemove(item.slot) : onEquip(item)}
+                >
+                  {isEquipped ? 'Unequip' : 'Equip'}
                 </button>
               </article>
             )
@@ -192,7 +196,7 @@ export default function ArmorCatalog({ source, equipped, raceCode, onRaceChange,
                   <>
                     <strong>{item.name}</strong>
                     <code title={plan?.modelPath}>{plan?.modelPath}</code>
-                    <button className="text-button" onClick={() => onRemove(slot)}>Remove</button>
+                    <button className="text-button" type="button" onClick={() => onRemove(slot)}>Unequip</button>
                   </>
                 ) : <small>Empty</small>}
               </div>

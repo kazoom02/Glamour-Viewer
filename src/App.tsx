@@ -1,11 +1,18 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState, type FormEvent } from 'react'
 import type { AssetSource } from './asset-source/types'
 import { HostedAssetsPanel } from './components/HostedAssetsPanel'
 import { LocalInstallPanel } from './components/LocalInstallPanel'
 import { formatBytes } from './lib/format'
-import { encodeSharedSet, readSharedSet, type SharedSet } from './lib/share'
+import {
+  createSharedSet,
+  equippedFromSharedSet,
+  parseSharedSet,
+  readSharedSet,
+  sharedSetHash,
+  type SharedSet,
+} from './lib/share'
 import type { ArmorItem, EquippedArmor } from './catalog/types'
-import type { CharacterRaceCode } from './asset-source/characterPlan'
+import { CHARACTER_PRESETS, type CharacterRaceCode } from './asset-source/characterPlan'
 
 const ViewerCanvas = lazy(() => import('./viewer/ViewerCanvas'))
 const ArmorCatalog = lazy(() => import('./components/ArmorCatalog'))
@@ -14,29 +21,77 @@ export function App() {
   const [source, setSource] = useState<AssetSource>()
   const [sharedSet, setSharedSet] = useState<SharedSet | null>(() => readSharedSet())
   const [copied, setCopied] = useState(false)
-  const [equipped, setEquipped] = useState<EquippedArmor>({})
-  const [raceCode, setRaceCode] = useState<CharacterRaceCode>('c0201')
+  const [shareInput, setShareInput] = useState('')
+  const [shareNotice, setShareNotice] = useState<string>()
+  const [shareError, setShareError] = useState<string>()
+  const [equipped, setEquipped] = useState<EquippedArmor>(() => sharedSet ? equippedFromSharedSet(sharedSet) : {})
+  const [raceCode, setRaceCode] = useState<CharacterRaceCode>(() => sharedSet?.raceCode ?? 'c0201')
 
   useEffect(() => {
-    const onHashChange = () => setSharedSet(readSharedSet())
+    const onHashChange = () => {
+      const set = readSharedSet()
+      setSharedSet(set)
+      if (set) {
+        setRaceCode(set.raceCode)
+        setEquipped(equippedFromSharedSet(set))
+        setShareNotice('Shared recipe imported.')
+        setShareError(undefined)
+      }
+    }
     window.addEventListener('hashchange', onHashChange)
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
 
-  async function shareExample() {
-    const set: SharedSet = {
-      name: 'Evening Expedition',
-      race: 'Midlander',
-      items: ['Weathered travel coat', 'Leather field gloves', 'Expedition boots'],
+  function applySharedSet(set: SharedSet) {
+    setSharedSet(set)
+    setRaceCode(set.raceCode)
+    setEquipped(equippedFromSharedSet(set))
+    setShareNotice('Shared recipe imported.')
+    setShareError(undefined)
+  }
+
+  async function shareCurrentLook() {
+    if (!Object.values(equipped).some(Boolean)) {
+      setShareError('Equip at least one armor piece before creating a share link.')
+      return
     }
-    window.location.hash = `/set/${encodeSharedSet(set)}`
-    await navigator.clipboard.writeText(window.location.href).catch(() => undefined)
-    setCopied(true)
+    const set = createSharedSet(raceCode, equipped)
+    setSharedSet(set)
+    window.location.hash = sharedSetHash(set)
+    setShareError(undefined)
+    try {
+      if (!navigator.clipboard) throw new Error('Clipboard access is unavailable.')
+      await navigator.clipboard.writeText(window.location.href)
+      setCopied(true)
+      setShareNotice('Current look link copied.')
+    } catch {
+      setShareNotice('The share link is ready in the address bar; copy it from there.')
+    }
     window.setTimeout(() => setCopied(false), 1800)
+  }
+
+  function importSharedLink(event: FormEvent) {
+    event.preventDefault()
+    const set = parseSharedSet(shareInput)
+    if (!set) {
+      setShareNotice(undefined)
+      setShareError('That is not a valid Glamour Viewer share link.')
+      return
+    }
+    applySharedSet(set)
+    window.location.hash = sharedSetHash(set)
   }
 
   function equip(item: ArmorItem) {
     setEquipped((current) => ({ ...current, [item.slot]: item }))
+  }
+
+  function unequip(slot: ArmorItem['slot']) {
+    setEquipped((current) => {
+      const next = { ...current }
+      delete next[slot]
+      return next
+    })
   }
 
   return (
@@ -77,10 +132,13 @@ export function App() {
             <div>
               <p className="eyebrow">Shared set</p>
               <h2 id="shared-title">{sharedSet.name}</h2>
-              {sharedSet.race && <p>{sharedSet.race}</p>}
+              <p>{CHARACTER_PRESETS.find(({ code }) => code === sharedSet.raceCode)?.label}</p>
             </div>
-            <ul>{sharedSet.items.map((item) => <li key={item}>{item}</li>)}</ul>
-            {!source && <p className="shared-note">Connect your own assets below to render this set.</p>}
+            <ul>{sharedSet.items.map((item) => <li key={item.slot}>{item.name}</li>)}</ul>
+            <div className="shared-set-actions">
+              <p className="shared-note">{source ? 'Apply the recipe to the connected preview.' : 'Connect your own assets below to render this set.'}</p>
+              <button className="button secondary" type="button" onClick={() => applySharedSet(sharedSet)}>Apply recipe</button>
+            </div>
           </section>
         )}
 
@@ -134,7 +192,7 @@ export function App() {
                   raceCode={raceCode}
                   onRaceChange={setRaceCode}
                   onEquip={equip}
-                  onRemove={(slot) => setEquipped((current) => ({ ...current, [slot]: undefined }))}
+                  onRemove={unequip}
                 />
               </Suspense>
             </div>
@@ -147,7 +205,27 @@ export function App() {
             <h2>Share the recipe, never the assets.</h2>
             <p>Set metadata lives in the URL hash. The recipient supplies their own local install or bucket.</p>
           </div>
-          <button className="button secondary" onClick={shareExample}>{copied ? 'Link copied' : 'Try an example link'}</button>
+          <div className="share-actions">
+            <button className="button secondary" type="button" onClick={shareCurrentLook}>
+              {copied ? 'Link copied' : 'Copy current look link'}
+            </button>
+            <form className="share-import" onSubmit={importSharedLink}>
+              <label className="field-label" htmlFor="share-link">Import a recipe URL</label>
+              <div className="url-row">
+                <input
+                  id="share-link"
+                  type="text"
+                  value={shareInput}
+                  onChange={(event) => setShareInput(event.target.value)}
+                  placeholder="Paste a /#/set/ link"
+                  autoComplete="off"
+                />
+                <button className="button primary">Import</button>
+              </div>
+            </form>
+            {shareNotice && <p className="share-feedback" role="status">{shareNotice}</p>}
+            {shareError && <p className="error-message share-feedback" role="alert">{shareError}</p>}
+          </div>
         </section>
       </main>
 

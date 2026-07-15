@@ -63,8 +63,8 @@ const EQUIPMENT_FALLBACKS: Record<CharacterRaceCode, readonly CharacterRaceCode[
   c1801: ['c0201', 'c0101'],
 }
 
-function modelPath(raceCode: CharacterRaceCode, category: string, prefix: string, suffix: string): string {
-  return `chara/human/${raceCode}/obj/${category}/${prefix}0001/model/${raceCode}${prefix}0001_${suffix}.mdl`
+function modelPath(raceCode: CharacterRaceCode, category: string, prefix: string, suffix: string, id = '0001'): string {
+  return `chara/human/${raceCode}/obj/${category}/${prefix}${id}/model/${raceCode}${prefix}${id}_${suffix}.mdl`
 }
 
 export function characterModelPlan(raceCode: CharacterRaceCode): CharacterModelPlan[] {
@@ -77,12 +77,13 @@ export function characterModelPlan(raceCode: CharacterRaceCode): CharacterModelP
       .map((candidate) => `chara/equipment/e0000/model/${candidate}e0000_${suffix}.mdl`)
     return { part, coveredBy, path: paths[0]!, fallbackPaths: paths.slice(1) }
   }
+  const facePaths = ['0001', '0101'].map((id) => modelPath(raceCode, 'face', 'f', 'fac', id))
   const result: CharacterModelPlan[] = [
     basePart('torso', 'body', 'top'),
     basePart('hands', 'hands', 'glv'),
     basePart('legs', 'legs', 'dwn'),
     basePart('feet', 'feet', 'sho'),
-    { part: 'face', path: modelPath(raceCode, 'face', 'f', 'fac') },
+    { part: 'face', path: facePaths[0]!, fallbackPaths: facePaths.slice(1) },
     { part: 'hair', path: modelPath(raceCode, 'hair', 'h', 'hir') },
   ]
   if (TAIL_RACES.has(raceCode)) result.push({ part: 'tail', path: modelPath(raceCode, 'tail', 't', 'til'), optional: true })
@@ -98,10 +99,19 @@ export function skeletonPath(raceCode: CharacterRaceCode): string {
   return `chara/human/${raceCode}/skeleton/base/b0001/skl_${raceCode}b0001.sklb`
 }
 
-/** Playable character faces use the f0002 auxiliary skeleton for their animated face bones. */
+/** The common face skeleton remains the first candidate for backwards compatibility. */
 export function faceSkeletonPath(raceCode: CharacterRaceCode): string {
-  const id = '0002'
-  return `chara/human/${raceCode}/skeleton/face/f${id}/skl_${raceCode}f${id}.sklb`
+  return faceSkeletonCandidates(raceCode)[0]!
+}
+
+/** Face extra-skeleton IDs vary by race family and are not always the face model ID. */
+export function faceSkeletonCandidates(raceCode: CharacterRaceCode): string[] {
+  const ids = raceCode === 'c0501'
+    ? ['0001', '0002', '0101']
+    : raceCode === 'c0301'
+      ? ['0101', '0002', '0001']
+      : ['0002', '0001', '0101']
+  return ids.map((id) => `chara/human/${raceCode}/skeleton/face/f${id}/skl_${raceCode}f${id}.sklb`)
 }
 
 export function hairSkeletonPath(raceCode: CharacterRaceCode, hairId = 1): string {

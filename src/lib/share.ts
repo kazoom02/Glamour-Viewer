@@ -1,8 +1,15 @@
+import { CHARACTER_PRESETS, type CharacterRaceCode } from '../asset-source/characterPlan'
+import { ARMOR_SLOTS, type ArmorItem, type ArmorSlot, type EquippedArmor } from '../catalog/types'
+
 export interface SharedSet {
+  version: 1
   name: string
-  race?: string
-  items: string[]
+  raceCode: CharacterRaceCode
+  items: ArmorItem[]
 }
+
+const RACE_CODES = new Set<string>(CHARACTER_PRESETS.map(({ code }) => code))
+const ARMOR_SLOT_SET = new Set<string>(ARMOR_SLOTS)
 
 function toBase64Url(value: string): string {
   const bytes = new TextEncoder().encode(value)
@@ -17,24 +24,107 @@ function fromBase64Url(value: string): string {
   return new TextDecoder().decode(Uint8Array.from(binary, (character) => character.charCodeAt(0)))
 }
 
+function integer(value: unknown, minimum = 0): number | undefined {
+  return Number.isSafeInteger(value) && (value as number) >= minimum ? value as number : undefined
+}
+
+function decodeSharedItem(value: unknown): ArmorItem | null {
+  if (!value || typeof value !== 'object') return null
+  const candidate = value as Partial<ArmorItem>
+  if (
+    integer(candidate.id, 1) === undefined
+    || typeof candidate.name !== 'string'
+    || !candidate.name.trim()
+    || !ARMOR_SLOT_SET.has(candidate.slot ?? '')
+    || integer(candidate.modelValue, 1) === undefined
+    || integer(candidate.modelSet, 1) === undefined
+    || integer(candidate.modelVariant) === undefined
+  ) return null
+
+  return {
+    id: candidate.id!,
+    name: candidate.name.trim().slice(0, 200),
+    iconPath: typeof candidate.iconPath === 'string' ? candidate.iconPath.slice(0, 500) : undefined,
+    modelValue: candidate.modelValue!,
+    modelSet: candidate.modelSet!,
+    modelVariant: candidate.modelVariant!,
+    slot: candidate.slot as ArmorSlot,
+    dyeCount: integer(candidate.dyeCount) ?? 0,
+    equipLevel: integer(candidate.equipLevel) ?? 0,
+    jobs: typeof candidate.jobs === 'string' ? candidate.jobs.slice(0, 500) : 'All classes',
+  }
+}
+
+function hashFromInput(input: string): string {
+  const trimmed = input.trim()
+  if (!trimmed) return ''
+  try {
+    if (/^https?:\/\//i.test(trimmed)) return new URL(trimmed).hash
+  } catch {
+    return ''
+  }
+  if (trimmed.startsWith('/#/')) return trimmed.slice(1)
+  if (trimmed.startsWith('/set/')) return `#${trimmed}`
+  if (trimmed.startsWith('set/')) return `#/${trimmed}`
+  return trimmed
+}
+
 export function encodeSharedSet(set: SharedSet): string {
   return toBase64Url(JSON.stringify(set))
 }
 
-export function readSharedSet(hash = window.location.hash): SharedSet | null {
-  const match = hash.match(/^#\/set\/([A-Za-z0-9_-]+)$/)
+export function sharedSetHash(set: SharedSet): string {
+  return `#/set/${encodeSharedSet(set)}`
+}
+
+export function createSharedSet(raceCode: CharacterRaceCode, equipped: EquippedArmor): SharedSet {
+  return {
+    version: 1,
+    name: 'Shared glamour',
+    raceCode,
+    items: ARMOR_SLOTS.flatMap((slot) => equipped[slot] ? [equipped[slot]!] : []),
+  }
+}
+
+export function equippedFromSharedSet(set: SharedSet): EquippedArmor {
+  return Object.fromEntries(set.items.map((item) => [item.slot, item])) as EquippedArmor
+}
+
+export function parseSharedSet(input: string): SharedSet | null {
+  let hash = hashFromInput(input)
+  try {
+    hash = decodeURIComponent(hash)
+  } catch {
+    return null
+  }
+  const match = hash.match(/^#\/set\/([A-Za-z0-9_-]+)\/?$/)
   if (!match?.[1]) return null
 
   try {
     const candidate = JSON.parse(fromBase64Url(match[1])) as Partial<SharedSet>
-    if (typeof candidate.name !== 'string' || !Array.isArray(candidate.items)) return null
-    if (!candidate.items.every((item) => typeof item === 'string')) return null
+    if (
+      candidate.version !== 1
+      || typeof candidate.name !== 'string'
+      || !RACE_CODES.has(candidate.raceCode ?? '')
+      || !Array.isArray(candidate.items)
+      || candidate.items.length > ARMOR_SLOTS.length
+    ) return null
+    const items = candidate.items.map(decodeSharedItem)
+    if (items.some((item) => !item)) return null
+    const slots = new Set(items.map((item) => item!.slot))
+    if (slots.size !== items.length) return null
+
     return {
-      name: candidate.name.slice(0, 100),
-      race: typeof candidate.race === 'string' ? candidate.race.slice(0, 100) : undefined,
-      items: candidate.items.slice(0, 20).map((item) => item.slice(0, 200)),
+      version: 1,
+      name: candidate.name.trim().slice(0, 100) || 'Shared glamour',
+      raceCode: candidate.raceCode as CharacterRaceCode,
+      items: items as ArmorItem[],
     }
   } catch {
     return null
   }
+}
+
+export function readSharedSet(hash = typeof window === 'undefined' ? '' : window.location.hash): SharedSet | null {
+  return parseSharedSet(hash)
 }

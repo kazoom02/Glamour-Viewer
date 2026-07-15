@@ -7,7 +7,7 @@ import {
   characterModelCandidates,
   characterModelPlan,
   equipmentModelCandidates,
-  faceSkeletonPath,
+  faceSkeletonCandidates,
   hairSkeletonPath,
   skeletonPath,
   type CharacterPart,
@@ -388,11 +388,22 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
         try {
           setStatus(`Reading ${raceCode} base, face, and hair skeletons…`)
           let combinedSkeleton = await loadLocalSkeleton(source, skeletonPath(raceCode))
-          try {
-            const faceSkeleton = await loadLocalSkeleton(source, faceSkeletonPath(raceCode))
-            combinedSkeleton = attachSkeleton(combinedSkeleton, faceSkeleton, 'j_kao')
-          } catch (reason) {
-            failures.push(`face skeleton: ${reason instanceof Error ? reason.message : String(reason)}`)
+          let faceSkeletonLoaded = false
+          const faceSkeletonErrors: string[] = []
+          for (const path of faceSkeletonCandidates(raceCode)) {
+            try {
+              const faceSkeleton = await loadLocalSkeleton(source, path)
+              combinedSkeleton = attachSkeleton(combinedSkeleton, faceSkeleton, 'j_kao')
+              faceSkeletonLoaded = true
+              break
+            } catch (reason) {
+              if (!isMissingLocalSkeletonError(reason, path)) {
+                faceSkeletonErrors.push(reason instanceof Error ? reason.message : String(reason))
+              }
+            }
+          }
+          if (!faceSkeletonLoaded && faceSkeletonErrors.length) {
+            failures.push(`face skeleton: ${faceSkeletonErrors.join(' / ')}`)
           }
           const optionalHairSkeletonPath = hairSkeletonPath(raceCode)
           try {

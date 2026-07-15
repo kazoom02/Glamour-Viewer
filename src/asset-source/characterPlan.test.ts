@@ -6,6 +6,7 @@ import {
   characterModelCandidates,
   characterModelPlan,
   equipmentModelCandidates,
+  faceSkeletonCandidates,
   faceSkeletonPath,
   hairSkeletonPath,
   skeletonPath,
@@ -92,6 +93,19 @@ describe('character asset planning', () => {
       'chara/equipment/e0000/model/c1801e0000_top.mdl',
       'chara/equipment/e0000/model/c0201e0000_top.mdl',
       'chara/equipment/e0000/model/c0101e0000_top.mdl',
+    ])
+  })
+
+  it('tries alternate race face models and race-aware face skeletons', () => {
+    const highlanderFace = characterModelPlan('c0301').find(({ part }) => part === 'face')!
+    expect(characterModelCandidates(highlanderFace)).toEqual([
+      'chara/human/c0301/obj/face/f0001/model/c0301f0001_fac.mdl',
+      'chara/human/c0301/obj/face/f0101/model/c0301f0101_fac.mdl',
+    ])
+    expect(faceSkeletonCandidates('c0501')).toEqual([
+      'chara/human/c0501/skeleton/face/f0001/skl_c0501f0001.sklb',
+      'chara/human/c0501/skeleton/face/f0002/skl_c0501f0002.sklb',
+      'chara/human/c0501/skeleton/face/f0101/skl_c0501f0101.sklb',
     ])
   })
 })

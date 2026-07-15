@@ -69,6 +69,8 @@ The Vite build writes to `dist` with `base: '/'`. The build script measures the 
 
 Import the repository in Vercel and accept the auto-detected Vite preset. Do not add framework, build, or output-directory overrides. The app uses hash routes such as `/#/set/<encoded>`, so it needs no SPA rewrite and no `vercel.json`.
 
+Share links contain only the selected race and XIVAPI catalog/model metadata. Opening a valid link imports the recipe automatically, and the same URL can be pasted into the import field. The recipient still supplies their own local install or asset bucket; no model or texture bytes are embedded in the hash.
+
 Environment variables are not required. Any future public build-time setting must use the `VITE_` prefix. A secret in the browser bundle is not secret and should never be added.
 
 `.vercelignore` excludes fixtures, documentation sources, extraction tooling, and test/game assets so the deployment artifact remains the web app only.
