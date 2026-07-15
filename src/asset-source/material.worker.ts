@@ -10,7 +10,7 @@ import {
   usesCharacterColorTable,
 } from './materialBake'
 import { materialCandidates } from './materialPath'
-import { parseMtrl, type TextureRole } from './mtrl'
+import { materialTexturePriority, parseMtrl, type TextureRole } from './mtrl'
 import { createLocalAssetReader, type LocalAssetReader } from './sqpack'
 import { decodeTex, type DecodedTexture } from './tex'
 import type { MaterialLoadRequest, MaterialLoadResult } from './materialTypes'
@@ -129,7 +129,9 @@ async function loadRequest(
         alphaMode: materialAlphaMode(parsed.shaderPackage, materialReference),
         textures: {},
       } as MaterialLoadResult['materials'][string]
-      for (const textureReference of parsed.textures) {
+      const textureReferences = [...parsed.textures]
+        .sort((left, right) => materialTexturePriority(right) - materialTexturePriority(left))
+      for (const textureReference of textureReferences) {
         if (!textureReference.path) continue
         const role = textureReference.role
         if (!(['diffuse', 'normal', 'mask', 'specular', 'index'] as TextureRole[]).includes(role)) continue

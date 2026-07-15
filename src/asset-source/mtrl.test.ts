@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseMtrl } from './mtrl'
+import { materialTexturePriority, parseMtrl, type MaterialTextureReference } from './mtrl'
 
 describe('MTRL parser', () => {
   it('resolves texture strings and sampler roles', () => {
@@ -59,5 +59,18 @@ describe('MTRL parser', () => {
       metalness: 0.25,
     })
     expect(material.dyeTable?.[0]).toEqual({ template: 12, channel: 1, flags: 0x21 })
+  })
+
+  it('prioritizes canonical character samplers over generic diffuse aliases', () => {
+    const generic: MaterialTextureReference = {
+      path: 'chara/common/texture/tile.tex', flags: 0, samplerId: 0x88408c04, role: 'diffuse',
+    }
+    const canonical: MaterialTextureReference = {
+      path: 'chara/equipment/e0005/texture/c0201e0005_sho_d.tex',
+      flags: 0,
+      samplerId: 0x115306be,
+      role: 'diffuse',
+    }
+    expect(materialTexturePriority(canonical)).toBeGreaterThan(materialTexturePriority(generic))
   })
 })

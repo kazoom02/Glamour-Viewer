@@ -54,6 +54,22 @@ const SAMPLER_ROLES = new Map<number, TextureRole>([
   [0x2005679f, 'table'],
 ])
 
+const CANONICAL_SAMPLERS = new Set([
+  0x115306be, // g_SamplerDiffuse
+  0x0c5ec1f1, // g_SamplerNormal
+  0x8a4e82b6, // g_SamplerMask
+  0x2b99e025, // g_SamplerSpecular
+  0x565f8fd8, // g_SamplerIndex
+  0x2005679f, // g_SamplerTable
+])
+
+/** Orders canonical character samplers ahead of generic shader-specific aliases. */
+export function materialTexturePriority(texture: MaterialTextureReference): number {
+  if (texture.samplerId !== undefined && CANONICAL_SAMPLERS.has(texture.samplerId)) return 100
+  if (texture.role !== 'unknown' && inferRole(texture.path) === texture.role) return 50
+  return 10
+}
+
 function assertRange(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
 }
