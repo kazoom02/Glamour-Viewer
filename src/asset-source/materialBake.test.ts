@@ -17,7 +17,9 @@ describe('character colorset baking', () => {
       metalness: 0,
     }))
     rows[2]!.diffuse = [0.25, 0.25, 0.25]
+    rows[2]!.metalness = 1
     rows[3]!.diffuse = [1, 1, 1]
+    rows[3]!.metalness = 1
     const table: MaterialColorTable = { kind: 'dawntrail', rows }
     const result = bakeCharacterMaterial(table, {
       index: texture([17, 128, 0, 255]),
@@ -25,6 +27,7 @@ describe('character colorset baking', () => {
       mask: texture([255, 255, 255, 255]),
     })!
     expect(Array.from(result.diffuse.rgba.slice(0, 3))).toEqual([201, 201, 201])
+    expect(Array.from(result.metalness.rgba.slice(0, 3))).toEqual([0, 0, 0])
   })
 
   it('builds facial-hair color and opacity from normal and mask channels', () => {

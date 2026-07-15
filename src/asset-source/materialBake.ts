@@ -160,11 +160,12 @@ export function bakeCharacterMaterial(
       }
       diffuse[target + 3] = clampByte((base[3] / 255) * opacity)
       const rowRoughness = mix(a.roughness, b.roughness)
-      const rowMetalness = mix(a.metalness, b.metalness)
       const rough = clampByte(rowRoughness * (textures.mask ? mask[1] / 255 : 1))
-      const metal = clampByte(rowMetalness)
       roughness[target] = roughness[target + 1] = roughness[target + 2] = rough
-      metalness[target] = metalness[target + 1] = metalness[target + 2] = metal
+      // FFXIV's character shader uses a colored-specular workflow. Feeding its
+      // table value directly into Three's metallic workflow removes the diffuse
+      // contribution and turns leather/cloth black without an environment map.
+      metalness[target] = metalness[target + 1] = metalness[target + 2] = 0
       emissive[target + 3] = roughness[target + 3] = metalness[target + 3] = 255
     }
   }
