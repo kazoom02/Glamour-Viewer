@@ -122,6 +122,30 @@ export function bakeSkinNormal(normal: DecodedTexture | undefined): DecodedTextu
   return normal ? cleanedNormal(normal) : undefined
 }
 
+/**
+ * CharacterTattoo has no diffuse sampler. Face paint, scars and makeup use the
+ * normal texture's alpha as opacity and receive their color from customization.
+ * Use the same neutral default used by model exporters until appearance color
+ * controls are exposed by the viewer.
+ */
+export function bakeTattooMaterial(
+  normal: DecodedTexture | undefined,
+): { diffuse: DecodedTexture; normal: DecodedTexture } | undefined {
+  if (!normal) return undefined
+  const rgba = new Uint8Array(normal.rgba.length)
+  const tattooColor = [38, 112, 102]
+  for (let offset = 0; offset < rgba.length; offset += 4) {
+    rgba[offset] = tattooColor[0]!
+    rgba[offset + 1] = tattooColor[1]!
+    rgba[offset + 2] = tattooColor[2]!
+    rgba[offset + 3] = normal.rgba[offset + 3]!
+  }
+  return {
+    diffuse: output(normal.width, normal.height, rgba),
+    normal: cleanedNormal(normal),
+  }
+}
+
 /** Bakes the character shader's colorset/index lookup into standard PBR textures. */
 export function bakeCharacterMaterial(
   table: MaterialColorTable,

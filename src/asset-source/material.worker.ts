@@ -6,6 +6,7 @@ import {
   bakeHairMaterial,
   bakeIrisMaterial,
   bakeSkinNormal,
+  bakeTattooMaterial,
   materialAlphaMode,
   usesCharacterColorTable,
 } from './materialBake'
@@ -210,6 +211,9 @@ async function loadRequest(
       } else if (shader === 'skin.shpk') {
         const normal = bakeSkinNormal(decoded.textures.normal)
         if (normal) decoded.textures.normal = normal
+      } else if (shader === 'charactertattoo.shpk') {
+        const baked = bakeTattooMaterial(decoded.textures.normal)
+        if (baked) Object.assign(decoded.textures, baked)
       }
       if (captureDiagnostics) {
         materialDiagnostics.push(

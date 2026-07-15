@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { bakeCharacterMaterial, bakeHairMaterial, materialAlphaMode, usesCharacterColorTable } from './materialBake'
+import {
+  bakeCharacterMaterial,
+  bakeHairMaterial,
+  bakeTattooMaterial,
+  materialAlphaMode,
+  usesCharacterColorTable,
+} from './materialBake'
 import type { MaterialColorTable } from './mtrl'
 import { TEX_FORMAT, type DecodedTexture } from './tex'
 
@@ -73,6 +79,12 @@ describe('character colorset baking', () => {
   it('builds facial-hair color and opacity from normal and mask channels', () => {
     const result = bakeHairMaterial(texture([128, 128, 0, 64]), texture([0, 0, 0, 255]))!
     expect(Array.from(result.diffuse.rgba)).toEqual([130, 64, 13, 64])
+    expect(Array.from(result.normal.rgba)).toEqual([128, 128, 255, 255])
+  })
+
+  it('builds face paint color and opacity from a CharacterTattoo normal texture', () => {
+    const result = bakeTattooMaterial(texture([128, 128, 64, 96]))!
+    expect(Array.from(result.diffuse.rgba)).toEqual([38, 112, 102, 96])
     expect(Array.from(result.normal.rgba)).toEqual([128, 128, 255, 255])
   })
 

@@ -161,6 +161,9 @@ function addDecodedModel(
     else if (/_acc_[a-z]\.mtrl$/.test(materialPath)) meshColor = 0x8b6a45
     else if (/e0000_(top|dwn|sho|glv)_/.test(materialPath)) meshColor = 0x554b49
     const diffuse = decodedMaterial?.textures.diffuse
+    // Face ETC layers are procedural (tattoo/makeup or facial hair). Rendering
+    // an undecoded layer with Three's white fallback creates opaque white masks.
+    if (/_etc_[a-z]\.mtrl$/.test(materialPath) && !diffuse) continue
     const normal = decodedMaterial?.textures.normal
     const mask = decodedMaterial?.textures.mask
     const ao = decodedMaterial?.textures.ao
@@ -680,16 +683,21 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
     <div className="viewer-canvas-wrap">
       <div className="viewer-canvas" ref={container} aria-label="Three-dimensional FFXIV character and armor inspection view" />
       {previewItems.length > 0 && (
-        <div className="viewer-selection" aria-label="Selected preview armor">
-          <strong>Previewing geometry</strong>
-          {previewItems.map(([slot, item]) => (
-            <span key={slot}>
-              {slot}: {item.name}
-              <small>e{item.modelSet.toString().padStart(4, '0')} v{item.modelVariant.toString().padStart(4, '0')}</small>
-            </span>
-          ))}
-          <em>Local mode resolves IMC parts, SKLB skinning, MTRL color tables, and TEX/PBR textures.</em>
-        </div>
+        <details className="viewer-selection" aria-label="Selected preview armor">
+          <summary title="Show or hide equipped geometry details">
+            <strong>Previewing geometry</strong>
+            <span className="viewer-selection-count">{previewItems.length}</span>
+          </summary>
+          <div className="viewer-selection-body">
+            {previewItems.map(([slot, item]) => (
+              <span key={slot}>
+                {slot}: {item.name}
+                <small>e{item.modelSet.toString().padStart(4, '0')} v{item.modelVariant.toString().padStart(4, '0')}</small>
+              </span>
+            ))}
+            <em>Local mode resolves IMC parts, SKLB skinning, MTRL color tables, and TEX/PBR textures.</em>
+          </div>
+        </details>
       )}
       <p className="viewer-status" aria-live="polite">{status}</p>
       {error && (
