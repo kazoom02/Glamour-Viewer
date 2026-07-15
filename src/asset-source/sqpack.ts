@@ -4,8 +4,12 @@ const SQPACK_MAGIC = 'SqPack\0\0'
 const SQPACK_HEADER_MIN = 24
 const INDEX2_ENTRY_SIZE = 8
 const MODEL_HEADER_SIZE = 208
+const FILE_INFO_SIZE = 24
+const BLOCK_HEADER_SIZE = 16
+const UNCOMPRESSED_BLOCK = 32_000
 const MAX_MODEL_HEADER_SIZE = 1024 * 1024
 const MAX_MODEL_RANGE_SIZE = 64 * 1024 * 1024
+const MAX_ASSET_SIZE = 256 * 1024 * 1024
 const CHARACTER_REPOSITORIES = ['ffxiv', 'ex1', 'ex2', 'ex3', 'ex4', 'ex5'] as const
 
 export interface SqpackLocation {
@@ -251,12 +255,136 @@ async function readModelAtLocation(
   return readFileSlice(datFile, location.offset, location.offset + rangeSize, datName)
 }
 
-export interface LocalModelReader {
+async function inflateRaw(bytes: Uint8Array): Promise<Uint8Array> {
+  const format = 'deflate-raw' as CompressionFormat
+  const input = new Blob([bytes as BlobPart]).stream().pipeThrough(new DecompressionStream(format))
+  return new Uint8Array(await new Response(input).arrayBuffer())
+}
+
+async function decodeDataBlock(file: File, offset: number, target: string): Promise<Uint8Array> {
+  const headerBytes = await readFileSlice(file, offset, offset + BLOCK_HEADER_SIZE, target)
+  const header = new DataView(headerBytes)
+  const headerSize = header.getUint32(0, true)
+  const compressedSize = header.getUint32(8, true)
+  const decompressedSize = header.getUint32(12, true)
+  assertRange(headerSize >= BLOCK_HEADER_SIZE && headerSize <= 1024, `The SqPack block header at ${offset} is invalid.`)
+  assertRange(decompressedSize <= MAX_ASSET_SIZE, 'The SqPack block exceeds the browser decoder safety limit.')
+  if (compressedSize === UNCOMPRESSED_BLOCK) {
+    return new Uint8Array(await readFileSlice(file, offset + headerSize, offset + headerSize + decompressedSize, target))
+  }
+  assertRange(compressedSize <= MAX_ASSET_SIZE, 'The compressed SqPack block exceeds the browser decoder safety limit.')
+  const compressed = new Uint8Array(await readFileSlice(file, offset + headerSize, offset + headerSize + compressedSize, target))
+  let decoded: Uint8Array
+  try {
+    decoded = await inflateRaw(compressed)
+  } catch (error) {
+    throw readError('inflate-block', `${target} at ${offset} (${compressedSize} -> ${decompressedSize})`, error)
+  }
+  assertRange(decoded.byteLength === decompressedSize, `SqPack block decoded to ${decoded.byteLength} bytes; expected ${decompressedSize}.`)
+  return decoded
+}
+
+function appendBlock(output: Uint8Array, cursor: number, block: Uint8Array): number {
+  assertRange(cursor + block.byteLength <= output.byteLength, 'The SqPack blocks exceed the declared uncompressed file size.')
+  output.set(block, cursor)
+  return cursor + block.byteLength
+}
+
+async function reconstructStandardFile(file: File, entryOffset: number, headerBytes: ArrayBuffer, target: string): Promise<ArrayBuffer> {
+  const view = new DataView(headerBytes)
+  const headerSize = view.getUint32(0, true)
+  const rawSize = view.getUint32(8, true)
+  const blockCount = view.getUint32(20, true)
+  assertRange(rawSize <= MAX_ASSET_SIZE, 'The selected asset exceeds the browser decoder safety limit.')
+  assertRange(blockCount <= 65_536, 'The selected asset declares too many SqPack blocks.')
+  assertRange(FILE_INFO_SIZE + blockCount * 8 <= headerBytes.byteLength, 'The standard SqPack block table is truncated.')
+  const output = new Uint8Array(rawSize)
+  let cursor = 0
+  for (let index = 0; index < blockCount; index += 1) {
+    const relativeOffset = view.getUint32(FILE_INFO_SIZE + index * 8, true)
+    const block = await decodeDataBlock(file, entryOffset + headerSize + relativeOffset, target)
+    cursor = appendBlock(output, cursor, block)
+  }
+  assertRange(cursor === rawSize, `SqPack file decoded to ${cursor} bytes; expected ${rawSize}.`)
+  return output.buffer
+}
+
+async function reconstructTextureFile(file: File, entryOffset: number, headerBytes: ArrayBuffer, target: string): Promise<ArrayBuffer> {
+  const view = new DataView(headerBytes)
+  const headerSize = view.getUint32(0, true)
+  const rawSize = view.getUint32(8, true)
+  const lodCount = view.getUint32(20, true)
+  assertRange(rawSize <= MAX_ASSET_SIZE, 'The selected texture exceeds the browser decoder safety limit.')
+  assertRange(lodCount > 0 && lodCount <= 13, 'The SqPack texture LOD table is invalid.')
+  assertRange(FILE_INFO_SIZE + lodCount * 20 <= headerBytes.byteLength, 'The SqPack texture LOD table is truncated.')
+
+  const descriptors = Array.from({ length: lodCount }, (_, index) => {
+    const offset = FILE_INFO_SIZE + index * 20
+    return {
+      compressedOffset: view.getUint32(offset, true),
+      blockCount: view.getUint32(offset + 16, true),
+    }
+  })
+  const totalBlocks = descriptors.reduce((sum, descriptor) => sum + descriptor.blockCount, 0)
+  assertRange(totalBlocks <= 65_536, 'The texture declares too many SqPack blocks.')
+  const blockTableOffset = FILE_INFO_SIZE + lodCount * 20
+  assertRange(blockTableOffset + totalBlocks * 2 <= headerBytes.byteLength, 'The SqPack texture block-size table is truncated.')
+  const blockSizes = Array.from({ length: totalBlocks }, (_, index) => view.getUint16(blockTableOffset + index * 2, true))
+
+  const output = new Uint8Array(rawSize)
+  const rawHeaderSize = descriptors[0]!.compressedOffset
+  assertRange(rawHeaderSize <= rawSize, 'The raw TEX header exceeds the declared texture size.')
+  const baseOffset = entryOffset + headerSize
+  output.set(new Uint8Array(await readFileSlice(file, baseOffset, baseOffset + rawHeaderSize, target)))
+  let outputCursor = rawHeaderSize
+  let blockIndex = 0
+  for (const descriptor of descriptors) {
+    let inputCursor = baseOffset + descriptor.compressedOffset
+    for (let index = 0; index < descriptor.blockCount; index += 1) {
+      const onDiskSize = blockSizes[blockIndex++]!
+      const block = await decodeDataBlock(file, inputCursor, target)
+      outputCursor = appendBlock(output, outputCursor, block)
+      inputCursor += onDiskSize
+    }
+  }
+  assertRange(outputCursor === rawSize, `SqPack texture decoded to ${outputCursor} bytes; expected ${rawSize}.`)
+  return output.buffer
+}
+
+async function readAssetAtLocation(
+  source: Extract<AssetSource, { kind: 'local' }>,
+  repository: string,
+  gamePath: string,
+  location: SqpackLocation,
+  getSourceFile = (requestedRepository: string, name: string) => sourceFile(source, requestedRepository, name),
+): Promise<ArrayBuffer> {
+  const datFile = await getSourceFile(repository, `040000.win32.dat${location.dataFileId}`)
+  assertRange(datFile, `The selected directory is missing ${repository}/040000.win32.dat${location.dataFileId}.`)
+  const datName = `${repository}/040000.win32.dat${location.dataFileId}`
+  assertRange(location.offset + FILE_INFO_SIZE <= datFile.size, `The offset for ${gamePath} points beyond ${datName}.`)
+  const prefix = await readFileSlice(datFile, location.offset, location.offset + FILE_INFO_SIZE, datName)
+  const prefixView = new DataView(prefix)
+  const headerSize = prefixView.getUint32(0, true)
+  const type = prefixView.getUint32(4, true)
+  if (type === 3) return readModelAtLocation(source, repository, gamePath, location, getSourceFile)
+  assertRange(type === 2 || type === 4, `Unsupported SqPack file type ${type} for ${gamePath}.`)
+  assertRange(headerSize >= FILE_INFO_SIZE && headerSize <= MAX_MODEL_HEADER_SIZE, `The SqPack header for ${gamePath} is invalid.`)
+  assertRange(location.offset + headerSize <= datFile.size, `The SqPack header for ${gamePath} is truncated.`)
+  if (location.nextOffset !== undefined) {
+    assertRange(location.offset + headerSize <= location.nextOffset, `The SqPack header for ${gamePath} overlaps the next entry.`)
+  }
+  const header = await readFileSlice(datFile, location.offset, location.offset + headerSize, datName)
+  return type === 2
+    ? reconstructStandardFile(datFile, location.offset, header, datName)
+    : reconstructTextureFile(datFile, location.offset, header, datName)
+}
+
+export interface LocalAssetReader {
   read(gamePath: string): Promise<ArrayBuffer>
 }
 
 /** Creates one repository-aware reader and retains only character index tables for this worker batch. */
-export function createLocalModelReader(source: Extract<AssetSource, { kind: 'local' }>): LocalModelReader {
+export function createLocalAssetReader(source: Extract<AssetSource, { kind: 'local' }>): LocalAssetReader {
   const fileCache = new Map<string, Promise<File | undefined>>()
   const cachedSourceFile = (repository: string, name: string) => {
     const key = `${repository}/${name}`
@@ -299,7 +427,7 @@ export function createLocalModelReader(source: Extract<AssetSource, { kind: 'loc
         if (!bytes) continue
         try {
           const location = locateIndex2Entry(bytes, gamePath)
-          return await readModelAtLocation(source, repository, gamePath, location, cachedSourceFile)
+          return await readAssetAtLocation(source, repository, gamePath, location, cachedSourceFile)
         } catch (error) {
           if (error instanceof Error && error.message === `The selected install does not contain ${gamePath}.`) continue
           throw error
@@ -313,9 +441,12 @@ export function createLocalModelReader(source: Extract<AssetSource, { kind: 'loc
   }
 }
 
+/** Backwards-compatible name retained for the geometry worker. */
+export const createLocalModelReader = createLocalAssetReader
+
 export async function readLocalModelPayload(
   source: Extract<AssetSource, { kind: 'local' }>,
   gamePath: string,
 ): Promise<ArrayBuffer> {
-  return createLocalModelReader(source).read(gamePath)
+  return createLocalAssetReader(source).read(gamePath)
 }

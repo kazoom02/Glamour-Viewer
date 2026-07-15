@@ -1,0 +1,37 @@
+import type { ArmorSlot } from '../catalog/types'
+
+const ENTRY_SIZE = 6
+const SLOT_PART: Record<ArmorSlot, number> = { head: 0, body: 1, hands: 2, legs: 3, feet: 4 }
+
+export interface ImcEntry {
+  materialId: number
+  decalId: number
+  attributeAndSound: number
+  vfxId: number
+  materialAnimationId: number
+}
+
+/** Reads an equipment IMC row. Variants include row zero, matching the game's Variant id. */
+export function readImcEntry(bytes: ArrayBuffer, slot: ArmorSlot, variant: number): ImcEntry {
+  if (bytes.byteLength < 4) throw new Error('The IMC preamble is truncated.')
+  const view = new DataView(bytes)
+  const variantCount = view.getUint16(0, true)
+  const partMask = view.getUint16(2, true)
+  const part = SLOT_PART[slot]
+  if ((partMask & (1 << part)) === 0) throw new Error(`The IMC file has no ${slot} part.`)
+  if (!Number.isInteger(variant) || variant < 0 || variant > variantCount) {
+    throw new Error(`IMC variant ${variant} is outside 0-${variantCount}.`)
+  }
+  const partCount = Array.from({ length: 16 }, (_, index) => (partMask >>> index) & 1)
+    .reduce((sum, bit) => sum + bit, 0)
+  const offset = 4 + (variant * partCount + part) * ENTRY_SIZE
+  if (offset + ENTRY_SIZE > bytes.byteLength) throw new Error('The IMC variant table is truncated.')
+  return {
+    materialId: view.getUint8(offset),
+    decalId: view.getUint8(offset + 1),
+    attributeAndSound: view.getUint16(offset + 2, true),
+    vfxId: view.getUint8(offset + 4),
+    materialAnimationId: view.getUint8(offset + 5),
+  }
+}
+

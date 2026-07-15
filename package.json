@@ -19,6 +19,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@bis-toolkit/bcn": "1.0.2",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "three": "0.178.0"

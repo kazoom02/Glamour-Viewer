@@ -8,6 +8,8 @@ import {
   type CharacterPart,
   type CharacterRaceCode,
 } from '../asset-source/characterPlan'
+import { equipmentAssetPlan } from '../asset-source/equipmentPlan'
+import { loadLocalMaterials, type DecodedMaterial, type MaterialLoadRequest } from '../asset-source/materialLoader'
 import { loadLocalModels, type ModelLoadResult } from '../asset-source/modelLoader'
 import type { DecodedModel } from '../asset-source/mdl'
 import { ARMOR_SLOTS, type ArmorSlot, type EquippedArmor } from '../catalog/types'
@@ -57,9 +59,26 @@ function addFallbackMannequin(scene: THREE.Scene): THREE.Group {
   return group
 }
 
-function addDecodedModel(target: THREE.Group, model: DecodedModel, color: number, label: string): number {
+function textureFromDecoded(texture: NonNullable<DecodedMaterial['textures']['diffuse']>, color: boolean): THREE.DataTexture {
+  const result = new THREE.DataTexture(texture.rgba, texture.width, texture.height, THREE.RGBAFormat, THREE.UnsignedByteType)
+  result.colorSpace = color ? THREE.SRGBColorSpace : THREE.NoColorSpace
+  result.wrapS = THREE.RepeatWrapping
+  result.wrapT = THREE.RepeatWrapping
+  result.flipY = false
+  result.needsUpdate = true
+  return result
+}
+
+function addDecodedModel(
+  target: THREE.Group,
+  model: DecodedModel,
+  color: number,
+  label: string,
+  decodedMaterials: Record<string, DecodedMaterial> = {},
+): number {
   for (const [index, part] of model.meshes.entries()) {
     const materialPath = model.materialPaths[part.materialIndex]?.toLowerCase() ?? ''
+    const decodedMaterial = decodedMaterials[materialPath.replaceAll('\\', '/')]
     let meshColor = color
     if (/b0001_[a-z]\.mtrl$/.test(materialPath) || /_fac_[a-z]\.mtrl$/.test(materialPath)) meshColor = 0xc99378
     else if (/_iri_[a-z]\.mtrl$/.test(materialPath)) meshColor = 0x6689a7
@@ -67,18 +86,30 @@ function addDecodedModel(target: THREE.Group, model: DecodedModel, color: number
     else if (/_hir_[a-z]\.mtrl$/.test(materialPath)) meshColor = 0x352a2b
     else if (/_acc_[a-z]\.mtrl$/.test(materialPath)) meshColor = 0x8b6a45
     else if (/e0000_(top|dwn|sho|glv)_/.test(materialPath)) meshColor = 0x554b49
+    const diffuse = decodedMaterial?.textures.diffuse
+    const normal = decodedMaterial?.textures.normal
+    const mask = decodedMaterial?.textures.mask
     const material = new THREE.MeshStandardMaterial({
-      color: meshColor, roughness: 0.62, metalness: materialPath.includes('/mt_c') && materialPath.includes('e0000') ? 0 : 0.08,
+      color: diffuse ? 0xffffff : meshColor,
+      map: diffuse ? textureFromDecoded(diffuse, true) : null,
+      normalMap: normal ? textureFromDecoded(normal, false) : null,
+      roughnessMap: mask ? textureFromDecoded(mask, false) : null,
+      roughness: mask ? 1 : 0.62,
+      metalness: materialPath.includes('/mt_c') && materialPath.includes('e0000') ? 0 : 0.08,
+      alphaTest: diffuse ? 0.08 : 0,
       side: THREE.DoubleSide,
     })
+    if (normal) material.normalScale.set(1, 1)
     const geometry = new THREE.BufferGeometry()
     geometry.setAttribute('position', new THREE.BufferAttribute(part.positions, 3))
-    if (part.normals) geometry.setAttribute('normal', new THREE.BufferAttribute(part.normals, 3))
-    else geometry.computeVertexNormals()
     if (part.uvs) geometry.setAttribute('uv', new THREE.BufferAttribute(part.uvs, 2))
     if (part.skinIndices) geometry.setAttribute('skinIndex', new THREE.BufferAttribute(part.skinIndices, 4))
     if (part.skinWeights) geometry.setAttribute('skinWeight', new THREE.BufferAttribute(part.skinWeights, 4))
     geometry.setIndex(new THREE.BufferAttribute(part.indices, 1))
+    // Use stable geometric vertex normals under the decoded normal map. Some packed
+    // MDL normals need shader-specific handling and otherwise create dark triangles.
+    geometry.computeVertexNormals()
+    geometry.normalizeNormals()
     geometry.computeBoundingBox()
     geometry.computeBoundingSphere()
     const mesh = new THREE.Mesh(geometry, material)
@@ -185,7 +216,12 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
     const allCharacterPlans = characterModelPlan(raceCode)
     const selected = (Object.entries(equipped) as Array<[ArmorSlot, EquippedArmor[ArmorSlot]]>)
       .filter((entry): entry is [ArmorSlot, NonNullable<EquippedArmor[ArmorSlot]>] => Boolean(entry[1]))
-    const equipmentPlans = selected.map(([slot, item]) => ({ slot, item, candidates: equipmentModelCandidates(item, raceCode) }))
+    const equipmentPlans = selected.map(([slot, item]) => ({
+      slot,
+      item,
+      asset: equipmentAssetPlan(item, raceCode),
+      candidates: equipmentModelCandidates(item, raceCode),
+    }))
     const characterPlans = allCharacterPlans.filter((plan) => !plan.coveredBy || !equipped[plan.coveredBy])
     setError(undefined)
     setStatus(`Reading ${raceCode} character models…`)
@@ -202,10 +238,43 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
         const byPath = resultMap(await loadLocalModels(source, paths))
         if (disposed) return
 
+        const characterModels = characterPlans.flatMap((plan) => {
+          const result = byPath.get(plan.path)
+          return result?.model ? [{ plan, result: result as Required<Pick<ModelLoadResult, 'path' | 'model'>> }] : []
+        })
+        const equipmentModels = equipmentPlans.flatMap((plan) => {
+          const result = plan.candidates.map((path) => byPath.get(path)).find((candidate) => candidate?.model)
+          return result?.model ? [{ plan, result: result as Required<Pick<ModelLoadResult, 'path' | 'model'>> }] : []
+        })
+        const materialRequests: MaterialLoadRequest[] = [
+          ...characterModels.map(({ result }) => ({
+            modelPath: result.path,
+            materialPaths: result.model.materialPaths,
+          })),
+          ...equipmentModels.map(({ plan, result }) => ({
+            modelPath: result.path,
+            materialPaths: result.model.materialPaths,
+            imcPath: plan.asset.imcPath,
+            slot: plan.slot,
+            variant: plan.asset.variant,
+          })),
+        ]
+        setStatus(`Resolving ${materialRequests.length} material sets and textures…`)
+        let materialResults: Awaited<ReturnType<typeof loadLocalMaterials>> = []
+        try {
+          materialResults = await loadLocalMaterials(source, materialRequests)
+        } catch (reason) {
+          failures.push(`material worker: ${reason instanceof Error ? reason.message : String(reason)}`)
+        }
+        if (disposed) return
+        const materialsByModel = new Map(materialResults.map((result) => [result.modelPath, result]))
+
         for (const plan of characterPlans) {
           const result = byPath.get(plan.path)
           if (result?.model) {
-            addDecodedModel(characterGroup, result.model, PART_COLORS[plan.part], `character-${plan.part}`)
+            const materialResult = materialsByModel.get(result.path)
+            addDecodedModel(characterGroup, result.model, PART_COLORS[plan.part], `character-${plan.part}`, materialResult?.materials)
+            if (materialResult?.errors.length) failures.push(...materialResult.errors.map((error) => `${plan.part} ${error}`))
             characterParts += 1
           } else {
             failures.push(`${plan.part}: ${result?.error || 'model not found'}`)
@@ -214,7 +283,9 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
         for (const plan of equipmentPlans) {
           const result = plan.candidates.map((path) => byPath.get(path)).find((candidate) => candidate?.model)
           if (result?.model) {
-            addDecodedModel(characterGroup, result.model, SLOT_COLORS[plan.slot], `equipment-${plan.slot}`)
+            const materialResult = materialsByModel.get(result.path)
+            addDecodedModel(characterGroup, result.model, SLOT_COLORS[plan.slot], `equipment-${plan.slot}`, materialResult?.materials)
+            if (materialResult?.errors.length) failures.push(...materialResult.errors.map((error) => `${plan.item.name} ${error}`))
             equippedItems += 1
           } else {
             const attempted = plan.candidates.map((path) => byPath.get(path)?.error).filter(Boolean).join(' / ')
@@ -291,7 +362,12 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
         if (!(object instanceof THREE.Mesh)) return
         object.geometry.dispose()
         const materials = Array.isArray(object.material) ? object.material : [object.material]
-        materials.forEach((item) => item.dispose())
+        materials.forEach((item) => {
+          if (item instanceof THREE.MeshStandardMaterial) {
+            new Set([item.map, item.normalMap, item.roughnessMap].filter(Boolean)).forEach((texture) => texture?.dispose())
+          }
+          item.dispose()
+        })
       })
       renderer.dispose()
       renderer.domElement.remove()
@@ -310,7 +386,7 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
               <small>e{item.modelSet.toString().padStart(4, '0')} v{item.modelVariant.toString().padStart(4, '0')}</small>
             </span>
           ))}
-          <em>Material and texture variants are not rendered yet.</em>
+          <em>Local mode resolves IMC variants and applies MTRL/TEX diffuse, normal, and mask textures.</em>
         </div>
       )}
       <p className="viewer-status" aria-live="polite">{status}</p>

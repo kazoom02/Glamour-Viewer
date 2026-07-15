@@ -74,17 +74,17 @@ Do not load multi-gigabyte `.dat` archives into memory. The reader should:
 6. Read the entry header and compressed block table with `File.slice(offset, end).arrayBuffer()`.
 7. Inflate only the blocks belonging to the requested resource.
 
-`src/asset-source/sqpack.ts` implements the `index2` hash lookup and bounded `File.slice()` reads. `src/asset-source/mdl.ts` reconstructs the model sections, inflates raw-DEFLATE blocks with the browser's native `DecompressionStream`, and decodes the renderable vertex/index buffers. These run through `model.worker.ts`, keeping SqPack and MDL work off the UI thread.
+`src/asset-source/sqpack.ts` implements the `index2` hash lookup, bounded `File.slice()` reads, and reconstruction for standard, model, and streamed texture entries. `src/asset-source/mdl.ts` decodes renderable vertex/index buffers. Geometry runs through `model.worker.ts`; IMC/MTRL/TEX work runs through `material.worker.ts`, keeping binary parsing and texture decompression off the UI thread.
 
 ## Decode graph for one armor piece
 
 After extracting the relevant virtual files:
 
-1. Parse `.imc` to select the correct material/mesh variant and visible parts.
+1. Parse `.imc` to select the correct material variant.
 2. Parse the race-specific `.mdl` into positions, normals, tangents, UVs, indices, bone indices, and bone weights.
 3. Resolve every material path referenced by the model.
-4. Parse each `.mtrl` colorset and its referenced `.tex` files.
-5. Decode texture formats to `ImageBitmap` or GPU-ready buffers.
+4. Parse each `.mtrl` sampler table and its referenced `.tex` files.
+5. Decode BC1/BC3/BC5/BC7 and common uncompressed TEX surfaces to RGBA buffers.
 6. Load the base character skeleton and bind equipment skinning weights to it.
 7. Apply EQP/EQDP visibility and deformation rules so covered body pieces are hidden correctly.
 8. Construct `THREE.BufferGeometry`, materials, textures, and skinned meshes in memory.
@@ -100,9 +100,9 @@ Ironworks is the best reference for the binary structures because it already cov
 
 Keep filesystem traversal and range reads in TypeScript because the File System Access API is asynchronous. Pass the small extracted buffers—not directory handles or whole archives—into WASM.
 
-The current milestone assembles real `e0000` torso/hands/legs/feet models with face and hair models, then replaces covered slots with selected armor. It renders complete standalone `c0101`, `c0201`, and `c0901` bodies in their shared bind pose. MDL material paths, bone names, bone palettes, blend indices, and normalized weights are decoded and transferred from the worker.
+The current milestone assembles real `e0000` torso/hands/legs/feet models with face and hair models, then replaces covered slots with selected armor. It renders complete standalone `c0101`, `c0201`, and `c0901` bodies in their shared bind pose. MDL material references feed an IMC/MTRL/TEX pipeline that applies diffuse, normal, and mask/roughness textures. Decoded texture surfaces are cached in worker memory and IndexedDB with a schema/source/path key.
 
-The next layers are SKLB/Havok reference-pose and animation decoding, MTRL/TEX textures, IMC part masks, PBD/EQDP deformation for races that reuse Midlander geometry, detailed equipment body-hiding metadata, and dyes.
+The next layers are SKLB/Havok reference-pose and animation decoding, MTRL color-set/dye shader parity, IMC part masks, PBD/EQDP deformation for races that reuse Midlander geometry, and detailed equipment body-hiding metadata.
 
 ## Vercel behavior
 
