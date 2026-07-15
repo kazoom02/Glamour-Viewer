@@ -13,9 +13,11 @@ import {
 } from './lib/share'
 import type { ArmorItem, EquippedArmor } from './catalog/types'
 import { CHARACTER_PRESETS, type CharacterRaceCode } from './asset-source/characterPlan'
+import { customizationForRaceCode, type CharacterCustomization } from './customization/types'
 
 const ViewerCanvas = lazy(() => import('./viewer/ViewerCanvas'))
 const ArmorCatalog = lazy(() => import('./components/ArmorCatalog'))
+const CustomizationPanel = lazy(() => import('./components/CustomizationPanel'))
 
 export function App() {
   const [source, setSource] = useState<AssetSource>()
@@ -26,6 +28,12 @@ export function App() {
   const [shareError, setShareError] = useState<string>()
   const [equipped, setEquipped] = useState<EquippedArmor>(() => sharedSet ? equippedFromSharedSet(sharedSet) : {})
   const [raceCode, setRaceCode] = useState<CharacterRaceCode>(() => sharedSet?.raceCode ?? 'c0201')
+  const [customization, setCustomization] = useState<CharacterCustomization>(() => customizationForRaceCode(sharedSet?.raceCode ?? 'c0201'))
+  const [workspaceTab, setWorkspaceTab] = useState<'dressing' | 'customization'>('dressing')
+
+  useEffect(() => {
+    setCustomization((current) => customizationForRaceCode(raceCode, current))
+  }, [raceCode])
 
   useEffect(() => {
     const onHashChange = () => {
@@ -52,7 +60,7 @@ export function App() {
 
   async function shareCurrentLook() {
     if (!Object.values(equipped).some(Boolean)) {
-      setShareError('Equip at least one armor piece before creating a share link.')
+      setShareError('Equip at least one item before creating a share link.')
       return
     }
     const set = createSharedSet(raceCode, equipped)
@@ -176,24 +184,30 @@ export function App() {
         )}
 
         {source && (
-          <section className="viewer-workspace" aria-label="Character preview and armor catalog">
+          <section className="viewer-workspace" aria-label="Character preview, dressing room, and customization">
             <div className="workspace-preview">
               <div className="hero-visual">
                 <Suspense fallback={<div className="viewer-loading">Loading renderer…</div>}>
-                  <ViewerCanvas source={source} equipped={equipped} raceCode={raceCode} />
+                  <ViewerCanvas source={source} equipped={equipped} raceCode={raceCode} customization={customization} />
                 </Suspense>
               </div>
             </div>
             <div className="workspace-catalog">
-              <Suspense fallback={<div className="catalog-loading">Loading armor catalog…</div>}>
-                <ArmorCatalog
-                  source={source}
-                  equipped={equipped}
-                  raceCode={raceCode}
-                  onRaceChange={setRaceCode}
-                  onEquip={equip}
-                  onRemove={unequip}
-                />
+              <nav className="workspace-tabs" aria-label="Dressing room sections">
+                <button className={workspaceTab === 'dressing' ? 'active' : ''} type="button" onClick={() => setWorkspaceTab('dressing')}>Dressing Room</button>
+                <button className={workspaceTab === 'customization' ? 'active' : ''} type="button" onClick={() => setWorkspaceTab('customization')}>Customization</button>
+              </nav>
+              <Suspense fallback={<div className="catalog-loading">Loading workspace…</div>}>
+                {workspaceTab === 'dressing' ? (
+                  <ArmorCatalog source={source} equipped={equipped} onEquip={equip} onRemove={unequip} />
+                ) : (
+                  <CustomizationPanel
+                    raceCode={raceCode}
+                    customization={customization}
+                    onChange={setCustomization}
+                    onRaceChange={setRaceCode}
+                  />
+                )}
               </Suspense>
             </div>
           </section>

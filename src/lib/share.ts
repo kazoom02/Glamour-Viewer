@@ -1,5 +1,5 @@
 import { CHARACTER_PRESETS, type CharacterRaceCode } from '../asset-source/characterPlan'
-import { ARMOR_SLOTS, type ArmorItem, type ArmorSlot, type EquippedArmor } from '../catalog/types'
+import { ARMOR_SLOTS, type ArmorItem, type EquipmentSlot, type EquippedArmor } from '../catalog/types'
 
 export interface SharedSet {
   version: 1
@@ -47,8 +47,9 @@ function decodeSharedItem(value: unknown): ArmorItem | null {
     iconPath: typeof candidate.iconPath === 'string' ? candidate.iconPath.slice(0, 500) : undefined,
     modelValue: candidate.modelValue!,
     modelSet: candidate.modelSet!,
+    modelBase: integer(candidate.modelBase) ?? 0,
     modelVariant: candidate.modelVariant!,
-    slot: candidate.slot as ArmorSlot,
+    slot: candidate.slot as EquipmentSlot,
     dyeCount: integer(candidate.dyeCount) ?? 0,
     equipLevel: integer(candidate.equipLevel) ?? 0,
     jobs: typeof candidate.jobs === 'string' ? candidate.jobs.slice(0, 500) : 'All classes',

@@ -41,25 +41,25 @@ export function attachSkeleton(
   return { bones }
 }
 
-interface HavokMember {
+export interface HavokMember {
   name: string
   type: number
   className?: string
 }
 
-interface HavokType {
+export interface HavokType {
   name: string
   parent?: HavokType
   ownMembers: HavokMember[]
 }
 
-interface HavokObject {
+export interface HavokObject {
   type: HavokType
   values: Map<number, HavokValue>
 }
 
-interface ObjectReference { reference: number }
-type HavokValue = number | string | number[] | HavokValue[] | HavokObject | ObjectReference
+export interface ObjectReference { reference: number }
+export type HavokValue = number | string | number[] | HavokValue[] | HavokObject | ObjectReference
 
 const BASE_MASK = 0x0f
 const ARRAY = 0x10
@@ -305,7 +305,7 @@ class TagfileReader {
   }
 }
 
-function objectValue(object: HavokObject, name: string): HavokValue {
+export function havokObjectValue(object: HavokObject, name: string): HavokValue {
   const members = (type: HavokType): HavokMember[] => [...(type.parent ? members(type.parent) : []), ...type.ownMembers]
   const index = members(object.type).findIndex((member) => member.name === name)
   const value = object.values.get(index)
@@ -313,7 +313,7 @@ function objectValue(object: HavokObject, name: string): HavokValue {
   return value
 }
 
-function valueArray(value: HavokValue, label: string): HavokValue[] {
+export function havokValueArray(value: HavokValue, label: string): HavokValue[] {
   assertSklb(Array.isArray(value), `The Havok ${label} value is not an array.`)
   return value
 }
@@ -328,16 +328,16 @@ export function decodeSklb(bytes: ArrayBuffer): DecodedSkeleton {
   assertSklb(oldHeader || version === 0x31333030 || version === 0x31333031, `Unsupported SKLB version 0x${version.toString(16)}.`)
   const havokOffset = oldHeader ? view.getUint16(10, true) : view.getUint32(12, true)
   assertSklb(havokOffset >= 12 && havokOffset + 8 <= bytes.byteLength, 'The SKLB Havok offset is invalid.')
-  const objects = new TagfileReader(new Uint8Array(bytes, havokOffset)).read()
+  const objects = decodeHavokTagfile(new Uint8Array(bytes, havokOffset))
   const skeleton = objects.find((object) => object.type.name === 'hkaSkeleton')
   assertSklb(skeleton, 'The SKLB contains no hkaSkeleton object.')
-  const boneValues = valueArray(objectValue(skeleton, 'bones'), 'bones')
-  const parents = valueArray(objectValue(skeleton, 'parentIndices'), 'parentIndices')
-  const poses = valueArray(objectValue(skeleton, 'referencePose'), 'referencePose')
+  const boneValues = havokValueArray(havokObjectValue(skeleton, 'bones'), 'bones')
+  const parents = havokValueArray(havokObjectValue(skeleton, 'parentIndices'), 'parentIndices')
+  const poses = havokValueArray(havokObjectValue(skeleton, 'referencePose'), 'referencePose')
   assertSklb(boneValues.length > 0 && parents.length >= boneValues.length && poses.length >= boneValues.length, 'The SKLB skeleton arrays have inconsistent lengths.')
   const bones = boneValues.map((value, index): DecodedSkeletonBone => {
     assertSklb(typeof value === 'object' && !Array.isArray(value) && value !== null && 'type' in value, 'An SKLB bone is malformed.')
-    const name = objectValue(value as HavokObject, 'name')
+    const name = havokObjectValue(value as HavokObject, 'name')
     const pose = poses[index]
     assertSklb(typeof name === 'string' && Array.isArray(pose) && pose.length >= 12, 'An SKLB bone pose is malformed.')
     return {
@@ -349,4 +349,9 @@ export function decodeSklb(bytes: ArrayBuffer): DecodedSkeleton {
     }
   })
   return { bones }
+}
+
+/** Reads the Havok binary tagfile shared by SKLB skeletons and PAP animations. */
+export function decodeHavokTagfile(bytes: Uint8Array): HavokObject[] {
+  return new TagfileReader(bytes).read()
 }

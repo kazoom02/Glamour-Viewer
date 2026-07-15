@@ -33,4 +33,15 @@ describe('IMC parser', () => {
     bytes[4 + 6] = 9
     expect(readImcEntry(bytes.buffer, 'feet', 0).materialId).toBe(9)
   })
+
+  it('maps both accessory ring sides to their distinct IMC parts', () => {
+    const bytes = new Uint8Array(4 + 5 * 6)
+    const view = new DataView(bytes.buffer)
+    view.setUint16(0, 0, true)
+    view.setUint16(2, 0b1_1111, true)
+    bytes[4 + 3 * 6] = 8
+    bytes[4 + 4 * 6] = 9
+    expect(readImcEntry(bytes.buffer, 'rightRing', 0).materialId).toBe(8)
+    expect(readImcEntry(bytes.buffer, 'leftRing', 0).materialId).toBe(9)
+  })
 })

@@ -1,4 +1,4 @@
-import type { ArmorSlot } from '../catalog/types'
+import type { EquipmentSlot } from '../catalog/types'
 import type { DecodedTexture } from './tex'
 import type { MaterialAlphaMode } from './materialBake'
 
@@ -6,7 +6,7 @@ export interface MaterialLoadRequest {
   modelPath: string
   materialPaths: string[]
   imcPath?: string
-  slot?: ArmorSlot
+  slot?: EquipmentSlot
   variant?: number
 }
 

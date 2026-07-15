@@ -36,4 +36,19 @@ describe('MDL material path resolution', () => {
       'chara/human/c0201/obj/hair/h0001/material/v0001/mt_c0201h0001_hir_a.mtrl',
     )
   })
+
+  it('uses IMC variants for accessory and weapon materials', () => {
+    expect(materialCandidates({
+      modelPath: 'chara/accessory/a0001/model/c0201a0001_ear.mdl',
+      materialPaths: [],
+    }, '/mt_c0201a0001_ear_a.mtrl', 2)[0]).toBe(
+      'chara/accessory/a0001/material/v0002/mt_c0201a0001_ear_a.mtrl',
+    )
+    expect(materialCandidates({
+      modelPath: 'chara/weapon/w2901/obj/body/b0001/model/w2901b0001.mdl',
+      materialPaths: [],
+    }, '/mt_w2901b0001_a.mtrl', 3)[0]).toBe(
+      'chara/weapon/w2901/obj/body/b0001/material/v0003/mt_w2901b0001_a.mtrl',
+    )
+  })
 })

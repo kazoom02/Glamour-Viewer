@@ -26,6 +26,8 @@ export function materialCandidates(request: MaterialLoadRequest, reference: stri
     const lowerKind = kind!.toLowerCase()
     if (lowerKind === 'e') {
       candidates.push(`chara/equipment/e${id}/material/${variantDirectory(materialId)}/${filename}`)
+    } else if (lowerKind === 'a') {
+      candidates.push(`chara/accessory/a${id}/material/${variantDirectory(materialId)}/${filename}`)
     } else if (CHARACTER_OBJECTS[lowerKind]) {
       const root = `chara/human/c${race}/obj/${CHARACTER_OBJECTS[lowerKind]}/${lowerKind}${id}/material`
       candidates.push(`${root}/v0001/${filename}`, `${root}/${filename}`)
@@ -37,7 +39,7 @@ export function materialCandidates(request: MaterialLoadRequest, reference: stri
   if (/^chara\/equipment\/e\d{4}$/i.test(modelRoot)) {
     candidates.push(`${modelRoot}/material/${variantDirectory(materialId)}/${filename}`)
   } else {
-    candidates.push(`${modelRoot}/material/v0001/${filename}`, `${modelRoot}/material/${filename}`)
+    candidates.push(`${modelRoot}/material/${variantDirectory(materialId)}/${filename}`, `${modelRoot}/material/v0001/${filename}`, `${modelRoot}/material/${filename}`)
   }
   return [...new Set(candidates)]
 }

@@ -1,4 +1,4 @@
-import type { ArmorItem } from '../catalog/types'
+import { isWeaponSlot, type ArmorItem } from '../catalog/types'
 import { equipmentAssetPlan } from './equipmentPlan'
 
 export const CHARACTER_PRESETS = [
@@ -67,7 +67,10 @@ function modelPath(raceCode: CharacterRaceCode, category: string, prefix: string
   return `chara/human/${raceCode}/obj/${category}/${prefix}${id}/model/${raceCode}${prefix}${id}_${suffix}.mdl`
 }
 
-export function characterModelPlan(raceCode: CharacterRaceCode): CharacterModelPlan[] {
+export function characterModelPlan(
+  raceCode: CharacterRaceCode,
+  options: { faceId?: number; hairId?: number } = {},
+): CharacterModelPlan[] {
   const basePart = (
     part: 'torso' | 'hands' | 'legs' | 'feet',
     coveredBy: 'body' | 'hands' | 'legs' | 'feet',
@@ -77,14 +80,17 @@ export function characterModelPlan(raceCode: CharacterRaceCode): CharacterModelP
       .map((candidate) => `chara/equipment/e0000/model/${candidate}e0000_${suffix}.mdl`)
     return { part, coveredBy, path: paths[0]!, fallbackPaths: paths.slice(1) }
   }
-  const facePaths = ['0001', '0101'].map((id) => modelPath(raceCode, 'face', 'f', 'fac', id))
+  const faceId = Math.max(1, options.faceId ?? 1).toString().padStart(4, '0')
+  const hairId = Math.max(1, options.hairId ?? 1).toString().padStart(4, '0')
+  const facePaths = [...new Set([faceId, '0001', '0101'])].map((id) => modelPath(raceCode, 'face', 'f', 'fac', id))
+  const hairPaths = [...new Set([hairId, '0001'])].map((id) => modelPath(raceCode, 'hair', 'h', 'hir', id))
   const result: CharacterModelPlan[] = [
     basePart('torso', 'body', 'top'),
     basePart('hands', 'hands', 'glv'),
     basePart('legs', 'legs', 'dwn'),
     basePart('feet', 'feet', 'sho'),
     { part: 'face', path: facePaths[0]!, fallbackPaths: facePaths.slice(1) },
-    { part: 'hair', path: modelPath(raceCode, 'hair', 'h', 'hir') },
+    { part: 'hair', path: hairPaths[0]!, fallbackPaths: hairPaths.slice(1) },
   ]
   if (TAIL_RACES.has(raceCode)) result.push({ part: 'tail', path: modelPath(raceCode, 'tail', 't', 'til'), optional: true })
   if (EAR_RACES.has(raceCode)) result.push({ part: 'ears', path: modelPath(raceCode, 'zear', 'z', 'zer'), optional: true })
@@ -97,6 +103,13 @@ export function characterModelCandidates(plan: CharacterModelPlan): string[] {
 
 export function skeletonPath(raceCode: CharacterRaceCode): string {
   return `chara/human/${raceCode}/skeleton/base/b0001/skl_${raceCode}b0001.sklb`
+}
+
+/** Race-authored standing idle loops, followed by compatible skeleton fallbacks. */
+export function idleAnimationCandidates(raceCode: CharacterRaceCode): string[] {
+  return [raceCode, ...EQUIPMENT_FALLBACKS[raceCode]].map((candidate) => (
+    `chara/human/${candidate}/animation/a0001/bt_common/resident/idle.pap`
+  ))
 }
 
 /** The common face skeleton remains the first candidate for backwards compatibility. */
@@ -139,6 +152,7 @@ export function auxiliarySkeletonPlan(raceCode: CharacterRaceCode): AuxiliarySke
 }
 
 export function equipmentModelCandidates(item: ArmorItem, raceCode: CharacterRaceCode): string[] {
+  if (isWeaponSlot(item.slot)) return [equipmentAssetPlan(item, raceCode).modelPath]
   // Older/shared sets can omit a race-specific model. Try a compatible body
   // family before the canonical male Midlander geometry.
   return [...new Set([raceCode, ...EQUIPMENT_FALLBACKS[raceCode]])]

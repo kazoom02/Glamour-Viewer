@@ -9,10 +9,12 @@ import {
   equipmentModelCandidates,
   faceSkeletonCandidates,
   hairSkeletonPath,
+  idleAnimationCandidates,
   skeletonPath,
   type CharacterPart,
   type CharacterRaceCode,
 } from '../asset-source/characterPlan'
+import { loadLocalIdleAnimation, type DecodedAnimation } from '../asset-source/animationLoader'
 import { equipmentAssetPlan } from '../asset-source/equipmentPlan'
 import { loadLocalMaterials, type DecodedMaterial, type MaterialLoadRequest } from '../asset-source/materialLoader'
 import { loadLocalModels, type ModelLoadResult } from '../asset-source/modelLoader'
@@ -23,16 +25,34 @@ import {
   type DecodedSkeleton,
 } from '../asset-source/skeletonLoader'
 import { attachSkeleton } from '../asset-source/sklb'
-import { ARMOR_SLOTS, type ArmorSlot, type EquippedArmor } from '../catalog/types'
+import {
+  EQUIPMENT_SLOTS,
+  isWeaponSlot,
+  type EquipmentSlot,
+  type EquippedArmor,
+} from '../catalog/types'
+import type { CharacterCustomization } from '../customization/types'
 
 interface ViewerCanvasProps {
   source: AssetSource
   equipped: EquippedArmor
   raceCode: CharacterRaceCode
+  customization: CharacterCustomization
 }
 
-const SLOT_COLORS: Record<ArmorSlot, number> = {
-  head: 0xd5b36f, body: 0xa6804f, hands: 0x8f7557, legs: 0x7a6651, feet: 0x63584b,
+const SLOT_COLORS: Record<EquipmentSlot, number> = {
+  mainHand: 0x9f895e,
+  offHand: 0x8e8065,
+  head: 0xd5b36f,
+  body: 0xa6804f,
+  hands: 0x8f7557,
+  legs: 0x7a6651,
+  feet: 0x63584b,
+  ears: 0xc7aa73,
+  neck: 0xb99b67,
+  wrists: 0xa88c60,
+  rightRing: 0xd2b77c,
+  leftRing: 0xd2b77c,
 }
 
 const PART_COLORS: Record<CharacterPart, number> = {
@@ -113,6 +133,8 @@ interface CharacterRig {
   boneIndex: Map<string, number>
 }
 
+type IdleAnimationState = 'loading' | 'ready' | 'playing' | 'paused' | 'unavailable'
+
 function addCharacterRig(target: THREE.Group, decoded: DecodedSkeleton): CharacterRig {
   const bones = decoded.bones.map((source) => {
     const bone = new THREE.Bone()
@@ -134,16 +156,36 @@ function addCharacterRig(target: THREE.Group, decoded: DecodedSkeleton): Charact
   return { skeleton, boneIndex: new Map(bones.map((bone, index) => [bone.name, index])) }
 }
 
+function animationClipFromDecoded(animation: DecodedAnimation, skeleton: THREE.Skeleton): THREE.AnimationClip {
+  const tracks: THREE.KeyframeTrack[] = []
+  for (const track of animation.tracks) {
+    const bone = skeleton.bones[track.boneIndex]
+    if (!bone) continue
+    tracks.push(
+      new THREE.VectorKeyframeTrack(`${bone.name}.position`, animation.times, track.translations),
+      new THREE.QuaternionKeyframeTrack(`${bone.name}.quaternion`, animation.times, track.rotations),
+      new THREE.VectorKeyframeTrack(`${bone.name}.scale`, animation.times, track.scales),
+    )
+  }
+  if (!tracks.length) throw new Error('The idle animation has no tracks matching the selected character skeleton.')
+  return new THREE.AnimationClip(animation.name || 'Idle', animation.duration, tracks)
+}
+
+function colorNumber(value: string, fallback = 0xffffff): number {
+  return /^#[0-9a-f]{6}$/i.test(value) ? Number.parseInt(value.slice(1), 16) : fallback
+}
+
 function addDecodedModel(
-  target: THREE.Group,
+  target: THREE.Object3D,
   model: DecodedModel,
   color: number,
   label: string,
   decodedMaterials: Record<string, DecodedMaterial> = {},
   attributeMask?: number,
-  slot?: ArmorSlot,
+  slot?: EquipmentSlot,
   rig?: CharacterRig,
   anisotropy = 1,
+  customization?: CharacterCustomization,
 ): number {
   for (const [index, part] of model.meshes.entries()) {
     if (slot && attributeMask !== undefined && !isVisibleEquipmentPart(part.attributes, slot, attributeMask)) continue
@@ -175,6 +217,16 @@ function addDecodedModel(
     const alphaMode = decodedMaterial?.alphaMode ?? 'opaque'
     const isIris = decodedMaterial?.shaderPackage.toLowerCase() === 'iris.shpk' || /_iri_[a-z]\.mtrl$/.test(materialPath)
     const isFaceMaterial = /mt_c\d{4}f\d{4}/.test(materialPath)
+    let materialTint = 0xffffff
+    if (customization) {
+      if (isIris) materialTint = colorNumber(customization.eyeColor)
+      else if (/_hir_[a-z]\.mtrl$/.test(materialPath) || shaderPackage === 'hair.shpk') materialTint = colorNumber(customization.hairColor)
+      else if (shaderPackage.includes('tattoo') || /_etc_[a-z]\.mtrl$/.test(materialPath)) {
+        materialTint = colorNumber(customization.facePaint ? customization.facePaintColor : customization.tattooColor)
+      } else if (shaderPackage === 'skin.shpk' || /b0001_[a-z]\.mtrl$/.test(materialPath) || isFaceMaterial) {
+        materialTint = colorNumber(customization.skinColor)
+      }
+    }
     const fallbackRoughness = shaderPackage === 'skin.shpk'
       ? 0.76
       : shaderPackage === 'hair.shpk'
@@ -205,7 +257,7 @@ function addDecodedModel(
         ? textureFromChannel(mask, 0, 'alpha', anisotropy)
         : null
     const material = new THREE.MeshPhysicalMaterial({
-      color: diffuse ? 0xffffff : meshColor,
+      color: diffuse ? materialTint : meshColor,
       map: diffuse ? textureFromDecoded(diffuse, true, anisotropy) : null,
       normalMap: normal ? textureFromDecoded(normal, false, anisotropy) : null,
       aoMap,
@@ -270,18 +322,36 @@ function addDecodedModel(
   return model.meshes.length
 }
 
-const ATTRIBUTE_PREFIX: Record<ArmorSlot, string> = {
-  head: 'atr_mv_', body: 'atr_tv_', hands: 'atr_gv_', legs: 'atr_dv_', feet: 'atr_sv_',
+const ATTRIBUTE_PREFIX: Partial<Record<EquipmentSlot, string>> = {
+  head: 'atr_mv_',
+  body: 'atr_tv_',
+  hands: 'atr_gv_',
+  legs: 'atr_dv_',
+  feet: 'atr_sv_',
+  ears: 'atr_ev_',
+  neck: 'atr_nv_',
+  wrists: 'atr_wv_',
+  rightRing: 'atr_rv_',
+  leftRing: 'atr_rv_',
 }
 
-function isVisibleEquipmentPart(attributes: string[] | undefined, slot: ArmorSlot, mask: number): boolean {
+function isVisibleEquipmentPart(attributes: string[] | undefined, slot: EquipmentSlot, mask: number): boolean {
   const prefix = ATTRIBUTE_PREFIX[slot]
+  if (!prefix) return true
   const variants = attributes?.filter((attribute) => attribute.toLowerCase().startsWith(prefix)) ?? []
   if (!variants.length) return true
   return variants.some((attribute) => {
     const index = attribute.toLowerCase().charCodeAt(prefix.length) - 97
     return index >= 0 && index < 10 && (mask & (1 << index)) !== 0
   })
+}
+
+function equipmentTarget(character: THREE.Group, rig: CharacterRig | undefined, slot: EquipmentSlot): THREE.Object3D {
+  if (!rig || !isWeaponSlot(slot)) return character
+  const names = slot === 'mainHand'
+    ? ['j_buki_r', 'n_buki_r', 'j_te_r', 'j_hand_r']
+    : ['j_buki_l', 'n_buki_l', 'j_te_l', 'j_hand_l']
+  return names.map((name) => rig.skeleton.bones.find((bone) => bone.name === name)).find(Boolean) ?? character
 }
 
 function fitCamera(camera: THREE.PerspectiveCamera, controls: OrbitControls, object: THREE.Object3D) {
@@ -384,12 +454,32 @@ async function diagnosticReport(source: AssetSource, failures: string[], diagnos
   ].join('\n')
 }
 
-export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanvasProps) {
+export default function ViewerCanvas({ source, equipped, raceCode, customization }: ViewerCanvasProps) {
   const container = useRef<HTMLDivElement>(null)
-  const previewItems = ARMOR_SLOTS.flatMap((slot) => equipped[slot] ? [[slot, equipped[slot]!] as const] : [])
+  const idleAction = useRef<THREE.AnimationAction | null>(null)
+  const idleMixer = useRef<THREE.AnimationMixer | null>(null)
+  const previewItems = EQUIPMENT_SLOTS.flatMap((slot) => equipped[slot] ? [[slot, equipped[slot]!] as const] : [])
   const [status, setStatus] = useState('Loading character…')
   const [error, setError] = useState<string>()
   const [debug, setDebug] = useState<string>()
+  const [idleState, setIdleState] = useState<IdleAnimationState>(source.kind === 'local' ? 'loading' : 'unavailable')
+  const [idleLabel, setIdleLabel] = useState('Idle')
+
+  const startIdle = () => {
+    const action = idleAction.current
+    if (!action) return
+    if (idleState === 'ready') action.reset()
+    action.paused = false
+    action.play()
+    setIdleState('playing')
+  }
+
+  const pauseIdle = () => {
+    const action = idleAction.current
+    if (!action) return
+    action.paused = true
+    setIdleState('paused')
+  }
 
   useEffect(() => {
     const host = container.current
@@ -416,6 +506,11 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
     const characterGroup = new THREE.Group()
     characterGroup.name = `${raceCode}-character`
     scene.add(characterGroup)
+    let activeIdleMixer: THREE.AnimationMixer | undefined
+    idleAction.current = null
+    idleMixer.current = null
+    setIdleLabel('Idle')
+    setIdleState(source.kind === 'local' ? 'loading' : 'unavailable')
 
     scene.add(new THREE.HemisphereLight(0xffffff, 0x20242c, 1.35))
     const key = new THREE.DirectionalLight(0xffffff, 2.4)
@@ -425,9 +520,9 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
     rim.position.set(-4, 2, -3)
     scene.add(rim)
 
-    const allCharacterPlans = characterModelPlan(raceCode)
-    const selected = (Object.entries(equipped) as Array<[ArmorSlot, EquippedArmor[ArmorSlot]]>)
-      .filter((entry): entry is [ArmorSlot, NonNullable<EquippedArmor[ArmorSlot]>] => Boolean(entry[1]))
+    const allCharacterPlans = characterModelPlan(raceCode, { faceId: customization.face, hairId: customization.hairstyle })
+    const selected = (Object.entries(equipped) as Array<[EquipmentSlot, EquippedArmor[EquipmentSlot]]>)
+      .filter((entry): entry is [EquipmentSlot, NonNullable<EquippedArmor[EquipmentSlot]>] => Boolean(entry[1]))
     const equipmentPlans = selected.map(([slot, item]) => ({
       slot,
       item,
@@ -446,6 +541,8 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
       let equippedItems = 0
       let rig: CharacterRig | undefined
       let decodedSkeleton: DecodedSkeleton | undefined
+      let idleAnimationPromise: Promise<DecodedAnimation> | undefined
+      let idleReady = false
       if (source.kind === 'local') {
         try {
           setStatus(`Reading ${raceCode} base, face, and hair skeletons…`)
@@ -467,7 +564,7 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
           if (!faceSkeletonLoaded && faceSkeletonErrors.length) {
             failures.push(`face skeleton: ${faceSkeletonErrors.join(' / ')}`)
           }
-          const optionalHairSkeletonPath = hairSkeletonPath(raceCode)
+          const optionalHairSkeletonPath = hairSkeletonPath(raceCode, customization.hairstyle)
           try {
             const hairSkeleton = await loadLocalSkeleton(source, optionalHairSkeletonPath)
             combinedSkeleton = attachSkeleton(combinedSkeleton, hairSkeleton, 'j_kao')
@@ -488,8 +585,10 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
           }
           decodedSkeleton = combinedSkeleton
           rig = addCharacterRig(characterGroup, combinedSkeleton)
+          idleAnimationPromise = loadLocalIdleAnimation(source, idleAnimationCandidates(raceCode))
         } catch (reason) {
           failures.push(`base skeleton: ${reason instanceof Error ? reason.message : String(reason)}`)
+          setIdleState('unavailable')
         }
         const paths = [...new Set([
           ...characterPlans.flatMap(characterModelCandidates),
@@ -548,6 +647,7 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
               undefined,
               rig,
               maxAnisotropy,
+              customization,
             )
             if (result.warning) failures.push(`${plan.part}: ${result.warning}`)
             if (materialResult?.errors.length) failures.push(...materialResult.errors.map((error) => `${plan.part} ${error}`))
@@ -562,15 +662,16 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
           const result = plan.candidates.map((path) => byPath.get(path)).find((candidate) => candidate?.model)
           if (result?.model) {
             const materialResult = materialsByModel.get(result.path)
+            const weapon = isWeaponSlot(plan.slot)
             addDecodedModel(
-              characterGroup,
+              equipmentTarget(characterGroup, rig, plan.slot),
               result.model,
               SLOT_COLORS[plan.slot],
               `equipment-${plan.slot}`,
               materialResult?.materials,
               materialResult?.attributeMask,
               plan.slot,
-              rig,
+              weapon ? undefined : rig,
               maxAnisotropy,
             )
             if (result.warning) failures.push(`${plan.item.name}: ${result.warning}`)
@@ -580,6 +681,30 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
           } else {
             const attempted = plan.candidates.map((path) => byPath.get(path)?.error).filter(Boolean).join(' / ')
             failures.push(`${plan.item.name}: ${attempted || 'model not found'}`)
+          }
+        }
+        if (idleAnimationPromise && rig) {
+          try {
+            setStatus(`Preparing ${raceCode} idle animation…`)
+            const decodedAnimation = await idleAnimationPromise
+            if (disposed) return
+            const clip = animationClipFromDecoded(decodedAnimation, rig.skeleton)
+            activeIdleMixer = new THREE.AnimationMixer(characterGroup)
+            const action = activeIdleMixer.clipAction(clip)
+            action.setLoop(THREE.LoopRepeat, Infinity)
+            action.clampWhenFinished = false
+            idleMixer.current = activeIdleMixer
+            idleAction.current = action
+            idleReady = true
+            setIdleLabel(decodedAnimation.name || 'Idle')
+            setIdleState('ready')
+            diagnostics.push(
+              `idle animation: ${decodedAnimation.path} name=${decodedAnimation.name} duration=${decodedAnimation.duration.toFixed(3)}s frames=${decodedAnimation.times.length} tracks=${decodedAnimation.tracks.length}`,
+            )
+          } catch (reason) {
+            const detail = reason instanceof Error ? reason.message : String(reason)
+            failures.push(`idle animation: ${detail}`)
+            setIdleState('unavailable')
           }
         }
       } else {
@@ -620,7 +745,7 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
       fallback.visible = characterParts === 0
       if (characterParts || equippedItems) fitCamera(camera, controls, characterGroup)
       setStatus(characterParts
-        ? `${raceCode} ${rig ? 'skinned' : 'bind-pose'} character · ${equippedItems}/${selected.length} equipped · drag to rotate`
+        ? `${raceCode} ${rig ? 'skinned' : 'bind-pose'} character · ${equippedItems}/${selected.length} equipped${source.kind === 'local' ? ` · idle ${idleReady ? 'ready' : 'unavailable'}` : ''} · drag to rotate`
         : 'Character models could not be decoded')
       if (source.kind === 'local') {
         const report = await diagnosticReport(source, failures, diagnostics)
@@ -648,7 +773,9 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
     const observer = new ResizeObserver(resize)
     observer.observe(host)
     resize()
+    const clock = new THREE.Clock()
     const render = () => {
+      activeIdleMixer?.update(Math.min(clock.getDelta(), 0.1))
       controls.update()
       renderer.render(scene, camera)
       frame = requestAnimationFrame(render)
@@ -660,6 +787,11 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
       cancelAnimationFrame(frame)
       observer.disconnect()
       controls.dispose()
+      activeIdleMixer?.stopAllAction()
+      if (idleMixer.current === activeIdleMixer) {
+        idleMixer.current = null
+        idleAction.current = null
+      }
       scene.traverse((object) => {
         if (!(object instanceof THREE.Mesh)) return
         object.geometry.dispose()
@@ -677,7 +809,19 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
       renderer.dispose()
       renderer.domElement.remove()
     }
-  }, [source, equipped, raceCode])
+  }, [
+    source,
+    equipped,
+    raceCode,
+    customization.face,
+    customization.hairstyle,
+    customization.skinColor,
+    customization.hairColor,
+    customization.eyeColor,
+    customization.tattooColor,
+    customization.facePaint,
+    customization.facePaintColor,
+  ])
 
   return (
     <div className="viewer-canvas-wrap">
@@ -692,13 +836,35 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
             {previewItems.map(([slot, item]) => (
               <span key={slot}>
                 {slot}: {item.name}
-                <small>e{item.modelSet.toString().padStart(4, '0')} v{item.modelVariant.toString().padStart(4, '0')}</small>
+                <small>{equipmentAssetPlan(item, raceCode).objectType} {item.modelSet.toString().padStart(4, '0')} v{item.modelVariant.toString().padStart(4, '0')}</small>
               </span>
             ))}
             <em>Local mode resolves IMC parts, SKLB skinning, MTRL color tables, and TEX/PBR textures.</em>
           </div>
         </details>
       )}
+      <div className={`viewer-animation-controls ${idleState}`} aria-label="Idle animation controls">
+        <span className="viewer-animation-label" title={idleLabel}>
+          <i aria-hidden="true" />
+          {idleState === 'loading' ? 'Loading idle…' : idleState === 'unavailable' ? 'Idle unavailable' : idleLabel}
+        </span>
+        <button
+          type="button"
+          onClick={startIdle}
+          disabled={!idleAction.current || idleState === 'loading' || idleState === 'playing' || idleState === 'unavailable'}
+          title={source.kind === 'local' ? 'Start or resume the character idle animation' : 'Idle animation requires Local install mode'}
+        >
+          Start
+        </button>
+        <button
+          type="button"
+          onClick={pauseIdle}
+          disabled={!idleAction.current || idleState !== 'playing'}
+          title="Pause the character idle animation"
+        >
+          Pause
+        </button>
+      </div>
       <p className="viewer-status" aria-live="polite">{status}</p>
       {error && (
         <details className="viewer-error">

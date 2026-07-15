@@ -1,17 +1,25 @@
-import type { ArmorItem, ArmorSearchPage, ArmorSlot } from './types'
+import { isWeaponSlot, type ArmorItem, type ArmorSearchPage, type EquipmentSlot } from './types'
 
 const DEFAULT_XIVAPI_BASE_URL = 'https://v2.xivapi.com/api/'
-const SLOT_FIELDS: Record<ArmorSlot, keyof EquipSlotFields> = {
+const SLOT_FIELDS: Record<EquipmentSlot, keyof EquipSlotFields> = {
+  mainHand: 'MainHand',
+  offHand: 'OffHand',
   head: 'Head',
   body: 'Body',
   hands: 'Gloves',
   legs: 'Legs',
   feet: 'Feet',
+  ears: 'Ears',
+  neck: 'Neck',
+  wrists: 'Wrists',
+  rightRing: 'FingerR',
+  leftRing: 'FingerL',
 }
 const FIELDS = [
   'Name',
   'Icon',
   'ModelMain',
+  'ModelSub',
   'EquipSlotCategory',
   'DyeCount',
   'LevelEquip',
@@ -24,17 +32,25 @@ interface Relationship<T> {
 }
 
 interface EquipSlotFields {
+  MainHand?: number
+  OffHand?: number
   Head?: number
   Body?: number
   Gloves?: number
   Legs?: number
   Feet?: number
+  Ears?: number
+  Neck?: number
+  Wrists?: number
+  FingerR?: number
+  FingerL?: number
 }
 
 interface SearchFields {
   Name?: string
   Icon?: { path?: string; path_hr1?: string }
   ModelMain?: number
+  ModelSub?: number
   EquipSlotCategory?: Relationship<EquipSlotFields>
   DyeCount?: number
   LevelEquip?: number
@@ -61,20 +77,24 @@ function escapeQueryValue(value: string): string {
   return value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')
 }
 
-function armorSlot(fields?: EquipSlotFields): ArmorSlot | undefined {
-  if ((fields?.Head ?? 0) > 0) return 'head'
-  if ((fields?.Body ?? 0) > 0) return 'body'
-  if ((fields?.Gloves ?? 0) > 0) return 'hands'
-  if ((fields?.Legs ?? 0) > 0) return 'legs'
-  if ((fields?.Feet ?? 0) > 0) return 'feet'
-  return undefined
-}
-
-export function decodeEquipmentModel(modelValue: number): { set: number; variant: number } {
-  if (!Number.isSafeInteger(modelValue) || modelValue <= 0) return { set: 0, variant: 0 }
+export function decodeEquipmentModel(
+  modelValue: number,
+  slot: EquipmentSlot = 'body',
+): { set: number; base: number; variant: number } {
+  if (!Number.isSafeInteger(modelValue) || modelValue <= 0) return { set: 0, base: 0, variant: 0 }
+  const set = modelValue % 65_536
+  const middle = Math.floor(modelValue / 65_536) % 65_536
+  if (isWeaponSlot(slot)) {
+    return {
+      set,
+      base: middle,
+      variant: Math.floor(modelValue / 4_294_967_296) % 256,
+    }
+  }
   return {
-    set: modelValue % 65_536,
-    variant: Math.floor(modelValue / 65_536) % 65_536,
+    set,
+    base: 0,
+    variant: middle,
   }
 }
 
@@ -85,7 +105,7 @@ export function xivapiIconUrl(path: string): string {
   return url.toString()
 }
 
-export function armorSearchUrl(search: string, slot: ArmorSlot): URL {
+export function armorSearchUrl(search: string, slot: EquipmentSlot): URL {
   const term = search.trim()
   if (term.length === 1) throw new Error('Enter at least two characters, or leave the search empty to browse everything.')
 
@@ -107,7 +127,7 @@ function cursorUrl(cursor: string): URL {
   return url
 }
 
-async function fetchArmorPage(url: URL, selectedSlot: ArmorSlot, signal?: AbortSignal): Promise<ArmorSearchPage> {
+async function fetchArmorPage(url: URL, selectedSlot: EquipmentSlot, signal?: AbortSignal): Promise<ArmorSearchPage> {
 
   const response = await fetch(url, {
     headers: { Accept: 'application/json' },
@@ -120,11 +140,12 @@ async function fetchArmorPage(url: URL, selectedSlot: ArmorSlot, signal?: AbortS
   const items = (payload.results ?? []).flatMap<ArmorItem>((result) => {
     const fields = result.fields
     const id = result.row_id
-    const slot = armorSlot(fields?.EquipSlotCategory?.fields)
-    const modelValue = fields?.ModelMain
-    if (!fields?.Name || id === undefined || !slot || !modelValue) return []
+    const slotFields = fields?.EquipSlotCategory?.fields
+    if ((slotFields?.[SLOT_FIELDS[selectedSlot]] ?? 0) <= 0) return []
+    const modelValue = fields?.ModelMain || fields?.ModelSub
+    if (!fields?.Name || id === undefined || !modelValue) return []
 
-    const model = decodeEquipmentModel(modelValue)
+    const model = decodeEquipmentModel(modelValue, selectedSlot)
     if (!model.set) return []
     return [{
       id,
@@ -132,6 +153,7 @@ async function fetchArmorPage(url: URL, selectedSlot: ArmorSlot, signal?: AbortS
       iconPath: fields.Icon?.path_hr1 ?? fields.Icon?.path,
       modelValue,
       modelSet: model.set,
+      modelBase: model.base,
       modelVariant: model.variant,
       slot: selectedSlot,
       dyeCount: fields.DyeCount ?? 0,
@@ -147,11 +169,11 @@ async function fetchArmorPage(url: URL, selectedSlot: ArmorSlot, signal?: AbortS
   }
 }
 
-export function searchArmor(search: string, slot: ArmorSlot, signal?: AbortSignal): Promise<ArmorSearchPage> {
+export function searchArmor(search: string, slot: EquipmentSlot, signal?: AbortSignal): Promise<ArmorSearchPage> {
   return fetchArmorPage(armorSearchUrl(search, slot), slot, signal)
 }
 
-export function continueArmorSearch(cursor: string, slot: ArmorSlot, signal?: AbortSignal): Promise<ArmorSearchPage> {
+export function continueArmorSearch(cursor: string, slot: EquipmentSlot, signal?: AbortSignal): Promise<ArmorSearchPage> {
   if (!cursor) throw new Error('The XIVAPI catalog cursor is empty.')
   return fetchArmorPage(cursorUrl(cursor), slot, signal)
 }

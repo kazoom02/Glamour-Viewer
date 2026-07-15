@@ -1,7 +1,20 @@
-import type { ArmorSlot } from '../catalog/types'
+import type { EquipmentSlot } from '../catalog/types'
 
 const ENTRY_SIZE = 6
-const SLOT_PART: Record<ArmorSlot, number> = { head: 0, body: 1, hands: 2, legs: 3, feet: 4 }
+const SLOT_PART: Record<EquipmentSlot, number> = {
+  mainHand: 0,
+  offHand: 0,
+  head: 0,
+  body: 1,
+  hands: 2,
+  legs: 3,
+  feet: 4,
+  ears: 0,
+  neck: 1,
+  wrists: 2,
+  rightRing: 3,
+  leftRing: 4,
+}
 
 export interface ImcEntry {
   materialId: number
@@ -14,7 +27,7 @@ export interface ImcEntry {
 }
 
 /** Reads an equipment IMC row. Variants include row zero, matching the game's Variant id. */
-export function readImcEntry(bytes: ArrayBuffer, slot: ArmorSlot, variant: number): ImcEntry {
+export function readImcEntry(bytes: ArrayBuffer, slot: EquipmentSlot, variant: number): ImcEntry {
   if (bytes.byteLength < 4) throw new Error('The IMC preamble is truncated.')
   const view = new DataView(bytes)
   const variantCount = view.getUint16(0, true)

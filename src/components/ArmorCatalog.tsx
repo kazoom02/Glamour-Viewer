@@ -1,30 +1,31 @@
 import { type FormEvent, useEffect, useRef, useState } from 'react'
 import type { AssetSource } from '../asset-source/types'
-import { equipmentAssetPlan } from '../asset-source/equipmentPlan'
-import { ARMOR_SLOTS, type ArmorItem, type ArmorSlot, type EquippedArmor } from '../catalog/types'
+import {
+  EQUIPMENT_SLOTS,
+  SLOT_LABELS,
+  type ArmorItem,
+  type EquipmentSlot,
+  type EquippedArmor,
+} from '../catalog/types'
 import { continueArmorSearch, searchArmor, xivapiIconUrl } from '../catalog/xivapi'
-import { CHARACTER_PRESETS, type CharacterRaceCode } from '../asset-source/characterPlan'
 
 interface Props {
   source: AssetSource
   equipped: EquippedArmor
-  raceCode: CharacterRaceCode
-  onRaceChange: (raceCode: CharacterRaceCode) => void
   onEquip: (item: ArmorItem) => void
-  onRemove: (slot: ArmorItem['slot']) => void
+  onRemove: (slot: EquipmentSlot) => void
 }
 
-const SLOT_LABELS: Record<ArmorItem['slot'], string> = {
-  head: 'Head',
-  body: 'Body',
-  hands: 'Hands',
-  legs: 'Legs',
-  feet: 'Feet',
+const LEFT_SLOTS: EquipmentSlot[] = ['mainHand', 'head', 'body', 'hands', 'legs', 'feet']
+const RIGHT_SLOTS: EquipmentSlot[] = ['offHand', 'ears', 'neck', 'wrists', 'rightRing', 'leftRing']
+const SLOT_GLYPHS: Record<EquipmentSlot, string> = {
+  mainHand: '⚔', offHand: '◈', head: '⌃', body: '◇', hands: '✦', legs: 'Ⅱ', feet: '⌄',
+  ears: '◉', neck: '◡', wrists: '◌', rightRing: '○', leftRing: '○',
 }
 
-export default function ArmorCatalog({ source, equipped, raceCode, onRaceChange, onEquip, onRemove }: Props) {
+export default function ArmorCatalog({ source, equipped, onEquip, onRemove }: Props) {
   const [query, setQuery] = useState('')
-  const [selectedSlot, setSelectedSlot] = useState<ArmorSlot>('head')
+  const [selectedSlot, setSelectedSlot] = useState<EquipmentSlot | null>(null)
   const [results, setResults] = useState<ArmorItem[]>([])
   const [pagesLoaded, setPagesLoaded] = useState(0)
   const [version, setVersion] = useState<string>()
@@ -32,7 +33,7 @@ export default function ArmorCatalog({ source, equipped, raceCode, onRaceChange,
   const [busy, setBusy] = useState(false)
   const abortRef = useRef<AbortController>(null)
 
-  async function loadCatalog(search: string, slot: ArmorSlot) {
+  async function loadCatalog(search: string, slot: EquipmentSlot) {
     abortRef.current?.abort()
     const controller = new AbortController()
     const itemsById = new Map<number, ArmorItem>()
@@ -52,158 +53,178 @@ export default function ArmorCatalog({ source, equipped, raceCode, onRaceChange,
         setResults([...itemsById.values()])
         setPagesLoaded(loadedPages)
         setVersion(page.version)
-
         const cursor = page.next
         if (!cursor) break
         if (seenCursors.has(cursor)) throw new Error('XIVAPI returned a repeated catalog cursor.')
         seenCursors.add(cursor)
         page = await continueArmorSearch(cursor, slot, controller.signal)
       }
-      if (!itemsById.size) setError(`No ${SLOT_LABELS[slot].toLowerCase()} equipment matched that search.`)
+      if (!itemsById.size) setError(`No ${SLOT_LABELS[slot].toLowerCase()} items matched that search.`)
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === 'AbortError') return
-      const message = caught instanceof Error ? caught.message : 'The armor catalog could not be searched.'
+      const message = caught instanceof Error ? caught.message : 'The equipment catalog could not be searched.'
       setError(itemsById.size ? `${itemsById.size} items loaded before the catalog stopped: ${message}` : message)
     } finally {
       if (abortRef.current === controller) setBusy(false)
     }
   }
 
+  function openSlot(slot: EquipmentSlot) {
+    setQuery('')
+    setSelectedSlot(slot)
+  }
+
+  function closePicker() {
+    abortRef.current?.abort()
+    setSelectedSlot(null)
+  }
+
   useEffect(() => {
+    if (!selectedSlot) return
     void loadCatalog('', selectedSlot)
     return () => abortRef.current?.abort()
   }, [selectedSlot])
 
+  useEffect(() => {
+    if (!selectedSlot) return
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closePicker()
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [selectedSlot])
+
   function submit(event: FormEvent) {
     event.preventDefault()
-    void loadCatalog(query, selectedSlot)
+    if (selectedSlot) void loadCatalog(query, selectedSlot)
   }
 
-  function selectCategory(slot: ArmorSlot) {
-    setQuery('')
-    if (slot === selectedSlot) void loadCatalog('', slot)
-    else setSelectedSlot(slot)
+  function equip(item: ArmorItem) {
+    onEquip(item)
+    closePicker()
+  }
+
+  function SlotButton({ slot }: { slot: EquipmentSlot }) {
+    const item = equipped[slot]
+    return (
+      <div className={`dressing-slot ${item ? 'filled' : ''}`}>
+        <button type="button" className="dressing-slot-main" onClick={() => openSlot(slot)}>
+          <span className="dressing-slot-icon">
+            {item?.iconPath
+              ? <img src={xivapiIconUrl(item.iconPath)} alt="" loading="lazy" />
+              : <b aria-hidden="true">{SLOT_GLYPHS[slot]}</b>}
+          </span>
+          <span className="dressing-slot-copy">
+            <small>{SLOT_LABELS[slot]}</small>
+            <strong>{item?.name ?? 'Choose item'}</strong>
+          </span>
+        </button>
+        {item && (
+          <button className="dressing-slot-remove" type="button" onClick={() => onRemove(slot)} aria-label={`Unequip ${item.name}`} title="Unequip">×</button>
+        )}
+      </div>
+    )
   }
 
   return (
-    <section className="catalog-section" aria-labelledby="catalog-title">
+    <section className="catalog-section dressing-room" aria-labelledby="catalog-title">
       <div className="catalog-heading">
         <div>
-          <p className="eyebrow">XIVAPI v2 catalog</p>
-          <h2 id="catalog-title">Choose armor to equip</h2>
-          <p>
-            XIVAPI supplies names, icons, slots, and model identifiers. The actual model and texture bytes still come from <strong>{source.label}</strong>.
-          </p>
+          <p className="eyebrow">Dressing room</p>
+          <h2 id="catalog-title">Click a slot to change it</h2>
+          <p>Names and icons come from XIVAPI. Models and textures are read directly from <strong>{source.label}</strong>.</p>
         </div>
-        <div className="catalog-controls">
-          <label className="catalog-character" htmlFor="character-race">
-            <span className="field-label">Character</span>
-            <select
-              id="character-race"
-              value={raceCode}
-              onChange={(event) => onRaceChange(event.target.value as CharacterRaceCode)}
-            >
-              {CHARACTER_PRESETS.map(({ code, label }) => <option value={code} key={code}>{label}</option>)}
-            </select>
-          </label>
-          {version && <span className="catalog-version">Game data {version.slice(0, 8)}</span>}
-        </div>
+        {version && <span className="catalog-version">Game data {version.slice(0, 8)}</span>}
       </div>
 
-      <nav className="catalog-categories" aria-label="Armor categories">
-        {ARMOR_SLOTS.map((slot) => (
-          <button
-            className={selectedSlot === slot ? 'active' : ''}
-            type="button"
-            aria-pressed={selectedSlot === slot}
-            onClick={() => selectCategory(slot)}
-            key={slot}
-          >
-            <span>{SLOT_LABELS[slot]}</span>
-            {equipped[slot] && <small>Equipped</small>}
-          </button>
-        ))}
-      </nav>
-
-      <form className="catalog-search" onSubmit={submit}>
-        <label className="field-label" htmlFor="armor-search">Search within {SLOT_LABELS[selectedSlot]}</label>
-        <div className="url-row">
-          <input
-            id="armor-search"
-            type="search"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={`Search ${SLOT_LABELS[selectedSlot].toLowerCase()} equipment, or leave empty to show all`}
-            autoComplete="off"
-          />
-          <button className="button primary" disabled={query.trim().length === 1}>
-            {busy ? `Restart ${SLOT_LABELS[selectedSlot]} load` : query.trim() ? `Search ${SLOT_LABELS[selectedSlot]}` : `Show all ${SLOT_LABELS[selectedSlot]}`}
-          </button>
+      <div className="dressing-layout" aria-label="Equipment slots">
+        <div className="dressing-rail">{LEFT_SLOTS.map((slot) => <SlotButton slot={slot} key={slot} />)}</div>
+        <div className="dressing-figure" aria-hidden="true">
+          <span />
+          <strong>{Object.values(equipped).filter(Boolean).length}</strong>
+          <small>items equipped</small>
         </div>
-      </form>
+        <div className="dressing-rail">{RIGHT_SLOTS.map((slot) => <SlotButton slot={slot} key={slot} />)}</div>
+      </div>
 
-      {error && <p className="error-message catalog-error" role="alert">{error}</p>}
-      {busy && results.length === 0 && (
-        <p className="catalog-loading-status" role="status">Loading the complete {SLOT_LABELS[selectedSlot].toLowerCase()} catalog…</p>
-      )}
+      <p className="dressing-help">Select any slot to open its complete searchable catalog. Use × to unequip an item.</p>
 
-      {results.length > 0 && (
-        <>
-        <div className="catalog-results-heading">
-          <strong>{SLOT_LABELS[selectedSlot]} equipment</strong>
-          <span>{results.length} loaded from {pagesLoaded} {pagesLoaded === 1 ? 'page' : 'pages'}{busy ? ' · loading remaining pages…' : ' · complete'}</span>
-        </div>
-        <div className="armor-results" aria-label={`${SLOT_LABELS[selectedSlot]} armor results`}>
-          {results.map((item) => {
-            const isEquipped = equipped[item.slot]?.id === item.id
-            return (
-              <article className="armor-result" key={item.id}>
-                <div className="armor-icon">
-                  {item.iconPath ? <img src={xivapiIconUrl(item.iconPath)} alt="" loading="lazy" /> : <span>—</span>}
-                </div>
-                <div className="armor-copy">
-                  <span>{SLOT_LABELS[item.slot]} · Level {item.equipLevel}</span>
-                  <strong>{item.name}</strong>
-                  <small>{item.jobs} · Model e{item.modelSet.toString().padStart(4, '0')} v{item.modelVariant.toString().padStart(4, '0')}</small>
-                </div>
-                <button
-                  className={`button ${isEquipped ? 'equipped' : 'secondary'}`}
-                  type="button"
-                  onClick={() => isEquipped ? onRemove(item.slot) : onEquip(item)}
-                >
-                  {isEquipped ? 'Unequip' : 'Equip'}
-                </button>
-              </article>
-            )
-          })}
-        </div>
-        </>
-      )}
-
-      <div className="equipment-tray">
-        <div className="tray-heading">
-          <strong>Current armor</strong>
-          <span>Asset paths target <code>{raceCode}</code> with compatible body-family fallbacks.</span>
-        </div>
-        <div className="equipment-slots">
-          {ARMOR_SLOTS.map((slot) => {
-            const item = equipped[slot]
-            const plan = item ? equipmentAssetPlan(item, raceCode) : undefined
-            return (
-              <div className={`equipment-slot ${item ? 'filled' : ''}`} key={slot}>
-                <span>{SLOT_LABELS[slot]}</span>
-                {item ? (
-                  <>
-                    <strong>{item.name}</strong>
-                    <code title={plan?.modelPath}>{plan?.modelPath}</code>
-                    <button className="text-button" type="button" onClick={() => onRemove(slot)}>Unequip</button>
-                  </>
-                ) : <small>Empty</small>}
+      {selectedSlot && (
+        <div className="catalog-picker-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && closePicker()}>
+          <section className="catalog-picker" role="dialog" aria-modal="true" aria-labelledby="picker-title">
+            <header className="catalog-picker-header">
+              <div>
+                <p className="eyebrow">Equipment picker</p>
+                <h2 id="picker-title">{SLOT_LABELS[selectedSlot]}</h2>
               </div>
-            )
-          })}
+              <div className="catalog-picker-actions">
+                {equipped[selectedSlot] && <button className="button secondary" type="button" onClick={() => onRemove(selectedSlot)}>Unequip</button>}
+                <button className="catalog-picker-close" type="button" onClick={closePicker} aria-label="Close equipment picker">×</button>
+              </div>
+            </header>
+
+            <form className="catalog-search" onSubmit={submit}>
+              <label className="field-label" htmlFor="equipment-search">Search {SLOT_LABELS[selectedSlot]}</label>
+              <div className="url-row">
+                <input
+                  id="equipment-search"
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder={`Search ${SLOT_LABELS[selectedSlot].toLowerCase()}, or leave empty to show everything`}
+                  autoComplete="off"
+                  autoFocus
+                />
+                <button className="button primary" disabled={query.trim().length === 1}>
+                  {busy ? 'Restart search' : query.trim() ? 'Search' : 'Show everything'}
+                </button>
+              </div>
+            </form>
+
+            {error && <p className="error-message catalog-error" role="alert">{error}</p>}
+            {busy && results.length === 0 && <p className="catalog-loading-status" role="status">Loading the complete catalog…</p>}
+            {results.length > 0 && (
+              <>
+                <div className="catalog-results-heading">
+                  <strong>{results.length} {results.length === 1 ? 'item' : 'items'}</strong>
+                  <span>{pagesLoaded} {pagesLoaded === 1 ? 'page' : 'pages'}{busy ? ' · loading remaining pages…' : ' · complete'}</span>
+                </div>
+                <div className="armor-results picker-results" aria-label={`${SLOT_LABELS[selectedSlot]} results`}>
+                  {results.map((item) => {
+                    const isEquipped = equipped[selectedSlot]?.id === item.id
+                    return (
+                      <article className="armor-result" key={item.id}>
+                        <div className="armor-icon">
+                          {item.iconPath ? <img src={xivapiIconUrl(item.iconPath)} alt="" loading="lazy" /> : <span>—</span>}
+                        </div>
+                        <div className="armor-copy">
+                          <span>Level {item.equipLevel}</span>
+                          <strong>{item.name}</strong>
+                          <small>{item.jobs} · Model {item.modelSet.toString().padStart(4, '0')}{item.modelBase ? `/${item.modelBase.toString().padStart(4, '0')}` : ''} v{item.modelVariant.toString().padStart(4, '0')}</small>
+                        </div>
+                        <button
+                          className={`button ${isEquipped ? 'equipped' : 'secondary'}`}
+                          type="button"
+                          onClick={() => isEquipped ? onRemove(selectedSlot) : equip(item)}
+                        >
+                          {isEquipped ? 'Unequip' : 'Equip'}
+                        </button>
+                      </article>
+                    )
+                  })}
+                </div>
+              </>
+            )}
+          </section>
         </div>
-      </div>
+      )}
     </section>
   )
 }
+
+export { EQUIPMENT_SLOTS }
