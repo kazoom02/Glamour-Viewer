@@ -176,11 +176,19 @@ function f16(value: number): number {
 }
 
 function dataTypeSize(type: number): number {
-  if ([0, 5, 6, 8, 13].includes(type)) return 4
-  if ([1, 7, 14].includes(type)) return 8
+  if ([0, 4, 5, 6, 8, 9, 11, 13, 14, 15].includes(type)) return 4
+  if ([1, 7, 10, 12, 16].includes(type)) return 8
   if (type === 2) return 12
   if (type === 3) return 16
   throw new Error(`Unsupported FFXIV vertex data type ${type}.`)
+}
+
+function snorm16(value: number): number {
+  return Math.max(-1, value / 32767)
+}
+
+function signed10(value: number): number {
+  return value & 0x200 ? value - 0x400 : value
 }
 
 function floats(view: DataView, offset: number, type: number): number[] {
@@ -189,12 +197,25 @@ function floats(view: DataView, offset: number, type: number): number[] {
     case 1: return [view.getFloat32(offset, true), view.getFloat32(offset + 4, true)]
     case 2: return [view.getFloat32(offset, true), view.getFloat32(offset + 4, true), view.getFloat32(offset + 8, true)]
     case 3: return [view.getFloat32(offset, true), view.getFloat32(offset + 4, true), view.getFloat32(offset + 8, true), view.getFloat32(offset + 12, true)]
+    case 4: return [view.getUint8(offset + 2) / 255, view.getUint8(offset + 1) / 255, view.getUint8(offset) / 255, view.getUint8(offset + 3) / 255]
     case 5: return [view.getUint8(offset), view.getUint8(offset + 1), view.getUint8(offset + 2), view.getUint8(offset + 3)]
     case 6: return [view.getInt16(offset, true), view.getInt16(offset + 2, true)]
     case 7: return [view.getInt16(offset, true), view.getInt16(offset + 2, true), view.getInt16(offset + 4, true), view.getInt16(offset + 6, true)]
     case 8: return [view.getUint8(offset) / 255, view.getUint8(offset + 1) / 255, view.getUint8(offset + 2) / 255, view.getUint8(offset + 3) / 255]
-    case 13: return [f16(view.getUint16(offset, true)), f16(view.getUint16(offset + 2, true))]
-    case 14: return [f16(view.getUint16(offset, true)), f16(view.getUint16(offset + 2, true)), f16(view.getUint16(offset + 4, true)), f16(view.getUint16(offset + 6, true))]
+    case 9: return [snorm16(view.getInt16(offset, true)), snorm16(view.getInt16(offset + 2, true))]
+    case 10: return [snorm16(view.getInt16(offset, true)), snorm16(view.getInt16(offset + 2, true)), snorm16(view.getInt16(offset + 4, true)), snorm16(view.getInt16(offset + 6, true))]
+    case 11: return [view.getUint16(offset, true) / 65535, view.getUint16(offset + 2, true) / 65535]
+    case 12: return [view.getUint16(offset, true) / 65535, view.getUint16(offset + 2, true) / 65535, view.getUint16(offset + 4, true) / 65535, view.getUint16(offset + 6, true) / 65535]
+    case 13: {
+      const packed = view.getUint32(offset, true)
+      return [packed & 0x3ff, (packed >>> 10) & 0x3ff, (packed >>> 20) & 0x3ff]
+    }
+    case 14: {
+      const packed = view.getUint32(offset, true)
+      return [signed10(packed & 0x3ff) / 511, signed10((packed >>> 10) & 0x3ff) / 511, signed10((packed >>> 20) & 0x3ff) / 511]
+    }
+    case 15: return [f16(view.getUint16(offset, true)), f16(view.getUint16(offset + 2, true))]
+    case 16: return [f16(view.getUint16(offset, true)), f16(view.getUint16(offset + 2, true)), f16(view.getUint16(offset + 4, true)), f16(view.getUint16(offset + 6, true))]
     default: throw new Error(`Unsupported FFXIV vertex data type ${type}.`)
   }
 }
@@ -234,11 +255,12 @@ export function decodeMdl(mdlBuffer: ArrayBuffer): DecodedModel {
     for (let slot = 0; slot < 17; slot += 1) {
       const offset = cursor + slot * 8
       const stream = view.getUint8(offset)
-      if (stream === 0xff) break
+      const dataType = view.getUint8(offset + 2)
+      if (stream === 0xff || dataType === 17) break
       elements.push({
         stream,
         offset: view.getUint8(offset + 1),
-        dataType: view.getUint8(offset + 2),
+        dataType,
         usage: view.getUint8(offset + 3),
         usageIndex: view.getUint8(offset + 4),
       })

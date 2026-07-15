@@ -56,6 +56,11 @@ h2 { margin: 0; font-size: clamp(28px, 3.2vw, 42px); line-height: 1.1; letter-sp
 .viewer-canvas-wrap { position: relative; width: 100%; height: 100%; }
 .viewer-canvas { width: 100%; height: 100%; touch-action: none; }
 .viewer-status { position: absolute; z-index: 2; left: 50%; bottom: 30px; margin: 0; padding: 8px 12px; transform: translateX(-50%); border: 1px solid #4e473b; border-radius: 999px; background: #111216d9; color: #cfc7ba; font-size: 10px; white-space: nowrap; backdrop-filter: blur(8px); }
+.viewer-selection { position: absolute; z-index: 2; top: 16px; left: 16px; display: grid; gap: 5px; max-width: min(300px, calc(100% - 32px)); padding: 10px 12px; border: 1px solid #4e473b; border-radius: 6px; background: #111216e8; color: #d7d0c4; font-size: 10px; backdrop-filter: blur(8px); }
+.viewer-selection strong { color: #f0e8da; font-size: 9px; letter-spacing: .1em; text-transform: uppercase; }
+.viewer-selection span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: capitalize; }
+.viewer-selection small { margin-left: 7px; color: #928b80; font-family: ui-monospace, monospace; }
+.viewer-selection em { color: #bd9f6e; font-size: 9px; font-style: normal; }
 .viewer-error { position: absolute; z-index: 3; left: 18px; right: 18px; bottom: 66px; padding: 9px 12px; border: 1px solid #704945; border-radius: 6px; background: #271b1be8; color: #e5aaa4; font-size: 10px; }
 .viewer-error summary { cursor: pointer; }
 .viewer-error pre { max-height: 180px; margin: 8px 0 0; overflow: auto; white-space: pre-wrap; }

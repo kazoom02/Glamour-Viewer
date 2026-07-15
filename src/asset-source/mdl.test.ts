@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { decodeMdl, reconstructMdl } from './mdl'
 
-function triangleMdl(): ArrayBuffer {
+function triangleMdl(typeTerminator = false): ArrayBuffer {
   const buffer = new ArrayBuffer(526)
   const view = new DataView(buffer)
   const declarationOffset = 68
@@ -18,7 +18,13 @@ function triangleMdl(): ArrayBuffer {
   view.setUint8(declarationOffset + 1, 0)
   view.setUint8(declarationOffset + 2, 2) // float3
   view.setUint8(declarationOffset + 3, 0) // position
-  view.setUint8(declarationOffset + 8, 0xff)
+  if (typeTerminator) {
+    view.setUint8(declarationOffset + 8, 0)
+    view.setUint8(declarationOffset + 10, 17)
+    view.setUint8(declarationOffset + 11, 3)
+  } else {
+    view.setUint8(declarationOffset + 8, 0xff)
+  }
   view.setUint32(208, 0, true) // empty string table
   view.setUint16(modelHeaderOffset + 4, 1, true)
   view.setUint16(lodOffset, 0, true)
@@ -47,6 +53,12 @@ describe('MDL geometry decoding', () => {
     expect(model.materialPaths).toEqual([])
     expect(model.boneNames).toEqual([])
     expect(model.bounds).toEqual({ min: [0, 0, 0], max: [1, 2, 0] })
+  })
+
+  it('treats Direct3D vertex type 17 as an unused declaration terminator', () => {
+    const model = decodeMdl(triangleMdl(true))
+    expect(model.meshes).toHaveLength(1)
+    expect(model.meshes[0]!.normals).toBeUndefined()
   })
 
   it('ignores SqPack alignment padding after a raw-deflate block', async () => {

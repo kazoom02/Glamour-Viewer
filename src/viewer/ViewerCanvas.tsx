@@ -10,7 +10,7 @@ import {
 } from '../asset-source/characterPlan'
 import { loadLocalModels, type ModelLoadResult } from '../asset-source/modelLoader'
 import type { DecodedModel } from '../asset-source/mdl'
-import type { ArmorSlot, EquippedArmor } from '../catalog/types'
+import { ARMOR_SLOTS, type ArmorSlot, type EquippedArmor } from '../catalog/types'
 
 interface ViewerCanvasProps {
   source: AssetSource
@@ -145,6 +145,7 @@ async function diagnosticReport(source: AssetSource, failures: string[]): Promis
 
 export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanvasProps) {
   const container = useRef<HTMLDivElement>(null)
+  const previewItems = ARMOR_SLOTS.flatMap((slot) => equipped[slot] ? [[slot, equipped[slot]!] as const] : [])
   const [status, setStatus] = useState('Loading character…')
   const [error, setError] = useState<string>()
 
@@ -300,6 +301,18 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
   return (
     <div className="viewer-canvas-wrap">
       <div className="viewer-canvas" ref={container} aria-label="Three-dimensional FFXIV character and armor inspection view" />
+      {previewItems.length > 0 && (
+        <div className="viewer-selection" aria-label="Selected preview armor">
+          <strong>Previewing geometry</strong>
+          {previewItems.map(([slot, item]) => (
+            <span key={slot}>
+              {slot}: {item.name}
+              <small>e{item.modelSet.toString().padStart(4, '0')} v{item.modelVariant.toString().padStart(4, '0')}</small>
+            </span>
+          ))}
+          <em>Material and texture variants are not rendered yet.</em>
+        </div>
+      )}
       <p className="viewer-status" aria-live="polite">{status}</p>
       {error && (
         <details className="viewer-error">
