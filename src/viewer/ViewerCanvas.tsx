@@ -124,6 +124,7 @@ function addDecodedModel(
     const roughness = decodedMaterial?.textures.roughness ?? mask
     const metalness = decodedMaterial?.textures.metalness
     const emissive = decodedMaterial?.textures.emissive
+    const alphaMode = decodedMaterial?.alphaMode ?? 'opaque'
     const material = new THREE.MeshStandardMaterial({
       color: diffuse ? 0xffffff : meshColor,
       map: diffuse ? textureFromDecoded(diffuse, true) : null,
@@ -134,7 +135,9 @@ function addDecodedModel(
       metalness: metalness ? 1 : materialPath.includes('/mt_c') && materialPath.includes('e0000') ? 0 : 0.08,
       emissiveMap: emissive ? textureFromDecoded(emissive, true) : null,
       emissive: emissive ? 0xffffff : 0x000000,
-      alphaTest: diffuse ? 0.08 : 0,
+      alphaTest: diffuse && alphaMode === 'mask' ? 0.5 : 0,
+      transparent: alphaMode === 'blend',
+      depthWrite: alphaMode !== 'blend',
       side: THREE.DoubleSide,
     })
     if (normal) material.normalScale.set(1, 1)

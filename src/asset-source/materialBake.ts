@@ -9,6 +9,8 @@ export interface BakedCharacterMaterial {
   emissive: DecodedTexture
 }
 
+export type MaterialAlphaMode = 'opaque' | 'mask' | 'blend'
+
 function clampByte(value: number): number {
   return Math.round(Math.min(1, Math.max(0, value)) * 255)
 }
@@ -27,6 +29,75 @@ function output(width: number, height: number, rgba: Uint8Array): DecodedTexture
 
 function pseudoSqrt(value: number): number {
   return value < 0 ? -Math.sqrt(-value) : Math.sqrt(value)
+}
+
+function cleanedNormal(texture: DecodedTexture): DecodedTexture {
+  const rgba = new Uint8Array(texture.rgba)
+  for (let offset = 0; offset < rgba.length; offset += 4) {
+    if (texture.format !== TEX_FORMAT.BC5) rgba[offset + 2] = 255
+    rgba[offset + 3] = 255
+  }
+  return { ...texture, rgba }
+}
+
+export function materialAlphaMode(shaderPackage: string, materialReference: string): MaterialAlphaMode {
+  const shader = shaderPackage.toLowerCase()
+  const face = /mt_c\d{4}f\d{4}/i.test(materialReference)
+  if (shader === 'characterglass.shpk' || shader === 'charactertattoo.shpk') return 'blend'
+  if (shader === 'hair.shpk') return face ? 'blend' : 'mask'
+  if (shader === 'skin.shpk') return face ? 'mask' : 'opaque'
+  if (shader === 'character.shpk' || shader === 'characterlegacy.shpk') return 'mask'
+  return 'opaque'
+}
+
+/** Bakes hair/facial-hair tint and opacity stored across normal and mask textures. */
+export function bakeHairMaterial(
+  normal: DecodedTexture | undefined,
+  mask: DecodedTexture | undefined,
+): { diffuse: DecodedTexture; normal: DecodedTexture } | undefined {
+  if (!normal || !mask) return undefined
+  const rgba = new Uint8Array(normal.width * normal.height * 4)
+  const base = [130, 64, 13]
+  const highlight = [77, 126, 240]
+  for (let y = 0; y < normal.height; y += 1) {
+    for (let x = 0; x < normal.width; x += 1) {
+      const target = (y * normal.width + x) * 4
+      const normalPixel = sample(normal, x, y, normal.width, normal.height)
+      const maskPixel = sample(mask, x, y, normal.width, normal.height)
+      const tint = normalPixel[2] / 255
+      const strength = maskPixel[3] / 255
+      for (let channel = 0; channel < 3; channel += 1) {
+        rgba[target + channel] = Math.round((base[channel]! + (highlight[channel]! - base[channel]!) * tint) * strength)
+      }
+      rgba[target + 3] = normalPixel[3]
+    }
+  }
+  return { diffuse: output(normal.width, normal.height, rgba), normal: cleanedNormal(normal) }
+}
+
+/** Applies the iris tint encoded by the mask's blue channel. */
+export function bakeIrisMaterial(
+  diffuse: DecodedTexture | undefined,
+  mask: DecodedTexture | undefined,
+): DecodedTexture | undefined {
+  if (!diffuse || !mask) return undefined
+  const rgba = new Uint8Array(diffuse.rgba)
+  const eye = [21 / 255, 176 / 255, 172 / 255]
+  for (let y = 0; y < diffuse.height; y += 1) {
+    for (let x = 0; x < diffuse.width; x += 1) {
+      const target = (y * diffuse.width + x) * 4
+      const tint = sample(mask, x, y, diffuse.width, diffuse.height)[2] / 255
+      for (let channel = 0; channel < 3; channel += 1) {
+        const multiplier = 1 + (eye[channel]! - 1) * tint
+        rgba[target + channel] = Math.round(rgba[target + channel]! * multiplier)
+      }
+    }
+  }
+  return { ...diffuse, rgba }
+}
+
+export function bakeSkinNormal(normal: DecodedTexture | undefined): DecodedTexture | undefined {
+  return normal ? cleanedNormal(normal) : undefined
 }
 
 /** Bakes the character shader's colorset/index lookup into standard PBR textures. */
@@ -48,7 +119,6 @@ export function bakeCharacterMaterial(
   const roughness = new Uint8Array(diffuse.length)
   const metalness = new Uint8Array(diffuse.length)
   const emissive = new Uint8Array(diffuse.length)
-  const normal = textures.normal ? new Uint8Array(textures.normal.rgba) : undefined
 
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
@@ -90,15 +160,9 @@ export function bakeCharacterMaterial(
     }
   }
 
-  if (normal) {
-    for (let offset = 0; offset < normal.length; offset += 4) {
-      if (textures.normal!.format !== TEX_FORMAT.BC5) normal[offset + 2] = 255
-      normal[offset + 3] = 255
-    }
-  }
   return {
     diffuse: output(width, height, diffuse),
-    normal: normal ? { ...textures.normal!, rgba: normal } : undefined,
+    normal: textures.normal ? cleanedNormal(textures.normal) : undefined,
     roughness: output(width, height, roughness),
     metalness: output(width, height, metalness),
     emissive: output(width, height, emissive),

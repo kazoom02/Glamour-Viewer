@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 
 import { readImcEntry } from './imc'
-import { bakeCharacterMaterial } from './materialBake'
+import { bakeCharacterMaterial, bakeHairMaterial, bakeIrisMaterial, bakeSkinNormal, materialAlphaMode } from './materialBake'
 import { materialCandidates } from './materialPath'
 import { parseMtrl, type TextureRole } from './mtrl'
 import { createLocalAssetReader, type LocalAssetReader } from './sqpack'
@@ -119,6 +119,7 @@ async function loadRequest(
       const decoded = {
         path: materialFile.path,
         shaderPackage: parsed.shaderPackage,
+        alphaMode: materialAlphaMode(parsed.shaderPackage, materialReference),
         textures: {},
       } as MaterialLoadResult['materials'][string]
       for (const textureReference of parsed.textures) {
@@ -137,6 +138,17 @@ async function loadRequest(
         if (baked) Object.assign(decoded.textures, baked)
         decoded.colorTableRows = parsed.colorTable.rows.length
         decoded.dyeableRows = parsed.dyeTable?.filter((row) => row.flags !== 0).length ?? 0
+      }
+      const shader = parsed.shaderPackage.toLowerCase()
+      if (shader === 'hair.shpk') {
+        const baked = bakeHairMaterial(decoded.textures.normal, decoded.textures.mask)
+        if (baked) Object.assign(decoded.textures, baked)
+      } else if (shader === 'iris.shpk') {
+        const diffuse = bakeIrisMaterial(decoded.textures.diffuse, decoded.textures.mask)
+        if (diffuse) decoded.textures.diffuse = diffuse
+      } else if (shader === 'skin.shpk') {
+        const normal = bakeSkinNormal(decoded.textures.normal)
+        if (normal) decoded.textures.normal = normal
       }
       materials[normalizedMaterialKey(materialReference)] = decoded
     } catch (error) {

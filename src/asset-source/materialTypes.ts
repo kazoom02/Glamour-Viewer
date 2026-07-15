@@ -1,5 +1,6 @@
 import type { ArmorSlot } from '../catalog/types'
 import type { DecodedTexture } from './tex'
+import type { MaterialAlphaMode } from './materialBake'
 
 export interface MaterialLoadRequest {
   modelPath: string
@@ -12,6 +13,7 @@ export interface MaterialLoadRequest {
 export interface DecodedMaterial {
   path: string
   shaderPackage: string
+  alphaMode: MaterialAlphaMode
   textures: {
     diffuse?: DecodedTexture
     normal?: DecodedTexture
