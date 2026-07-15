@@ -1,4 +1,4 @@
-const CHARACTER_INDEX_NAMES = ['040000.win32.index2', '040000.win32.index'] as const
+const CHARACTER_INDEX_NAME = '040000.win32.index2'
 const CHARACTER_DATA_NAME = '040000.win32.dat0'
 
 export interface SqpackInspection {
@@ -26,26 +26,20 @@ export async function inspectSqpackDirectory(root: FileSystemDirectoryHandle): P
     return { valid: false, repository: 'ffxiv', missing: ['ffxiv/'] }
   }
 
-  let indexName: string | undefined
-  for (const candidate of CHARACTER_INDEX_NAMES) {
-    if (await fileExists(repository, candidate)) {
-      indexName = candidate
-      break
-    }
-  }
+  const indexName = await fileExists(repository, CHARACTER_INDEX_NAME) ? CHARACTER_INDEX_NAME : undefined
 
   const missing: string[] = []
-  if (!indexName) missing.push(`ffxiv/${CHARACTER_INDEX_NAMES.join(' or ')}`)
+  if (!indexName) missing.push(`ffxiv/${CHARACTER_INDEX_NAME}`)
   if (!(await fileExists(repository, CHARACTER_DATA_NAME))) missing.push(`ffxiv/${CHARACTER_DATA_NAME}`)
   return { valid: missing.length === 0, repository: 'ffxiv', indexName, missing }
 }
 
 export function inspectFallbackSqpack(files: File[]): SqpackInspection {
   const paths = new Set(files.map((file) => file.webkitRelativePath.replaceAll('\\', '/').toLowerCase()))
-  const hasSuffix = (suffix: string) => [...paths].some((path) => path.endsWith(`/ffxiv/${suffix}`))
-  const indexName = CHARACTER_INDEX_NAMES.find(hasSuffix)
+  const hasSuffix = (suffix: string) => [...paths].some((path) => path === `ffxiv/${suffix}` || path.endsWith(`/ffxiv/${suffix}`))
+  const indexName = hasSuffix(CHARACTER_INDEX_NAME) ? CHARACTER_INDEX_NAME : undefined
   const missing: string[] = []
-  if (!indexName) missing.push(`ffxiv/${CHARACTER_INDEX_NAMES.join(' or ')}`)
+  if (!indexName) missing.push(`ffxiv/${CHARACTER_INDEX_NAME}`)
   if (!hasSuffix(CHARACTER_DATA_NAME)) missing.push(`ffxiv/${CHARACTER_DATA_NAME}`)
   return { valid: missing.length === 0, repository: 'ffxiv', indexName, missing }
 }

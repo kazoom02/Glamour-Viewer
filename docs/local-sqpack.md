@@ -66,7 +66,7 @@ Not every equipment set contains a model for every race code. Production resolut
 
 Do not load multi-gigabyte `.dat` archives into memory. The reader should:
 
-1. Open `040000.win32.index2` (or `.index`) from the selected repository.
+1. Open `040000.win32.index2` from the selected repository.
 2. Parse its SqPack header and hash table.
 3. Normalize the requested internal path and compute its SqPack path hash.
 4. Find the encoded data-file ID and byte offset.
@@ -74,7 +74,7 @@ Do not load multi-gigabyte `.dat` archives into memory. The reader should:
 6. Read the entry header and compressed block table with `File.slice(offset, end).arrayBuffer()`.
 7. Inflate only the blocks belonging to the requested resource.
 
-`src/asset-source/localSqpack.ts` already provides directory validation, file opening, and bounded range reads. Index parsing and block decompression should live in the existing module worker so the UI thread remains responsive.
+`src/asset-source/sqpack.ts` implements the `index2` hash lookup and bounded `File.slice()` reads. `src/asset-source/mdl.ts` reconstructs the model sections, inflates raw-DEFLATE blocks with the browser's native `DecompressionStream`, and decodes the renderable vertex/index buffers. These run through `model.worker.ts`, keeping SqPack and MDL work off the UI thread.
 
 ## Decode graph for one armor piece
 
@@ -100,7 +100,7 @@ Ironworks is the best reference for the binary structures because it already cov
 
 Keep filesystem traversal and range reads in TypeScript because the File System Access API is asynchronous. Pass the small extracted buffers—not directory handles or whole archives—into WASM.
 
-Start with `c0201` (Midlander female), one body item, variant 1, and no dye. Add IMC part masks, additional slots, race fallbacks, skeleton deformation, and dyes after that single path renders correctly.
+The current milestone renders solid-color geometry for `c0201` (Midlander female) equipment across the five armor slots. The next layers are MTRL/TEX textures, IMC part masks, race fallbacks, skeleton deformation, EQP/EQDP body hiding, and dyes.
 
 ## Vercel behavior
 

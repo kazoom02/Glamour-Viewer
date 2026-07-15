@@ -62,7 +62,7 @@ export function App() {
           <div className="hero-visual" aria-hidden={!source}>
             {source ? (
               <Suspense fallback={<div className="viewer-loading">Loading renderer…</div>}>
-                <ViewerCanvas />
+                <ViewerCanvas source={source} equipped={equipped} />
               </Suspense>
             ) : (
               <div className="silhouette">

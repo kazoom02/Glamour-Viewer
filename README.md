@@ -25,6 +25,8 @@ The catalog is loaded only after an asset source is connected and makes no reque
 
 The full local random-access and decoding design is documented in [`docs/local-sqpack.md`](docs/local-sqpack.md). In short, Vercel serves the parser code, while the browser uses `File.slice()` to read only required ranges from local SqPack `.index` and `.dat*` files. No game data is sent to Vercel.
 
+The current viewer decodes equipment MDL geometry from `040000.win32.index2`/`datN` in a module worker and displays it over a neutral inspection mannequin. It intentionally starts with the Midlander female model path (`c0201`). Game textures, materials, skeleton skinning, IMC visibility, and race deformation/fallbacks are not yet decoded, so this is a geometry preview rather than Fanbyte-level parity.
+
 ## Self-hosted cache CORS
 
 The asset origin must permit the deployed app to read it and must expose `Content-Length` so download progress can be reported:
@@ -35,6 +37,8 @@ Access-Control-Expose-Headers: Content-Length
 ```
 
 If the cache is deliberately public, `Access-Control-Allow-Origin: *` is also valid. Configure allowed methods for `GET`, `HEAD`, and `OPTIONS` when your bucket provider requires an explicit list.
+
+For rendering, the converted cache mirrors each internal equipment path but replaces `.mdl` with `.glb`, for example `chara/equipment/e0190/model/c0201e0190_top.glb`. The manifest is metadata; model requests are direct browser-to-bucket requests.
 
 The decoder is designed to be single-threaded. This repository intentionally has no `vercel.json`, COOP, or COEP policy. If future profiling justifies `SharedArrayBuffer` or threaded WASM, add COOP/COEP only after also requiring `Cross-Origin-Resource-Policy: cross-origin` (or equivalent CORS-compatible behavior) from every asset bucket.
 

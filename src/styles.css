@@ -53,7 +53,12 @@ h2 { margin: 0; font-size: clamp(28px, 3.2vw, 42px); line-height: 1.1; letter-sp
 .silhouette-head { width: 72px; height: 84px; border-radius: 50%; background: #3c3c3d; }
 .silhouette-body { width: 180px; height: 250px; margin-top: 12px; border-radius: 70px 70px 25px 25px; background: linear-gradient(#414143, #24262b); clip-path: polygon(20% 0, 80% 0, 100% 24%, 78% 100%, 22% 100%, 0 24%); }
 .silhouette p, .viewer-loading { color: #9e9fa3; font-size: 12px; letter-spacing: .04em; }
-.viewer-canvas { width: 100%; height: 100%; }
+.viewer-canvas-wrap { position: relative; width: 100%; height: 100%; }
+.viewer-canvas { width: 100%; height: 100%; touch-action: none; }
+.viewer-status { position: absolute; z-index: 2; left: 50%; bottom: 30px; margin: 0; padding: 8px 12px; transform: translateX(-50%); border: 1px solid #4e473b; border-radius: 999px; background: #111216d9; color: #cfc7ba; font-size: 10px; white-space: nowrap; backdrop-filter: blur(8px); }
+.viewer-error { position: absolute; z-index: 3; left: 18px; right: 18px; bottom: 66px; padding: 9px 12px; border: 1px solid #704945; border-radius: 6px; background: #271b1be8; color: #e5aaa4; font-size: 10px; }
+.viewer-error summary { cursor: pointer; }
+.viewer-error pre { max-height: 90px; margin: 8px 0 0; overflow: auto; white-space: pre-wrap; }
 .viewer-loading { height: 100%; display: grid; place-items: center; }
 .source-section { padding: 110px 0 90px; border-top: 1px solid #292b30; }
 .section-heading { max-width: 650px; margin-bottom: 42px; }
