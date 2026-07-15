@@ -28,4 +28,12 @@ describe('character asset planning', () => {
       'chara/equipment/e0190/model/c0101e0190_top.mdl',
     ])
   })
+
+  it('falls back to shared c0101 geometry when a female model is absent', () => {
+    const workboots = { ...bodyItem, name: 'Weathered Workboots', modelSet: 6, slot: 'feet' as const }
+    expect(equipmentModelCandidates(workboots, 'c0201')).toEqual([
+      'chara/equipment/e0006/model/c0201e0006_sho.mdl',
+      'chara/equipment/e0006/model/c0101e0006_sho.mdl',
+    ])
+  })
 })

@@ -47,6 +47,8 @@ export function hairSkeletonPath(raceCode: CharacterRaceCode, hairId = 1): strin
 }
 
 export function equipmentModelCandidates(item: ArmorItem, raceCode: CharacterRaceCode): string[] {
-  const fallback: CharacterRaceCode = raceCode === 'c0201' ? 'c0201' : 'c0101'
+  // Some early/shared equipment sets omit the female Midlander model and let the
+  // game's racial model table fall back to the canonical c0101 geometry.
+  const fallback: CharacterRaceCode = 'c0101'
   return [...new Set([equipmentAssetPlan(item, raceCode).modelPath, equipmentAssetPlan(item, fallback).modelPath])]
 }
