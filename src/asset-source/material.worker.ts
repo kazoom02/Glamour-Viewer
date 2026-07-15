@@ -2,6 +2,7 @@
 
 import { readImcEntry } from './imc'
 import { bakeCharacterMaterial } from './materialBake'
+import { materialCandidates } from './materialPath'
 import { parseMtrl, type TextureRole } from './mtrl'
 import { createLocalAssetReader, type LocalAssetReader } from './sqpack'
 import { decodeTex, type DecodedTexture } from './tex'
@@ -66,21 +67,6 @@ function normalizedMaterialKey(path: string): string {
   return path.replaceAll('\\', '/').toLowerCase()
 }
 
-function materialCandidates(request: MaterialLoadRequest, reference: string, materialId: number): string[] {
-  const normalized = reference.replaceAll('\\', '/').replace(/^\/+/, '')
-  const filename = normalized.split('/').at(-1)
-  if (!filename) return []
-  const candidates: string[] = []
-  if (normalized.includes('/material/')) candidates.push(normalized)
-  const modelRoot = request.modelPath.replace(/\/model\/[^/]+$/i, '')
-  if (/^chara\/equipment\/e\d{4}$/i.test(modelRoot)) {
-    candidates.push(`${modelRoot}/material/v${Math.max(1, materialId).toString().padStart(4, '0')}/${filename}`)
-  } else {
-    candidates.push(`${modelRoot}/material/v0001/${filename}`, `${modelRoot}/material/${filename}`)
-  }
-  return [...new Set(candidates)]
-}
-
 async function readFirst(reader: LocalAssetReader, paths: string[]): Promise<{ path: string; bytes: ArrayBuffer }> {
   const errors: string[] = []
   for (const path of paths) {
@@ -90,7 +76,8 @@ async function readFirst(reader: LocalAssetReader, paths: string[]): Promise<{ p
       errors.push(error instanceof Error ? error.message : String(error))
     }
   }
-  throw new Error(errors.at(-1) || 'No material path candidates were available.')
+  if (!paths.length) throw new Error('No material path candidates were available.')
+  throw new Error(`No material candidate was found. Tried: ${paths.join(', ')}. Last error: ${errors.at(-1) ?? 'unknown read error'}`)
 }
 
 async function loadTexture(
