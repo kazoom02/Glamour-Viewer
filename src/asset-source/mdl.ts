@@ -9,6 +9,7 @@ export interface DecodedModelMesh {
   positions: Float32Array
   normals?: Float32Array
   uvs?: Float32Array
+  uvs2?: Float32Array
   skinIndices?: Uint16Array
   skinWeights?: Float32Array
   bonePalette?: string[]
@@ -241,6 +242,21 @@ function readString(view: DataView, buffer: ArrayBuffer, tableStart: number, tab
   return new TextDecoder().decode(new Uint8Array(buffer, start, end - start))
 }
 
+/** Keeps the strongest four paired bone influences supported by Three.js skinning. */
+export function selectSkinInfluences(indices: number[], weights: number[]): { indices: number[]; weights: number[] } {
+  const count = Math.min(indices.length, weights.length)
+  const strongest = Array.from({ length: count }, (_, index) => ({
+    index: indices[index]!,
+    weight: Math.max(0, weights[index]!),
+  })).sort((a, b) => b.weight - a.weight).slice(0, 4)
+  while (strongest.length < 4) strongest.push({ index: 0, weight: 0 })
+  const total = strongest.reduce((sum, influence) => sum + influence.weight, 0)
+  return {
+    indices: strongest.map((influence) => influence.index),
+    weights: strongest.map((influence) => total > 0 ? influence.weight / total : 0),
+  }
+}
+
 export function decodeMdl(mdlBuffer: ArrayBuffer): DecodedModel {
   assertDecode(mdlBuffer.byteLength >= MODEL_FILE_HEADER_SIZE, 'The reconstructed MDL header is truncated.')
   const view = new DataView(mdlBuffer)
@@ -378,14 +394,18 @@ export function decodeMdl(mdlBuffer: ArrayBuffer): DecodedModel {
     if (!mesh || !declaration) continue
     const positionElement = declaration.find((element) => element.usage === 0)
     const normalElement = declaration.find((element) => element.usage === 3)
-    const uvElement = declaration.find((element) => element.usage === 4 && element.usageIndex === 0)
+    const uvElements = declaration
+      .filter((element) => element.usage === 4)
+      .sort((a, b) => a.usageIndex - b.usageIndex)
     const weightElement = declaration.find((element) => element.usage === 1)
     const boneElement = declaration.find((element) => element.usage === 2)
     if (!positionElement) continue
 
     const positions = new Float32Array(mesh.vertexCount * 3)
     const normals = normalElement ? new Float32Array(mesh.vertexCount * 3) : undefined
-    const uvs = uvElement ? new Float32Array(mesh.vertexCount * 2) : undefined
+    const uvs = uvElements.length ? new Float32Array(mesh.vertexCount * 2) : undefined
+    const hasSecondUv = uvElements.some((element) => element.dataType === 3 || element.dataType === 14) || uvElements.length > 1
+    const uvs2 = hasSecondUv ? new Float32Array(mesh.vertexCount * 2) : undefined
     const skinIndices = boneElement ? new Uint16Array(mesh.vertexCount * 4) : undefined
     const skinWeights = weightElement ? new Float32Array(mesh.vertexCount * 4) : undefined
     const boneTable = boneTables[mesh.boneTableIndex] ?? []
@@ -401,19 +421,34 @@ export function decodeMdl(mdlBuffer: ArrayBuffer): DecodedModel {
         if (normalElement.dataType === 8) normal.forEach((value, axis) => { normal[axis] = value * 2 - 1 })
         normals.set(normal, vertex * 3)
       }
-      if (uvElement && uvs) uvs.set(readVertex(view, vertexOffsets[lod]!, mesh, uvElement, vertex).slice(0, 2), vertex * 2)
-      if (boneElement && skinIndices) {
-        const localIndices = readVertex(view, vertexOffsets[lod]!, mesh, boneElement, vertex).slice(0, 4)
-        localIndices.forEach((value, component) => { skinIndices[vertex * 4 + component] = boneTable[value] ?? value })
+      if (uvs) {
+        const packedUvs = uvElements.flatMap((element) => readVertex(view, vertexOffsets[lod]!, mesh, element, vertex))
+        uvs.set(packedUvs.slice(0, 2), vertex * 2)
+        if (uvs2) uvs2.set(packedUvs.slice(2, 4), vertex * 2)
       }
-      if (weightElement && skinWeights) {
-        const weights = readVertex(view, vertexOffsets[lod]!, mesh, weightElement, vertex).slice(0, 4)
-        if (weightElement.dataType === 5 || weightElement.dataType === 17) {
-          weights.forEach((value, component) => { weights[component] = value / 255 })
+      const localIndices = boneElement
+        ? readVertex(view, vertexOffsets[lod]!, mesh, boneElement, vertex)
+        : undefined
+      const weights = weightElement
+        ? readVertex(view, vertexOffsets[lod]!, mesh, weightElement, vertex)
+        : undefined
+      if (weights && weightElement && (weightElement.dataType === 5 || weightElement.dataType === 17)) {
+        weights.forEach((value, component) => { weights[component] = value / 255 })
+      }
+      if (localIndices && weights && skinIndices && skinWeights) {
+        const selected = selectSkinInfluences(localIndices, weights)
+        selected.indices.forEach((value, component) => { skinIndices[vertex * 4 + component] = boneTable[value] ?? value })
+        skinWeights.set(selected.weights, vertex * 4)
+      } else {
+        if (localIndices && skinIndices) {
+          localIndices.slice(0, 4).forEach((value, component) => { skinIndices[vertex * 4 + component] = boneTable[value] ?? value })
         }
-        const sum = weights.reduce((total, value) => total + value, 0)
-        if (sum > 0) weights.forEach((value, component) => { weights[component] = value / sum })
-        skinWeights.set(weights, vertex * 4)
+        if (weights && skinWeights) {
+          const selectedWeights = weights.slice(0, 4)
+          const sum = selectedWeights.reduce((total, value) => total + value, 0)
+          if (sum > 0) selectedWeights.forEach((value, component) => { selectedWeights[component] = value / sum })
+          skinWeights.set(selectedWeights, vertex * 4)
+        }
       }
     }
 
@@ -431,7 +466,7 @@ export function decodeMdl(mdlBuffer: ArrayBuffer): DecodedModel {
     for (const range of ranges) {
       assertDecode(range.start >= 0 && range.start + range.count <= indices.length, 'An MDL submesh index range is invalid.')
       decoded.push({
-        positions, normals, uvs, skinIndices, skinWeights,
+        positions, normals, uvs, uvs2, skinIndices, skinWeights,
         bonePalette: boneTable.map((index) => boneNames[index] ?? `bone-${index}`),
         indices: indices.slice(range.start, range.start + range.count),
         materialIndex: mesh.materialIndex,

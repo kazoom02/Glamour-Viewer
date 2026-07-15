@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decodeMdl, reconstructMdl } from './mdl'
+import { decodeMdl, reconstructMdl, selectSkinInfluences } from './mdl'
 
 function triangleMdl(extendedWeights = false): ArrayBuffer {
   const vertexSize = extendedWeights ? 60 : 36
@@ -86,6 +86,46 @@ function texturedTriangleMdl(): ArrayBuffer {
   return buffer
 }
 
+function packedUvTriangleMdl(): ArrayBuffer {
+  const modelHeaderOffset = 212
+  const lodOffset = modelHeaderOffset + 56
+  const meshOffset = lodOffset + 180
+  const vertexOffset = meshOffset + 36
+  const uvOffset = vertexOffset + 36
+  const indexOffset = uvOffset + 24
+  const buffer = new ArrayBuffer(indexOffset + 6)
+  const view = new DataView(buffer)
+  view.setUint16(12, 1, true)
+  view.setUint32(16, vertexOffset, true)
+  view.setUint32(28, indexOffset, true)
+  view.setUint8(68, 0)
+  view.setUint8(69, 0)
+  view.setUint8(70, 2)
+  view.setUint8(71, 0)
+  view.setUint8(76, 1)
+  view.setUint8(77, 0)
+  view.setUint8(78, 14)
+  view.setUint8(79, 4)
+  view.setUint8(84, 0xff)
+  view.setUint32(208, 0, true)
+  view.setUint16(modelHeaderOffset + 4, 1, true)
+  view.setUint16(lodOffset + 2, 1, true)
+  view.setUint16(meshOffset, 3, true)
+  view.setUint32(meshOffset + 4, 3, true)
+  view.setUint32(meshOffset + 24, 36, true)
+  view.setUint8(meshOffset + 32, 12)
+  view.setUint8(meshOffset + 33, 8)
+  view.setUint8(meshOffset + 35, 2)
+  ;[0, 0, 0, 1, 0, 0, 0, 1, 0].forEach((value, index) => view.setFloat32(vertexOffset + index * 4, value, true))
+  ;[
+    0, 0, 0x3400, 0x3800,
+    0x3c00, 0, 0x3800, 0x3a00,
+    0, 0x3c00, 0x3a00, 0x3c00,
+  ].forEach((value, index) => view.setUint16(uvOffset + index * 2, value, true))
+  ;[0, 1, 2].forEach((value, index) => view.setUint16(indexOffset + index * 2, value, true))
+  return buffer
+}
+
 function attributedSubmeshMdl(): ArrayBuffer {
   const names = new TextEncoder().encode('atr_tv_a\0atr_tv_b\0')
   const modelHeaderOffset = 212 + names.length
@@ -153,6 +193,21 @@ describe('MDL geometry decoding', () => {
   it('decodes half-float UV vertex types used by character armor', () => {
     const model = decodeMdl(texturedTriangleMdl())
     expect(Array.from(model.meshes[0]!.uvs!)).toEqual([0, 0, 1, 0, 0, 1])
+  })
+
+  it('preserves both UV sets packed into a Half4 vertex attribute', () => {
+    const model = decodeMdl(packedUvTriangleMdl())
+    expect(Array.from(model.meshes[0]!.uvs!)).toEqual([0, 0, 1, 0, 0, 1])
+    expect(Array.from(model.meshes[0]!.uvs2!)).toEqual([0.25, 0.5, 0.5, 0.75, 0.75, 1])
+  })
+
+  it('keeps the strongest four of eight paired skinning influences', () => {
+    const selected = selectSkinInfluences(
+      [10, 11, 12, 13, 14, 15, 16, 17],
+      [0.01, 0.3, 0.02, 0.1, 0.25, 0.2, 0.05, 0.07],
+    )
+    expect(selected.indices).toEqual([11, 14, 15, 13])
+    expect(selected.weights.reduce((sum, weight) => sum + weight, 0)).toBeCloseTo(1)
   })
 
   it('splits meshes into IMC-addressable attribute submeshes', () => {

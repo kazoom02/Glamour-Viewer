@@ -134,6 +134,8 @@ function addDecodedModel(
     const metalness = decodedMaterial?.textures.metalness
     const emissive = decodedMaterial?.textures.emissive
     const alphaMode = decodedMaterial?.alphaMode ?? 'opaque'
+    const isIris = decodedMaterial?.shaderPackage.toLowerCase() === 'iris.shpk' || /_iri_[a-z]\.mtrl$/.test(materialPath)
+    const isFaceMaterial = /mt_c\d{4}f\d{4}/.test(materialPath)
     const material = new THREE.MeshStandardMaterial({
       color: diffuse ? 0xffffff : meshColor,
       map: diffuse ? textureFromDecoded(diffuse, true, anisotropy) : null,
@@ -147,12 +149,16 @@ function addDecodedModel(
       alphaTest: diffuse && alphaMode === 'mask' ? 0.5 : 0,
       transparent: alphaMode === 'blend',
       depthWrite: alphaMode !== 'blend',
-      side: THREE.DoubleSide,
+      side: isFaceMaterial ? THREE.FrontSide : THREE.DoubleSide,
+      polygonOffset: isIris,
+      polygonOffsetFactor: isIris ? -1 : 0,
+      polygonOffsetUnits: isIris ? -1 : 0,
     })
     if (normal) material.normalScale.set(1, 1)
     const geometry = new THREE.BufferGeometry()
     geometry.setAttribute('position', new THREE.BufferAttribute(part.positions, 3))
     if (part.uvs) geometry.setAttribute('uv', new THREE.BufferAttribute(part.uvs, 2))
+    if (part.uvs2) geometry.setAttribute('uv1', new THREE.BufferAttribute(part.uvs2, 2))
     let skinIndices = part.skinIndices
     if (skinIndices && rig) {
       skinIndices = new Uint16Array(skinIndices).map((globalIndex) => (
@@ -162,9 +168,10 @@ function addDecodedModel(
     if (skinIndices) geometry.setAttribute('skinIndex', new THREE.BufferAttribute(skinIndices, 4))
     if (part.skinWeights) geometry.setAttribute('skinWeight', new THREE.BufferAttribute(part.skinWeights, 4))
     geometry.setIndex(new THREE.BufferAttribute(part.indices, 1))
-    // Use stable geometric vertex normals under the decoded normal map. Some packed
-    // MDL normals need shader-specific handling and otherwise create dark triangles.
-    geometry.computeVertexNormals()
+    // FFXIV's authored normals preserve smoothing across material submeshes. Recomputing
+    // them independently makes the face look faceted at every material boundary.
+    if (part.normals?.every(Number.isFinite)) geometry.setAttribute('normal', new THREE.BufferAttribute(part.normals, 3))
+    else geometry.computeVertexNormals()
     geometry.normalizeNormals()
     geometry.computeBoundingBox()
     geometry.computeBoundingSphere()
@@ -172,6 +179,7 @@ function addDecodedModel(
       ? new THREE.SkinnedMesh(geometry, material)
       : new THREE.Mesh(geometry, material)
     mesh.name = `${label}-${index}`
+    if (isIris) mesh.renderOrder = 10
     target.add(mesh)
     if (mesh instanceof THREE.SkinnedMesh && rig) {
       target.updateMatrixWorld(true)

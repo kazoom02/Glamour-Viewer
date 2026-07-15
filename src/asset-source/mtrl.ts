@@ -37,10 +37,19 @@ export interface MaterialDyeRow {
 }
 
 const SAMPLER_ROLES = new Map<number, TextureRole>([
+  [0x88408c04, 'diffuse'],
+  [0x213cb439, 'diffuse'],
+  [0x563b84af, 'diffuse'],
+  [0x1e6fef9c, 'diffuse'],
+  [0x6968df0a, 'diffuse'],
   [0x115306be, 'diffuse'],
   [0x0c5ec1f1, 'normal'],
+  [0xaab4d9e9, 'normal'],
+  [0xddb3e97f, 'normal'],
   [0x8a4e82b6, 'mask'],
   [0x2b99e025, 'specular'],
+  [0x1bbc2f12, 'specular'],
+  [0x6cbb1f84, 'specular'],
   [0x565f8fd8, 'index'],
   [0x2005679f, 'table'],
 ])

@@ -14,6 +14,7 @@ export function modelTransferBuffers(results: ModelResult[]): ArrayBuffer[] {
         mesh.positions.buffer,
         mesh.normals?.buffer,
         mesh.uvs?.buffer,
+        mesh.uvs2?.buffer,
         mesh.skinIndices?.buffer,
         mesh.skinWeights?.buffer,
         mesh.indices.buffer,
