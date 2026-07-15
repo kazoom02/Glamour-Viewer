@@ -5,6 +5,8 @@ export type AssetSource =
       fileCount?: number
       totalBytes?: number
       access: 'handle' | 'fallback'
+      handle?: FileSystemDirectoryHandle
+      files?: File[]
     }
   | {
       kind: 'remote'

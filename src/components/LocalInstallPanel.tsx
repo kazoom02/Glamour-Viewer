@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { forgetDirectoryHandle, loadDirectoryHandle, saveDirectoryHandle } from '../lib/handleStore'
 import { formatBytes } from '../lib/format'
 import type { AssetSource } from '../asset-source/types'
+import { inspectFallbackSqpack, inspectSqpackDirectory } from '../asset-source/localSqpack'
 
 interface Props {
   onConnect: (source: AssetSource) => void
@@ -52,9 +53,15 @@ export function LocalInstallPanel({ onConnect }: Props) {
     setMessage(undefined)
     try {
       const handle = await window.showDirectoryPicker({ id: 'ffxiv-sqpack', mode: 'read' })
+      const inspection = await inspectSqpackDirectory(handle)
+      if (!inspection.valid) {
+        setMessage(`That does not look like game/sqpack. Missing: ${inspection.missing.join(', ')}`)
+        return
+      }
       await saveDirectoryHandle(handle)
       setSaved({ status: 'ready', handle })
-      onConnect({ kind: 'local', label: handle.name, access: 'handle' })
+      onConnect({ kind: 'local', label: handle.name, access: 'handle', handle })
+      setMessage(`Validated ${inspection.indexName} and the character data archive.`)
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return
       setMessage('The folder could not be opened. Check browser permissions and try again.')
@@ -64,8 +71,13 @@ export function LocalInstallPanel({ onConnect }: Props) {
   async function reconnect(handle: FileSystemDirectoryHandle) {
     const permission = await handle.requestPermission({ mode: 'read' }).catch(() => 'denied' as PermissionState)
     if (permission === 'granted') {
+      const inspection = await inspectSqpackDirectory(handle)
+      if (!inspection.valid) {
+        setMessage(`The saved folder is missing: ${inspection.missing.join(', ')}`)
+        return
+      }
       setSaved({ status: 'ready', handle })
-      onConnect({ kind: 'local', label: handle.name, access: 'handle' })
+      onConnect({ kind: 'local', label: handle.name, access: 'handle', handle })
     } else {
       setMessage('Read access was not granted. Your saved handle stays on this device.')
     }
@@ -76,14 +88,21 @@ export function LocalInstallPanel({ onConnect }: Props) {
     setBusy(true)
     setMessage(undefined)
     try {
+      const selectedFiles = Array.from(files)
+      const inspection = inspectFallbackSqpack(selectedFiles)
+      if (!inspection.valid) {
+        setMessage(`That does not look like game/sqpack. Missing: ${inspection.missing.join(', ')}`)
+        return
+      }
       const { summarizeFiles } = await import('../asset-source/parser')
-      const summary = await summarizeFiles(Array.from(files))
+      const summary = await summarizeFiles(selectedFiles)
       onConnect({
         kind: 'local',
         label: files[0]?.webkitRelativePath.split('/')[0] || 'Selected folder',
         access: 'fallback',
         fileCount: summary.fileCount,
         totalBytes: summary.totalBytes,
+        files: selectedFiles,
       })
       setMessage(`Indexed ${summary.fileCount.toLocaleString()} files (${formatBytes(summary.totalBytes)}) in this tab.`)
     } catch {
@@ -106,7 +125,7 @@ export function LocalInstallPanel({ onConnect }: Props) {
       {supportsPicker ? (
         <div className="card-actions">
           {saved.status === 'ready' && (
-            <button className="button secondary" onClick={() => onConnect({ kind: 'local', label: saved.handle.name, access: 'handle' })}>
+            <button className="button secondary" onClick={() => reconnect(saved.handle)}>
               Continue with {saved.handle.name}
             </button>
           )}

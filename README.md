@@ -17,6 +17,14 @@ There are exactly two asset-source modes:
 
 No server, companion process, asset proxy, credentials, or secret environment variables are part of the runtime design.
 
+## Armor catalog
+
+The equipment picker queries [XIVAPI v2](https://v2.xivapi.com/) directly from the browser for armor names, icons, equip slots, levels, jobs, and packed model identifiers. XIVAPI is catalog metadata only: model, material, and texture bytes still come exclusively from the selected local install or user-owned bucket.
+
+The catalog is loaded only after an asset source is connected and makes no request until the user submits a search. `VITE_XIVAPI_BASE_URL` can override the public `https://v2.xivapi.com/api/` base URL for development; it is a public build-time setting, never a secret.
+
+The full local random-access and decoding design is documented in [`docs/local-sqpack.md`](docs/local-sqpack.md). In short, Vercel serves the parser code, while the browser uses `File.slice()` to read only required ranges from local SqPack `.index` and `.dat*` files. No game data is sent to Vercel.
+
 ## Self-hosted cache CORS
 
 The asset origin must permit the deployed app to read it and must expose `Content-Length` so download progress can be reported:

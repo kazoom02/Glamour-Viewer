@@ -4,13 +4,16 @@ import { HostedAssetsPanel } from './components/HostedAssetsPanel'
 import { LocalInstallPanel } from './components/LocalInstallPanel'
 import { formatBytes } from './lib/format'
 import { encodeSharedSet, readSharedSet, type SharedSet } from './lib/share'
+import type { ArmorItem, EquippedArmor } from './catalog/types'
 
 const ViewerCanvas = lazy(() => import('./viewer/ViewerCanvas'))
+const ArmorCatalog = lazy(() => import('./components/ArmorCatalog'))
 
 export function App() {
   const [source, setSource] = useState<AssetSource>()
   const [sharedSet, setSharedSet] = useState<SharedSet | null>(() => readSharedSet())
   const [copied, setCopied] = useState(false)
+  const [equipped, setEquipped] = useState<EquippedArmor>({})
 
   useEffect(() => {
     const onHashChange = () => setSharedSet(readSharedSet())
@@ -28,6 +31,10 @@ export function App() {
     await navigator.clipboard.writeText(window.location.href).catch(() => undefined)
     setCopied(true)
     window.setTimeout(() => setCopied(false), 1800)
+  }
+
+  function equip(item: ArmorItem) {
+    setEquipped((current) => ({ ...current, [item.slot]: item }))
   }
 
   return (
@@ -101,9 +108,26 @@ export function App() {
             <div className="connection-meta">
               {source.fileCount !== undefined && <span>{source.fileCount.toLocaleString()} files</span>}
               {source.totalBytes !== undefined && <span>{formatBytes(source.totalBytes)}</span>}
-              <button className="text-button" onClick={() => setSource(undefined)}>Disconnect</button>
+              <button
+                className="text-button"
+                onClick={() => {
+                  setSource(undefined)
+                  setEquipped({})
+                }}
+              >Disconnect</button>
             </div>
           </section>
+        )}
+
+        {source && (
+          <Suspense fallback={<div className="catalog-loading">Loading armor catalog…</div>}>
+            <ArmorCatalog
+              source={source}
+              equipped={equipped}
+              onEquip={equip}
+              onRemove={(slot) => setEquipped((current) => ({ ...current, [slot]: undefined }))}
+            />
+          </Suspense>
         )}
 
         <section className="share-section">
@@ -118,7 +142,8 @@ export function App() {
 
       <footer>
         <p>Unofficial fan tool. Not affiliated with or endorsed by Square Enix.</p>
-        <p>This site hosts no Square Enix data.</p>
+        <p>Game imagery © SQUARE ENIX. FINAL FANTASY is a registered trademark of Square Enix Holdings Co., Ltd.</p>
+        <p>Vercel hosts no Square Enix data.</p>
       </footer>
     </div>
   )
