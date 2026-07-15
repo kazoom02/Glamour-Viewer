@@ -1,0 +1,58 @@
+# Glamour Viewer
+
+A privacy-first, static browser app for previewing FFXIV glamour data from files the user controls. The application shell is deployed; game assets are not.
+
+[![Deploy to Vercel](https://vercel.com/button)](https://vercel.com/new)
+
+> Deploying creates an empty shell. Every user must still supply their own local game installation or a converted asset cache in a bucket they control.
+
+## Privacy and hosting boundary
+
+The deployed instance hosts no Square Enix data. Vercel serves only the application’s JavaScript, CSS, and separately emitted browser code. It never receives, stores, uploads, or proxies FFXIV assets.
+
+There are exactly two asset-source modes:
+
+1. **Local install:** Chromium uses the File System Access API to read a user-selected `game/sqpack` directory on demand. The directory handle is stored only in that browser’s IndexedDB; read permission is checked and re-requested after reload. Firefox and Safari fall back to `<input type="file" webkitdirectory>`, which reads the directory into the tab’s memory and can be very slow for a full installation.
+2. **Self-hosted assets:** the user enters an `http(s)` base URL for a converted cache on infrastructure they control (for example R2 or S3). The app validates and displays the normalized URL for confirmation before making its first direct request. The bucket must expose a versioned `manifest.json`.
+
+No server, companion process, asset proxy, credentials, or secret environment variables are part of the runtime design.
+
+## Self-hosted cache CORS
+
+The asset origin must permit the deployed app to read it and must expose `Content-Length` so download progress can be reported:
+
+```http
+Access-Control-Allow-Origin: https://your-app.vercel.app
+Access-Control-Expose-Headers: Content-Length
+```
+
+If the cache is deliberately public, `Access-Control-Allow-Origin: *` is also valid. Configure allowed methods for `GET`, `HEAD`, and `OPTIONS` when your bucket provider requires an explicit list.
+
+The decoder is designed to be single-threaded. This repository intentionally has no `vercel.json`, COOP, or COEP policy. If future profiling justifies `SharedArrayBuffer` or threaded WASM, add COOP/COEP only after also requiring `Cross-Origin-Resource-Policy: cross-origin` (or equivalent CORS-compatible behavior) from every asset bucket.
+
+## Local development
+
+Requirements: Node.js 22 or newer and the pinned pnpm version (Corepack can activate it).
+
+```sh
+corepack enable
+pnpm install --frozen-lockfile
+pnpm dev
+```
+
+Production verification:
+
+```sh
+pnpm test
+pnpm build
+```
+
+The Vite build writes to `dist` with `base: '/'`. The build script measures the gzipped initial JavaScript entry, warns above 250 KiB, and fails above 400 KiB. The Three.js renderer and directory parser are lazy; the parser worker uses Vite’s module-worker URL form.
+
+## Vercel deployment
+
+Import the repository in Vercel and accept the auto-detected Vite preset. Do not add framework, build, or output-directory overrides. The app uses hash routes such as `/#/set/<encoded>`, so it needs no SPA rewrite and no `vercel.json`.
+
+Environment variables are not required. Any future public build-time setting must use the `VITE_` prefix. A secret in the browser bundle is not secret and should never be added.
+
+`.vercelignore` excludes fixtures, documentation sources, extraction tooling, and test/game assets so the deployment artifact remains the web app only.

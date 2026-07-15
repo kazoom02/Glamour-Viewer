@@ -1,0 +1,13 @@
+# Vercel should receive only the web application sources.
+docs/
+fixtures/
+packages/extraction-cli/
+test-assets/
+tests/fixtures/
+**/*.sqpack
+**/*.index
+**/*.index2
+**/*.dat[0-9]*
+**/*.tex
+**/*.mdl
+coverage/

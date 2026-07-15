@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.pnpm-store/
+.vite/
+.vite-preview.*.log
+*.tsbuildinfo
+.DS_Store
+*.local
