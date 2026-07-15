@@ -1,15 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import { decodeMdl, reconstructMdl } from './mdl'
 
-function triangleMdl(typeTerminator = false): ArrayBuffer {
-  const buffer = new ArrayBuffer(526)
+function triangleMdl(extendedWeights = false): ArrayBuffer {
+  const vertexSize = extendedWeights ? 60 : 36
+  const buffer = new ArrayBuffer(490 + vertexSize + 6)
   const view = new DataView(buffer)
   const declarationOffset = 68
   const modelHeaderOffset = 212
   const lodOffset = modelHeaderOffset + 56
   const meshOffset = lodOffset + 180
   const vertexOffset = meshOffset + 36
-  const indexOffset = vertexOffset + 36
+  const indexOffset = vertexOffset + vertexSize
 
   view.setUint16(12, 1, true)
   view.setUint32(16, vertexOffset, true)
@@ -18,10 +19,12 @@ function triangleMdl(typeTerminator = false): ArrayBuffer {
   view.setUint8(declarationOffset + 1, 0)
   view.setUint8(declarationOffset + 2, 2) // float3
   view.setUint8(declarationOffset + 3, 0) // position
-  if (typeTerminator) {
+  if (extendedWeights) {
     view.setUint8(declarationOffset + 8, 0)
+    view.setUint8(declarationOffset + 9, 12)
     view.setUint8(declarationOffset + 10, 17)
-    view.setUint8(declarationOffset + 11, 3)
+    view.setUint8(declarationOffset + 11, 1)
+    view.setUint8(declarationOffset + 16, 0xff)
   } else {
     view.setUint8(declarationOffset + 8, 0xff)
   }
@@ -34,11 +37,51 @@ function triangleMdl(typeTerminator = false): ArrayBuffer {
   view.setUint16(meshOffset + 8, 2, true)
   view.setUint32(meshOffset + 16, 0, true)
   view.setUint32(meshOffset + 20, 0, true)
-  view.setUint8(meshOffset + 32, 12)
+  view.setUint8(meshOffset + 32, extendedWeights ? 20 : 12)
   view.setUint8(meshOffset + 35, 1)
 
-  const vertices = [0, 0, 0, 1, 0, 0, 0, 2, 0]
-  vertices.forEach((value, index) => view.setFloat32(vertexOffset + index * 4, value, true))
+  const vertices = [[0, 0, 0], [1, 0, 0], [0, 2, 0]]
+  vertices.forEach((vertex, index) => {
+    const start = vertexOffset + index * (extendedWeights ? 20 : 12)
+    vertex.forEach((value, axis) => view.setFloat32(start + axis * 4, value, true))
+    if (extendedWeights) view.setUint8(start + 12, 255)
+  })
+  ;[0, 1, 2].forEach((value, index) => view.setUint16(indexOffset + index * 2, value, true))
+  return buffer
+}
+
+function texturedTriangleMdl(): ArrayBuffer {
+  const modelHeaderOffset = 212
+  const lodOffset = modelHeaderOffset + 56
+  const meshOffset = lodOffset + 180
+  const vertexOffset = meshOffset + 36
+  const uvOffset = vertexOffset + 36
+  const indexOffset = uvOffset + 12
+  const buffer = new ArrayBuffer(indexOffset + 6)
+  const view = new DataView(buffer)
+  view.setUint16(12, 1, true)
+  view.setUint32(16, vertexOffset, true)
+  view.setUint32(28, indexOffset, true)
+  view.setUint8(68, 0)
+  view.setUint8(69, 0)
+  view.setUint8(70, 2)
+  view.setUint8(71, 0)
+  view.setUint8(76, 1)
+  view.setUint8(77, 0)
+  view.setUint8(78, 13)
+  view.setUint8(79, 4)
+  view.setUint8(84, 0xff)
+  view.setUint32(208, 0, true)
+  view.setUint16(modelHeaderOffset + 4, 1, true)
+  view.setUint16(lodOffset + 2, 1, true)
+  view.setUint16(meshOffset, 3, true)
+  view.setUint32(meshOffset + 4, 3, true)
+  view.setUint32(meshOffset + 24, 36, true)
+  view.setUint8(meshOffset + 32, 12)
+  view.setUint8(meshOffset + 33, 4)
+  view.setUint8(meshOffset + 35, 2)
+  ;[0, 0, 0, 1, 0, 0, 0, 1, 0].forEach((value, index) => view.setFloat32(vertexOffset + index * 4, value, true))
+  ;[0, 0, 0x3c00, 0, 0, 0x3c00].forEach((value, index) => view.setUint16(uvOffset + index * 2, value, true))
   ;[0, 1, 2].forEach((value, index) => view.setUint16(indexOffset + index * 2, value, true))
   return buffer
 }
@@ -97,10 +140,19 @@ describe('MDL geometry decoding', () => {
     expect(model.bounds).toEqual({ min: [0, 0, 0], max: [1, 2, 0] })
   })
 
-  it('treats Direct3D vertex type 17 as an unused declaration terminator', () => {
+  it('decodes extended type-17 blend weights without truncating the declaration', () => {
     const model = decodeMdl(triangleMdl(true))
     expect(model.meshes).toHaveLength(1)
-    expect(model.meshes[0]!.normals).toBeUndefined()
+    expect(Array.from(model.meshes[0]!.skinWeights!)).toEqual([
+      1, 0, 0, 0,
+      1, 0, 0, 0,
+      1, 0, 0, 0,
+    ])
+  })
+
+  it('decodes half-float UV vertex types used by character armor', () => {
+    const model = decodeMdl(texturedTriangleMdl())
+    expect(Array.from(model.meshes[0]!.uvs!)).toEqual([0, 0, 1, 0, 0, 1])
   })
 
   it('splits meshes into IMC-addressable attribute submeshes', () => {

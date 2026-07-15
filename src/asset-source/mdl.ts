@@ -185,8 +185,8 @@ function f16(value: number): number {
 }
 
 function dataTypeSize(type: number): number {
-  if ([0, 4, 5, 6, 8, 9, 11, 13, 14, 15].includes(type)) return 4
-  if ([1, 7, 10, 12, 16].includes(type)) return 8
+  if ([0, 5, 6, 8, 9, 13, 16].includes(type)) return 4
+  if ([1, 7, 10, 14, 17].includes(type)) return 8
   if (type === 2) return 12
   if (type === 3) return 16
   throw new Error(`Unsupported FFXIV vertex data type ${type}.`)
@@ -194,10 +194,6 @@ function dataTypeSize(type: number): number {
 
 function snorm16(value: number): number {
   return Math.max(-1, value / 32767)
-}
-
-function signed10(value: number): number {
-  return value & 0x200 ? value - 0x400 : value
 }
 
 function floats(view: DataView, offset: number, type: number): number[] {
@@ -213,18 +209,12 @@ function floats(view: DataView, offset: number, type: number): number[] {
     case 8: return [view.getUint8(offset) / 255, view.getUint8(offset + 1) / 255, view.getUint8(offset + 2) / 255, view.getUint8(offset + 3) / 255]
     case 9: return [snorm16(view.getInt16(offset, true)), snorm16(view.getInt16(offset + 2, true))]
     case 10: return [snorm16(view.getInt16(offset, true)), snorm16(view.getInt16(offset + 2, true)), snorm16(view.getInt16(offset + 4, true)), snorm16(view.getInt16(offset + 6, true))]
-    case 11: return [view.getUint16(offset, true) / 65535, view.getUint16(offset + 2, true) / 65535]
-    case 12: return [view.getUint16(offset, true) / 65535, view.getUint16(offset + 2, true) / 65535, view.getUint16(offset + 4, true) / 65535, view.getUint16(offset + 6, true) / 65535]
-    case 13: {
-      const packed = view.getUint32(offset, true)
-      return [packed & 0x3ff, (packed >>> 10) & 0x3ff, (packed >>> 20) & 0x3ff]
-    }
-    case 14: {
-      const packed = view.getUint32(offset, true)
-      return [signed10(packed & 0x3ff) / 511, signed10((packed >>> 10) & 0x3ff) / 511, signed10((packed >>> 20) & 0x3ff) / 511]
-    }
-    case 15: return [f16(view.getUint16(offset, true)), f16(view.getUint16(offset + 2, true))]
-    case 16: return [f16(view.getUint16(offset, true)), f16(view.getUint16(offset + 2, true)), f16(view.getUint16(offset + 4, true)), f16(view.getUint16(offset + 6, true))]
+    case 13: return [f16(view.getUint16(offset, true)), f16(view.getUint16(offset + 2, true))]
+    case 14: return [f16(view.getUint16(offset, true)), f16(view.getUint16(offset + 2, true)), f16(view.getUint16(offset + 4, true)), f16(view.getUint16(offset + 6, true))]
+    case 16: return [view.getUint16(offset, true), view.getUint16(offset + 2, true)]
+    // Despite its historical UShort4 name, current character MDLs use this
+    // eight-byte element for up to eight byte-sized blend weights or indices.
+    case 17: return Array.from({ length: 8 }, (_, index) => view.getUint8(offset + index))
     default: throw new Error(`Unsupported FFXIV vertex data type ${type}.`)
   }
 }
@@ -265,7 +255,7 @@ export function decodeMdl(mdlBuffer: ArrayBuffer): DecodedModel {
       const offset = cursor + slot * 8
       const stream = view.getUint8(offset)
       const dataType = view.getUint8(offset + 2)
-      if (stream === 0xff || dataType === 17) break
+      if (stream === 0xff) break
       elements.push({
         stream,
         offset: view.getUint8(offset + 1),
@@ -418,7 +408,9 @@ export function decodeMdl(mdlBuffer: ArrayBuffer): DecodedModel {
       }
       if (weightElement && skinWeights) {
         const weights = readVertex(view, vertexOffsets[lod]!, mesh, weightElement, vertex).slice(0, 4)
-        if (weightElement.dataType === 5) weights.forEach((value, component) => { weights[component] = value / 255 })
+        if (weightElement.dataType === 5 || weightElement.dataType === 17) {
+          weights.forEach((value, component) => { weights[component] = value / 255 })
+        }
         const sum = weights.reduce((total, value) => total + value, 0)
         if (sum > 0) weights.forEach((value, component) => { weights[component] = value / sum })
         skinWeights.set(weights, vertex * 4)

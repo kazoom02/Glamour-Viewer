@@ -20,7 +20,7 @@ describe('TEX decoder', () => {
     ['BC3', TEX_FORMAT.BC3, 16],
     ['BC5', TEX_FORMAT.BC5, 16],
     ['BC7', TEX_FORMAT.BC7, 16],
-  ] as const)('decodes %s blocks to RGBA', (_name, format, blockBytes) => {
+  ] as const)('decodes %s blocks to RGBA', (_name: string, format: number, blockBytes: number) => {
     const texture = decodeTex(compressedTex(format, blockBytes))
     expect(texture.width).toBe(4)
     expect(texture.height).toBe(4)
@@ -40,4 +40,3 @@ describe('TEX decoder', () => {
     expect([...decodeTex(bytes.buffer).rgba]).toEqual([30, 20, 10, 40])
   })
 })
-
