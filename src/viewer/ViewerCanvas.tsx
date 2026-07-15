@@ -241,7 +241,43 @@ function resultMap(results: ModelLoadResult[]): Map<string, ModelLoadResult> {
   return new Map(results.map((result) => [result.path, result]))
 }
 
-async function diagnosticReport(source: AssetSource, failures: string[]): Promise<string> {
+function uvSummary(values: Float32Array | undefined): string {
+  if (!values?.length) return 'missing'
+  let minU = Number.POSITIVE_INFINITY
+  let minV = Number.POSITIVE_INFINITY
+  let maxU = Number.NEGATIVE_INFINITY
+  let maxV = Number.NEGATIVE_INFINITY
+  for (let offset = 0; offset + 1 < values.length; offset += 2) {
+    minU = Math.min(minU, values[offset]!)
+    minV = Math.min(minV, values[offset + 1]!)
+    maxU = Math.max(maxU, values[offset]!)
+    maxV = Math.max(maxV, values[offset + 1]!)
+  }
+  const value = (number: number) => Number.isFinite(number) ? number.toFixed(3) : 'invalid'
+  return `u=${value(minU)}..${value(maxU)} v=${value(minV)}..${value(maxV)}`
+}
+
+function modelMaterialDiagnostics(
+  label: string,
+  model: DecodedModel,
+  materialResult: Awaited<ReturnType<typeof loadLocalMaterials>>[number] | undefined,
+  equipment: boolean,
+): string[] {
+  return model.meshes.flatMap((mesh, index) => {
+    const reference = model.materialPaths[mesh.materialIndex]?.replaceAll('\\', '/').toLowerCase() ?? '(missing)'
+    const material = materialResult?.materials[reference]
+    const iris = material?.shaderPackage.toLowerCase() === 'iris.shpk' || reference.includes('_iri_')
+    if (!equipment && !iris) return []
+    return [
+      `${label} mesh ${index}: materialIndex=${mesh.materialIndex} reference=${reference}`,
+      `  shader=${material?.shaderPackage ?? 'unresolved'} vertices=${mesh.positions.length / 3} triangles=${mesh.indices.length / 3}`,
+      `  uv0=${uvSummary(mesh.uvs)} uv1=${uvSummary(mesh.uvs2)}`,
+      `  skin=${mesh.skinIndices && mesh.skinWeights ? 'yes' : 'no'} attributes=${mesh.attributes?.join(',') || 'none'}`,
+    ].join('\n')
+  })
+}
+
+async function diagnosticReport(source: AssetSource, failures: string[], diagnostics: string[] = []): Promise<string> {
   let permission = 'not applicable'
   if (source.kind === 'local' && source.handle) {
     try {
@@ -261,7 +297,10 @@ async function diagnosticReport(source: AssetSource, failures: string[]): Promis
     `Browser: ${navigator.userAgent}`,
     '',
     'Asset failures:',
-    ...failures,
+    ...(failures.length ? failures : ['none']),
+    '',
+    'Material and geometry diagnostics:',
+    ...(diagnostics.length ? diagnostics : ['none captured']),
   ].join('\n')
 }
 
@@ -270,6 +309,7 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
   const previewItems = ARMOR_SLOTS.flatMap((slot) => equipped[slot] ? [[slot, equipped[slot]!] as const] : [])
   const [status, setStatus] = useState('Loading character…')
   const [error, setError] = useState<string>()
+  const [debug, setDebug] = useState<string>()
 
   useEffect(() => {
     const host = container.current
@@ -316,10 +356,12 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
     }))
     const characterPlans = allCharacterPlans.filter((plan) => !plan.coveredBy || !equipped[plan.coveredBy])
     setError(undefined)
+    setDebug(undefined)
     setStatus(`Reading ${raceCode} character models…`)
 
     void (async () => {
       const failures: string[] = []
+      const diagnostics: string[] = []
       let characterParts = 0
       let equippedItems = 0
       let rig: CharacterRig | undefined
@@ -383,6 +425,7 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
         }
         if (disposed) return
         const materialsByModel = new Map(materialResults.map((result) => [result.modelPath, result]))
+        diagnostics.push(...materialResults.flatMap((result) => result.diagnostics))
 
         for (const plan of characterPlans) {
           const result = byPath.get(plan.path)
@@ -400,6 +443,7 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
               maxAnisotropy,
             )
             if (materialResult?.errors.length) failures.push(...materialResult.errors.map((error) => `${plan.part} ${error}`))
+            diagnostics.push(...modelMaterialDiagnostics(`character ${plan.part}`, result.model, materialResult, false))
             characterParts += 1
           } else {
             failures.push(`${plan.part}: ${result?.error || 'model not found'}`)
@@ -421,6 +465,7 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
               maxAnisotropy,
             )
             if (materialResult?.errors.length) failures.push(...materialResult.errors.map((error) => `${plan.item.name} ${error}`))
+            diagnostics.push(...modelMaterialDiagnostics(plan.item.name, result.model, materialResult, true))
             equippedItems += 1
           } else {
             const attempted = plan.candidates.map((path) => byPath.get(path)?.error).filter(Boolean).join(' / ')
@@ -458,9 +503,12 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
       setStatus(characterParts
         ? `${raceCode} ${rig ? 'skinned' : 'bind-pose'} character · ${equippedItems}/${selected.length} equipped · drag to rotate`
         : 'Character models could not be decoded')
-      if (failures.length) {
-        const report = await diagnosticReport(source, failures)
-        if (!disposed) setError(report)
+      if (source.kind === 'local') {
+        const report = await diagnosticReport(source, failures, diagnostics)
+        if (!disposed) {
+          if (failures.length) setError(report)
+          else setDebug(report)
+        }
       }
     })().catch((reason) => {
       if (disposed) return
@@ -536,6 +584,19 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
             Copy debug report
           </button>
           <pre>{error}</pre>
+        </details>
+      )}
+      {!error && debug && (
+        <details className="viewer-debug">
+          <summary>Material and eye debug report</summary>
+          <button
+            className="viewer-copy-debug"
+            type="button"
+            onClick={() => void navigator.clipboard.writeText(debug)}
+          >
+            Copy debug report
+          </button>
+          <pre>{debug}</pre>
         </details>
       )}
     </div>

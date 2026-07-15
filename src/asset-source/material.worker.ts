@@ -25,6 +25,32 @@ interface Request {
 const CACHE_VERSION = 1
 const memoryCache = new Map<string, DecodedTexture>()
 
+function textureSummary(texture: DecodedTexture | undefined): string {
+  if (!texture) return 'missing'
+  const min = [255, 255, 255, 255]
+  const max = [0, 0, 0, 0]
+  const sum = [0, 0, 0, 0]
+  const pixelCount = texture.width * texture.height
+  const stride = Math.max(1, Math.floor(pixelCount / 4096))
+  let samples = 0
+  for (let pixel = 0; pixel < pixelCount; pixel += stride) {
+    const offset = pixel * 4
+    for (let channel = 0; channel < 4; channel += 1) {
+      const value = texture.rgba[offset + channel]!
+      min[channel] = Math.min(min[channel]!, value)
+      max[channel] = Math.max(max[channel]!, value)
+      sum[channel] = sum[channel]! + value
+    }
+    samples += 1
+  }
+  const mean = sum.map((value) => Math.round(value / Math.max(1, samples)))
+  return `${texture.width}x${texture.height} format=0x${texture.format.toString(16)} rgba[min=${min.join(',')} max=${max.join(',')} mean=${mean.join(',')}]`
+}
+
+function samplerLabel(value: number | undefined): string {
+  return value === undefined ? 'inferred' : `0x${value.toString(16).padStart(8, '0')}`
+}
+
 function cacheDatabase(): Promise<IDBDatabase | undefined> {
   if (!('indexedDB' in self)) return Promise.resolve(undefined)
   return new Promise((resolve) => {
@@ -107,6 +133,7 @@ async function loadRequest(
 ): Promise<MaterialLoadResult> {
   const materials: MaterialLoadResult['materials'] = {}
   const errors: string[] = []
+  const diagnostics: string[] = []
   let materialId = request.variant ?? 1
   let attributeMask: number | undefined
   if (request.imcPath && request.slot && request.variant !== undefined) {
@@ -123,6 +150,22 @@ async function loadRequest(
     try {
       const materialFile = await readFirst(reader, materialCandidates(request, materialReference, materialId))
       const parsed = parseMtrl(materialFile.bytes)
+      const shader = parsed.shaderPackage.toLowerCase()
+      const captureDiagnostics = Boolean(request.slot)
+        || shader === 'iris.shpk'
+        || /_iri_[a-z]\.mtrl$/i.test(materialReference)
+      const materialDiagnostics: string[] = captureDiagnostics ? [
+        `material ${materialReference}`,
+        `  model: ${request.modelPath}`,
+        `  resolved MTRL: ${materialFile.path}`,
+        `  shader: ${parsed.shaderPackage || '(empty)'}`,
+        `  IMC: variant=${request.variant ?? 'n/a'} materialId=${materialId} attributeMask=${attributeMask ?? 'n/a'}`,
+        `  color table: ${parsed.colorTable ? `${parsed.colorTable.kind} ${parsed.colorTable.rows.length} rows` : 'none'}`,
+        '  declared samplers:',
+        ...parsed.textures.map((texture) => (
+          `    ${texture.role} sampler=${samplerLabel(texture.samplerId)} priority=${materialTexturePriority(texture)} path=${texture.path}`
+        )),
+      ] : []
       const decoded = {
         path: materialFile.path,
         shaderPackage: parsed.shaderPackage,
@@ -135,14 +178,20 @@ async function loadRequest(
         if (!textureReference.path) continue
         const role = textureReference.role
         if (!(['diffuse', 'normal', 'mask', 'specular', 'index'] as TextureRole[]).includes(role)) continue
-        if (decoded.textures[role as keyof typeof decoded.textures]) continue
+        if (decoded.textures[role as keyof typeof decoded.textures]) {
+          if (captureDiagnostics) materialDiagnostics.push(`  skipped duplicate ${role}: ${textureReference.path}`)
+          continue
+        }
         try {
-          decoded.textures[role as keyof typeof decoded.textures] = await loadTexture(reader, sourceKey, textureReference.path)
+          const texture = await loadTexture(reader, sourceKey, textureReference.path)
+          decoded.textures[role as keyof typeof decoded.textures] = texture
+          if (captureDiagnostics) materialDiagnostics.push(`  selected ${role}: ${textureReference.path} — ${textureSummary(texture)}`)
         } catch (error) {
-          errors.push(`[tex:${role}] ${textureReference.path}: ${error instanceof Error ? error.message : String(error)}`)
+          const message = error instanceof Error ? error.message : String(error)
+          errors.push(`[tex:${role}] ${textureReference.path}: ${message}`)
+          if (captureDiagnostics) materialDiagnostics.push(`  failed ${role}: ${textureReference.path} — ${message}`)
         }
       }
-      const shader = parsed.shaderPackage.toLowerCase()
       if (parsed.colorTable) {
         if (usesCharacterColorTable(shader)) {
           const baked = bakeCharacterMaterial(parsed.colorTable, decoded.textures)
@@ -161,12 +210,23 @@ async function loadRequest(
         const normal = bakeSkinNormal(decoded.textures.normal)
         if (normal) decoded.textures.normal = normal
       }
+      if (captureDiagnostics) {
+        materialDiagnostics.push(
+          `  final diffuse: ${textureSummary(decoded.textures.diffuse)}`,
+          `  final normal: ${textureSummary(decoded.textures.normal)}`,
+          `  final mask: ${textureSummary(decoded.textures.mask)}`,
+          `  final index: ${textureSummary(decoded.textures.index)}`,
+          `  final roughness: ${textureSummary(decoded.textures.roughness)}`,
+          `  final metalness: ${textureSummary(decoded.textures.metalness)}`,
+        )
+        diagnostics.push(materialDiagnostics.join('\n'))
+      }
       materials[normalizedMaterialKey(materialReference)] = decoded
     } catch (error) {
       errors.push(`[mtrl] ${materialReference}: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
-  return { modelPath: request.modelPath, materials, errors, attributeMask }
+  return { modelPath: request.modelPath, materials, errors, diagnostics, attributeMask }
 }
 
 async function sourceFingerprint(source: Extract<AssetSource, { kind: 'local' }>): Promise<string> {

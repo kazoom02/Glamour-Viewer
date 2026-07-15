@@ -32,5 +32,6 @@ export interface MaterialLoadResult {
   modelPath: string
   materials: Record<string, DecodedMaterial>
   errors: string[]
+  diagnostics: string[]
   attributeMask?: number
 }
