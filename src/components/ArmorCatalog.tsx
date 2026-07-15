@@ -1,8 +1,8 @@
-import { type FormEvent, useRef, useState } from 'react'
+import { type FormEvent, useEffect, useRef, useState } from 'react'
 import type { AssetSource } from '../asset-source/types'
 import { equipmentAssetPlan } from '../asset-source/equipmentPlan'
-import { ARMOR_SLOTS, type ArmorItem, type EquippedArmor } from '../catalog/types'
-import { searchArmor, xivapiIconUrl } from '../catalog/xivapi'
+import { ARMOR_SLOTS, type ArmorItem, type ArmorSlot, type EquippedArmor } from '../catalog/types'
+import { continueArmorSearch, searchArmor, xivapiIconUrl } from '../catalog/xivapi'
 import { CHARACTER_PRESETS, type CharacterRaceCode } from '../asset-source/characterPlan'
 
 interface Props {
@@ -24,30 +24,59 @@ const SLOT_LABELS: Record<ArmorItem['slot'], string> = {
 
 export default function ArmorCatalog({ source, equipped, raceCode, onRaceChange, onEquip, onRemove }: Props) {
   const [query, setQuery] = useState('')
+  const [selectedSlot, setSelectedSlot] = useState<ArmorSlot>('head')
   const [results, setResults] = useState<ArmorItem[]>([])
+  const [nextCursor, setNextCursor] = useState<string>()
   const [version, setVersion] = useState<string>()
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
   const abortRef = useRef<AbortController>(null)
 
-  async function submit(event: FormEvent) {
-    event.preventDefault()
+  async function loadCatalog(search: string, slot: ArmorSlot, append = false, cursor?: string) {
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
     setBusy(true)
     setError(undefined)
+    if (!append) {
+      setResults([])
+      setNextCursor(undefined)
+    }
     try {
-      const page = await searchArmor(query, controller.signal)
-      setResults(page.items)
+      const page = cursor
+        ? await continueArmorSearch(cursor, slot, controller.signal)
+        : await searchArmor(search, slot, controller.signal)
+      setResults((current) => {
+        if (!append) return page.items
+        const byId = new Map(current.map((item) => [item.id, item]))
+        page.items.forEach((item) => byId.set(item.id, item))
+        return [...byId.values()]
+      })
+      setNextCursor(page.next)
       setVersion(page.version)
-      if (!page.items.length) setError('No wearable head, body, hand, leg, or foot items matched that search.')
+      if (!page.items.length && !append) setError(`No ${SLOT_LABELS[slot].toLowerCase()} equipment matched that search.`)
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === 'AbortError') return
       setError(caught instanceof Error ? caught.message : 'The armor catalog could not be searched.')
     } finally {
       if (abortRef.current === controller) setBusy(false)
     }
+  }
+
+  useEffect(() => {
+    void loadCatalog('', selectedSlot)
+    return () => abortRef.current?.abort()
+  }, [selectedSlot])
+
+  function submit(event: FormEvent) {
+    event.preventDefault()
+    void loadCatalog(query, selectedSlot)
+  }
+
+  function selectCategory(slot: ArmorSlot) {
+    setQuery('')
+    if (slot === selectedSlot) void loadCatalog('', slot)
+    else setSelectedSlot(slot)
   }
 
   return (
@@ -75,20 +104,34 @@ export default function ArmorCatalog({ source, equipped, raceCode, onRaceChange,
         </div>
       </div>
 
+      <nav className="catalog-categories" aria-label="Armor categories">
+        {ARMOR_SLOTS.map((slot) => (
+          <button
+            className={selectedSlot === slot ? 'active' : ''}
+            type="button"
+            aria-pressed={selectedSlot === slot}
+            onClick={() => selectCategory(slot)}
+            key={slot}
+          >
+            <span>{SLOT_LABELS[slot]}</span>
+            {equipped[slot] && <small>Equipped</small>}
+          </button>
+        ))}
+      </nav>
+
       <form className="catalog-search" onSubmit={submit}>
-        <label className="field-label" htmlFor="armor-search">Armor name</label>
+        <label className="field-label" htmlFor="armor-search">Search within {SLOT_LABELS[selectedSlot]}</label>
         <div className="url-row">
           <input
             id="armor-search"
             type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Try Ironworks, Neo-Ishgardian, or hempen"
-            minLength={2}
+            placeholder={`Search ${SLOT_LABELS[selectedSlot].toLowerCase()} equipment, or leave empty to show all`}
             autoComplete="off"
           />
-          <button className="button primary" disabled={busy || query.trim().length < 2}>
-            {busy ? 'Searching…' : 'Search armor'}
+          <button className="button primary" disabled={busy || query.trim().length === 1}>
+            {busy ? 'Loading…' : query.trim() ? `Search ${SLOT_LABELS[selectedSlot]}` : `Show all ${SLOT_LABELS[selectedSlot]}`}
           </button>
         </div>
       </form>
@@ -96,7 +139,12 @@ export default function ArmorCatalog({ source, equipped, raceCode, onRaceChange,
       {error && <p className="error-message catalog-error" role="alert">{error}</p>}
 
       {results.length > 0 && (
-        <div className="armor-results" aria-label="Armor search results">
+        <>
+        <div className="catalog-results-heading">
+          <strong>{SLOT_LABELS[selectedSlot]} equipment</strong>
+          <span>{results.length} loaded{nextCursor ? ' · more available' : ''}</span>
+        </div>
+        <div className="armor-results" aria-label={`${SLOT_LABELS[selectedSlot]} armor results`}>
           {results.map((item) => {
             const isEquipped = equipped[item.slot]?.id === item.id
             return (
@@ -116,6 +164,17 @@ export default function ArmorCatalog({ source, equipped, raceCode, onRaceChange,
             )
           })}
         </div>
+        {nextCursor && (
+          <button
+            className="button secondary catalog-load-more"
+            type="button"
+            disabled={busy}
+            onClick={() => void loadCatalog(query, selectedSlot, true, nextCursor)}
+          >
+            {busy ? 'Loading…' : `Load more ${SLOT_LABELS[selectedSlot].toLowerCase()} equipment`}
+          </button>
+        )}
+        </>
       )}
 
       <div className="equipment-tray">

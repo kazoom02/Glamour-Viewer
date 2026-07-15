@@ -1,13 +1,13 @@
 import type { ArmorItem, ArmorSearchPage, ArmorSlot } from './types'
 
 const DEFAULT_XIVAPI_BASE_URL = 'https://v2.xivapi.com/api/'
-const ARMOR_SLOT_QUERY = [
-  'EquipSlotCategory.Head>0',
-  'EquipSlotCategory.Body>0',
-  'EquipSlotCategory.Gloves>0',
-  'EquipSlotCategory.Legs>0',
-  'EquipSlotCategory.Feet>0',
-].join(' ')
+const SLOT_FIELDS: Record<ArmorSlot, keyof EquipSlotFields> = {
+  head: 'Head',
+  body: 'Body',
+  hands: 'Gloves',
+  legs: 'Legs',
+  feet: 'Feet',
+}
 const FIELDS = [
   'Name',
   'Icon',
@@ -47,6 +47,8 @@ interface SearchResponse {
   results?: Array<{ row_id?: number; fields?: SearchFields }>
 }
 
+const PAGE_SIZE = 50
+
 function apiBaseUrl(): URL {
   const configured = import.meta.env.VITE_XIVAPI_BASE_URL || DEFAULT_XIVAPI_BASE_URL
   const url = new URL(configured)
@@ -83,15 +85,29 @@ export function xivapiIconUrl(path: string): string {
   return url.toString()
 }
 
-export async function searchArmor(search: string, signal?: AbortSignal): Promise<ArmorSearchPage> {
+export function armorSearchUrl(search: string, slot: ArmorSlot): URL {
   const term = search.trim()
-  if (term.length < 2) throw new Error('Enter at least two characters.')
+  if (term.length === 1) throw new Error('Enter at least two characters, or leave the search empty to browse everything.')
 
   const url = new URL('search', apiBaseUrl())
   url.searchParams.set('sheets', 'Item')
   url.searchParams.set('fields', FIELDS)
-  url.searchParams.set('limit', '30')
-  url.searchParams.set('query', `+Name~"${escapeQueryValue(term)}" +(${ARMOR_SLOT_QUERY})`)
+  url.searchParams.set('limit', PAGE_SIZE.toString())
+  const clauses = [`+EquipSlotCategory.${SLOT_FIELDS[slot]}>0`]
+  if (term) clauses.unshift(`+Name~"${escapeQueryValue(term)}"`)
+  url.searchParams.set('query', clauses.join(' '))
+  return url
+}
+
+function cursorUrl(cursor: string): URL {
+  const url = new URL('search', apiBaseUrl())
+  url.searchParams.set('fields', FIELDS)
+  url.searchParams.set('limit', PAGE_SIZE.toString())
+  url.searchParams.set('cursor', cursor)
+  return url
+}
+
+async function fetchArmorPage(url: URL, selectedSlot: ArmorSlot, signal?: AbortSignal): Promise<ArmorSearchPage> {
 
   const response = await fetch(url, {
     headers: { Accept: 'application/json' },
@@ -117,7 +133,7 @@ export async function searchArmor(search: string, signal?: AbortSignal): Promise
       modelValue,
       modelSet: model.set,
       modelVariant: model.variant,
-      slot,
+      slot: selectedSlot,
       dyeCount: fields.DyeCount ?? 0,
       equipLevel: fields.LevelEquip ?? 0,
       jobs: fields.ClassJobCategory?.fields?.Name ?? 'All classes',
@@ -129,4 +145,13 @@ export async function searchArmor(search: string, signal?: AbortSignal): Promise
     next: payload.next,
     version: payload.version ?? 'latest',
   }
+}
+
+export function searchArmor(search: string, slot: ArmorSlot, signal?: AbortSignal): Promise<ArmorSearchPage> {
+  return fetchArmorPage(armorSearchUrl(search, slot), slot, signal)
+}
+
+export function continueArmorSearch(cursor: string, slot: ArmorSlot, signal?: AbortSignal): Promise<ArmorSearchPage> {
+  if (!cursor) throw new Error('The XIVAPI catalog cursor is empty.')
+  return fetchArmorPage(cursorUrl(cursor), slot, signal)
 }

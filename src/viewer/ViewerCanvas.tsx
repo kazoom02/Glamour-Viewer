@@ -61,11 +61,19 @@ function addFallbackMannequin(scene: THREE.Scene): THREE.Group {
   return group
 }
 
-function textureFromDecoded(texture: NonNullable<DecodedMaterial['textures']['diffuse']>, color: boolean): THREE.DataTexture {
+function textureFromDecoded(
+  texture: NonNullable<DecodedMaterial['textures']['diffuse']>,
+  color: boolean,
+  anisotropy: number,
+): THREE.DataTexture {
   const result = new THREE.DataTexture(texture.rgba, texture.width, texture.height, THREE.RGBAFormat, THREE.UnsignedByteType)
   result.colorSpace = color ? THREE.SRGBColorSpace : THREE.NoColorSpace
   result.wrapS = THREE.RepeatWrapping
   result.wrapT = THREE.RepeatWrapping
+  result.magFilter = THREE.LinearFilter
+  result.minFilter = THREE.LinearMipmapLinearFilter
+  result.generateMipmaps = true
+  result.anisotropy = anisotropy
   result.flipY = false
   result.needsUpdate = true
   return result
@@ -106,6 +114,7 @@ function addDecodedModel(
   attributeMask?: number,
   slot?: ArmorSlot,
   rig?: CharacterRig,
+  anisotropy = 1,
 ): number {
   for (const [index, part] of model.meshes.entries()) {
     if (slot && attributeMask !== undefined && !isVisibleEquipmentPart(part.attributes, slot, attributeMask)) continue
@@ -127,13 +136,13 @@ function addDecodedModel(
     const alphaMode = decodedMaterial?.alphaMode ?? 'opaque'
     const material = new THREE.MeshStandardMaterial({
       color: diffuse ? 0xffffff : meshColor,
-      map: diffuse ? textureFromDecoded(diffuse, true) : null,
-      normalMap: normal ? textureFromDecoded(normal, false) : null,
-      roughnessMap: roughness ? textureFromDecoded(roughness, false) : null,
+      map: diffuse ? textureFromDecoded(diffuse, true, anisotropy) : null,
+      normalMap: normal ? textureFromDecoded(normal, false, anisotropy) : null,
+      roughnessMap: roughness ? textureFromDecoded(roughness, false, anisotropy) : null,
       roughness: roughness ? 1 : 0.62,
-      metalnessMap: metalness ? textureFromDecoded(metalness, false) : null,
+      metalnessMap: metalness ? textureFromDecoded(metalness, false, anisotropy) : null,
       metalness: metalness ? 1 : materialPath.includes('/mt_c') && materialPath.includes('e0000') ? 0 : 0.08,
-      emissiveMap: emissive ? textureFromDecoded(emissive, true) : null,
+      emissiveMap: emissive ? textureFromDecoded(emissive, true, anisotropy) : null,
       emissive: emissive ? 0xffffff : 0x000000,
       alphaTest: diffuse && alphaMode === 'mask' ? 0.5 : 0,
       transparent: alphaMode === 'blend',
@@ -260,6 +269,7 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
     renderer.outputColorSpace = THREE.SRGBColorSpace
     renderer.toneMapping = THREE.ACESFilmicToneMapping
     renderer.toneMappingExposure = 1.12
+    const maxAnisotropy = renderer.capabilities.getMaxAnisotropy()
     host.appendChild(renderer.domElement)
 
     const controls = new OrbitControls(camera, renderer.domElement)
@@ -347,7 +357,17 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
           const result = byPath.get(plan.path)
           if (result?.model) {
             const materialResult = materialsByModel.get(result.path)
-            addDecodedModel(characterGroup, result.model, PART_COLORS[plan.part], `character-${plan.part}`, materialResult?.materials, undefined, undefined, rig)
+            addDecodedModel(
+              characterGroup,
+              result.model,
+              PART_COLORS[plan.part],
+              `character-${plan.part}`,
+              materialResult?.materials,
+              undefined,
+              undefined,
+              rig,
+              maxAnisotropy,
+            )
             if (materialResult?.errors.length) failures.push(...materialResult.errors.map((error) => `${plan.part} ${error}`))
             characterParts += 1
           } else {
@@ -367,6 +387,7 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
               materialResult?.attributeMask,
               plan.slot,
               rig,
+              maxAnisotropy,
             )
             if (materialResult?.errors.length) failures.push(...materialResult.errors.map((error) => `${plan.item.name} ${error}`))
             equippedItems += 1
