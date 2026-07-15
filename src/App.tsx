@@ -5,7 +5,7 @@ import { LocalInstallPanel } from './components/LocalInstallPanel'
 import { formatBytes } from './lib/format'
 import { encodeSharedSet, readSharedSet, type SharedSet } from './lib/share'
 import type { ArmorItem, EquippedArmor } from './catalog/types'
-import { CHARACTER_PRESETS, type CharacterRaceCode } from './asset-source/characterPlan'
+import type { CharacterRaceCode } from './asset-source/characterPlan'
 
 const ViewerCanvas = lazy(() => import('./viewer/ViewerCanvas'))
 const ArmorCatalog = lazy(() => import('./components/ArmorCatalog'))
@@ -122,26 +122,12 @@ export function App() {
         )}
 
         {source && (
-          <section className="character-bar" aria-label="Character model">
-            <div>
-              <p className="eyebrow">Character model</p>
-              <strong>Race and gender</strong>
-            </div>
-            <label>
-              <span className="field-label">Preview body</span>
-              <select value={raceCode} onChange={(event) => setRaceCode(event.target.value as CharacterRaceCode)}>
-                {CHARACTER_PRESETS.map(([code, label]) => <option value={code} key={code}>{label}</option>)}
-              </select>
-            </label>
-          </section>
-        )}
-
-        {source && (
           <Suspense fallback={<div className="catalog-loading">Loading armor catalog…</div>}>
             <ArmorCatalog
               source={source}
               equipped={equipped}
               raceCode={raceCode}
+              onRaceChange={setRaceCode}
               onEquip={equip}
               onRemove={(slot) => setEquipped((current) => ({ ...current, [slot]: undefined }))}
             />

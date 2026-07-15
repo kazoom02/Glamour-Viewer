@@ -201,8 +201,9 @@ async function readModelAtLocation(
   repository: string,
   gamePath: string,
   location: SqpackLocation,
+  getSourceFile = (requestedRepository: string, name: string) => sourceFile(source, requestedRepository, name),
 ): Promise<ArrayBuffer> {
-  const datFile = await sourceFile(source, repository, `040000.win32.dat${location.dataFileId}`)
+  const datFile = await getSourceFile(repository, `040000.win32.dat${location.dataFileId}`)
   assertRange(datFile, `The selected directory is missing ${repository}/040000.win32.dat${location.dataFileId}.`)
   assertRange(location.offset + MODEL_HEADER_SIZE <= datFile.size, 'The model offset points beyond its SqPack data file.')
 
@@ -225,11 +226,21 @@ export interface LocalModelReader {
 
 /** Creates one repository-aware reader and retains only character index tables for this worker batch. */
 export function createLocalModelReader(source: Extract<AssetSource, { kind: 'local' }>): LocalModelReader {
+  const fileCache = new Map<string, Promise<File | undefined>>()
+  const cachedSourceFile = (repository: string, name: string) => {
+    const key = `${repository}/${name}`
+    let pending = fileCache.get(key)
+    if (!pending) {
+      pending = sourceFile(source, repository, name)
+      fileCache.set(key, pending)
+    }
+    return pending
+  }
   const indexCache = new Map<string, Promise<ArrayBuffer | undefined>>()
   const indexBytes = (repository: string) => {
     let pending = indexCache.get(repository)
     if (!pending) {
-      pending = sourceFile(source, repository, '040000.win32.index2')
+      pending = cachedSourceFile(repository, '040000.win32.index2')
         .then((file) => file?.arrayBuffer())
       indexCache.set(repository, pending)
     }
@@ -243,7 +254,7 @@ export function createLocalModelReader(source: Extract<AssetSource, { kind: 'loc
         if (!bytes) continue
         try {
           const location = locateIndex2Entry(bytes, gamePath)
-          return await readModelAtLocation(source, repository, gamePath, location)
+          return await readModelAtLocation(source, repository, gamePath, location, cachedSourceFile)
         } catch (error) {
           if (error instanceof Error && error.message === `The selected install does not contain ${gamePath}.`) continue
           throw error

@@ -3,12 +3,13 @@ import type { AssetSource } from '../asset-source/types'
 import { equipmentAssetPlan } from '../asset-source/equipmentPlan'
 import { ARMOR_SLOTS, type ArmorItem, type EquippedArmor } from '../catalog/types'
 import { searchArmor, xivapiIconUrl } from '../catalog/xivapi'
-import type { CharacterRaceCode } from '../asset-source/characterPlan'
+import { CHARACTER_PRESETS, type CharacterRaceCode } from '../asset-source/characterPlan'
 
 interface Props {
   source: AssetSource
   equipped: EquippedArmor
   raceCode: CharacterRaceCode
+  onRaceChange: (raceCode: CharacterRaceCode) => void
   onEquip: (item: ArmorItem) => void
   onRemove: (slot: ArmorItem['slot']) => void
 }
@@ -21,7 +22,7 @@ const SLOT_LABELS: Record<ArmorItem['slot'], string> = {
   feet: 'Feet',
 }
 
-export default function ArmorCatalog({ source, equipped, raceCode, onEquip, onRemove }: Props) {
+export default function ArmorCatalog({ source, equipped, raceCode, onRaceChange, onEquip, onRemove }: Props) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<ArmorItem[]>([])
   const [version, setVersion] = useState<string>()
@@ -59,7 +60,19 @@ export default function ArmorCatalog({ source, equipped, raceCode, onEquip, onRe
             XIVAPI supplies names, icons, slots, and model identifiers. The actual model and texture bytes still come from <strong>{source.label}</strong>.
           </p>
         </div>
-        {version && <span className="catalog-version">Game data {version.slice(0, 8)}</span>}
+        <div className="catalog-controls">
+          <label className="catalog-character" htmlFor="character-race">
+            <span className="field-label">Character</span>
+            <select
+              id="character-race"
+              value={raceCode}
+              onChange={(event) => onRaceChange(event.target.value as CharacterRaceCode)}
+            >
+              {CHARACTER_PRESETS.map(([code, label]) => <option value={code} key={code}>{label}</option>)}
+            </select>
+          </label>
+          {version && <span className="catalog-version">Game data {version.slice(0, 8)}</span>}
+        </div>
       </div>
 
       <form className="catalog-search" onSubmit={submit}>
