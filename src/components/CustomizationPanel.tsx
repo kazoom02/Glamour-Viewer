@@ -5,6 +5,7 @@ import {
   type CharacterCustomization,
   type CharacterGender,
 } from '../customization/types'
+import HairstylePicker from './HairstylePicker'
 
 interface Props {
   raceCode: CharacterRaceCode
@@ -113,7 +114,12 @@ export default function CustomizationPanel({ raceCode, customization, onChange, 
         </label>
         {numberField('Face', 'face', 4)}
         {colorField('Skin Color', 'skinColor')}
-        {numberField('Hairstyle', 'hairstyle', 200)}
+        <HairstylePicker
+          tribeId={customization.tribeId}
+          gender={customization.gender}
+          value={customization.hairstyle}
+          onChange={(hairstyle) => update('hairstyle', hairstyle)}
+        />
         {colorField('Hair Color', 'hairColor')}
         {numberField('Jaw', 'jaw', 4)}
         {numberField('Eye Shape', 'eyeShape', 6)}

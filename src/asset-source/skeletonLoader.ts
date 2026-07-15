@@ -1,5 +1,9 @@
 import type { DecodedSkeleton } from './sklb'
 import type { AssetSource } from './types'
+import type { CharacterRaceCode } from './characterPlan'
+import { hairSkeletonPath } from './characterPlan'
+import { extraSkeletonId, HAIR_EST_PATH } from './est'
+import { createLocalAssetReader } from './sqpack'
 
 interface Response {
   id: number
@@ -42,6 +46,18 @@ export function loadLocalSkeleton(
     activeWorker.addEventListener('error', onError)
     activeWorker.postMessage({ id, source, path })
   })
+}
+
+export async function loadLocalHairSkeleton(
+  source: Extract<AssetSource, { kind: 'local' }>,
+  raceCode: CharacterRaceCode,
+  hairId: number,
+): Promise<{ path: string; skeleton: DecodedSkeleton } | undefined> {
+  const table = await createLocalAssetReader(source).read(HAIR_EST_PATH)
+  const skeletonId = extraSkeletonId(table, Number(raceCode.slice(1)), hairId)
+  if (!skeletonId) return undefined
+  const path = hairSkeletonPath(raceCode, skeletonId)
+  return { path, skeleton: await loadLocalSkeleton(source, path) }
 }
 
 /** Missing optional auxiliary skeletons are valid; malformed or unreadable ones are not. */

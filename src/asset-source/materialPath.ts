@@ -8,6 +8,22 @@ const CHARACTER_OBJECTS: Record<string, string> = {
   z: 'zear',
 }
 
+const FEMALE_RACES = new Set(['0201', '0401', '0601', '0801', '1001', '1201', '1401', '1601', '1801'])
+
+function sharedHairMaterial(modelPath: string, filename: string): string | undefined {
+  const match = /chara\/human\/c(\d{4})\/obj\/hair\/h(\d{4})\/model\//i.exec(modelPath)
+  if (!match) return undefined
+  const [, race, rawId] = match
+  const hairId = Number(rawId)
+  if (race === '1501' || race === '1601') return undefined // Hrothgar hair is never shared.
+  const miqoteSpecific = hairId >= 101 && hairId <= 115
+  const globallyShared = hairId >= 116 && hairId <= 200
+  if (!globallyShared && !(miqoteSpecific && race !== '0701' && race !== '0801')) return undefined
+  const materialRace = FEMALE_RACES.has(race!) ? '0201' : '0101'
+  const sharedFilename = filename.replace(/^mt_c\d{4}h\d{4}/i, `mt_c${materialRace}h${rawId}`)
+  return `chara/human/c${materialRace}/obj/hair/h${rawId}/material/v0001/${sharedFilename}`
+}
+
 function variantDirectory(variant: number): string {
   return `v${Math.max(1, variant).toString().padStart(4, '0')}`
 }
@@ -19,6 +35,9 @@ export function materialCandidates(request: MaterialLoadRequest, reference: stri
   if (!filename) return []
   const candidates: string[] = []
   if (normalized.includes('/') && normalized.toLowerCase().endsWith('.mtrl')) candidates.push(normalized)
+
+  const sharedHair = sharedHairMaterial(request.modelPath, filename)
+  if (sharedHair) candidates.push(sharedHair)
 
   const named = /^mt_c(\d{4})([a-z])(\d{4})(?:_|\.)/i.exec(filename)
   if (named) {

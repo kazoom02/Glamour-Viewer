@@ -8,7 +8,6 @@ import {
   characterModelPlan,
   equipmentModelCandidates,
   faceSkeletonCandidates,
-  hairSkeletonPath,
   idleAnimationCandidates,
   skeletonPath,
   type CharacterPart,
@@ -21,6 +20,7 @@ import { loadLocalModels, type ModelLoadResult } from '../asset-source/modelLoad
 import type { DecodedModel } from '../asset-source/mdl'
 import {
   isMissingLocalSkeletonError,
+  loadLocalHairSkeleton,
   loadLocalSkeleton,
   type DecodedSkeleton,
 } from '../asset-source/skeletonLoader'
@@ -32,6 +32,7 @@ import {
   type EquippedArmor,
 } from '../catalog/types'
 import type { CharacterCustomization } from '../customization/types'
+import { animationClipFromDecoded } from './idleAnimation'
 
 interface ViewerCanvasProps {
   source: AssetSource
@@ -154,21 +155,6 @@ function addCharacterRig(target: THREE.Group, decoded: DecodedSkeleton): Charact
   const skeleton = new THREE.Skeleton(bones)
   skeleton.calculateInverses()
   return { skeleton, boneIndex: new Map(bones.map((bone, index) => [bone.name, index])) }
-}
-
-function animationClipFromDecoded(animation: DecodedAnimation, skeleton: THREE.Skeleton): THREE.AnimationClip {
-  const tracks: THREE.KeyframeTrack[] = []
-  for (const track of animation.tracks) {
-    const bone = skeleton.bones[track.boneIndex]
-    if (!bone) continue
-    tracks.push(
-      new THREE.VectorKeyframeTrack(`${bone.name}.position`, animation.times, track.translations),
-      new THREE.QuaternionKeyframeTrack(`${bone.name}.quaternion`, animation.times, track.rotations),
-      new THREE.VectorKeyframeTrack(`${bone.name}.scale`, animation.times, track.scales),
-    )
-  }
-  if (!tracks.length) throw new Error('The idle animation has no tracks matching the selected character skeleton.')
-  return new THREE.AnimationClip(animation.name || 'Idle', animation.duration, tracks)
 }
 
 function colorNumber(value: string, fallback = 0xffffff): number {
@@ -468,7 +454,6 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
   const startIdle = () => {
     const action = idleAction.current
     if (!action) return
-    if (idleState === 'ready') action.reset()
     action.paused = false
     action.play()
     setIdleState('playing')
@@ -564,14 +549,11 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           if (!faceSkeletonLoaded && faceSkeletonErrors.length) {
             failures.push(`face skeleton: ${faceSkeletonErrors.join(' / ')}`)
           }
-          const optionalHairSkeletonPath = hairSkeletonPath(raceCode, customization.hairstyle)
           try {
-            const hairSkeleton = await loadLocalSkeleton(source, optionalHairSkeletonPath)
-            combinedSkeleton = attachSkeleton(combinedSkeleton, hairSkeleton, 'j_kao')
+            const hairSkeleton = await loadLocalHairSkeleton(source, raceCode, customization.hairstyle)
+            if (hairSkeleton) combinedSkeleton = attachSkeleton(combinedSkeleton, hairSkeleton.skeleton, 'j_kao')
           } catch (reason) {
-            if (!isMissingLocalSkeletonError(reason, optionalHairSkeletonPath)) {
-              failures.push(`hair skeleton: ${reason instanceof Error ? reason.message : String(reason)}`)
-            }
+            failures.push(`hair skeleton: ${reason instanceof Error ? reason.message : String(reason)}`)
           }
           for (const auxiliary of auxiliarySkeletonPlan(raceCode)) {
             try {
@@ -693,13 +675,20 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             const action = activeIdleMixer.clipAction(clip)
             action.setLoop(THREE.LoopRepeat, Infinity)
             action.clampWhenFinished = false
+            action.setEffectiveWeight(1)
+            action.setEffectiveTimeScale(1)
+            // Apply frame zero immediately so the preview starts in the authored
+            // standing pose instead of snapping out of the bind-pose T stance.
+            action.play()
+            activeIdleMixer.update(0)
+            action.paused = true
             idleMixer.current = activeIdleMixer
             idleAction.current = action
             idleReady = true
             setIdleLabel(decodedAnimation.name || 'Idle')
             setIdleState('ready')
             diagnostics.push(
-              `idle animation: ${decodedAnimation.path} name=${decodedAnimation.name} duration=${decodedAnimation.duration.toFixed(3)}s frames=${decodedAnimation.times.length} tracks=${decodedAnimation.tracks.length}`,
+              `idle animation: ${decodedAnimation.path} name=${decodedAnimation.name} blend=${decodedAnimation.blendHint} duration=${decodedAnimation.duration.toFixed(3)}s frames=${decodedAnimation.times.length} tracks=${decodedAnimation.tracks.length} rootTranslation=stabilized`,
             )
           } catch (reason) {
             const detail = reason instanceof Error ? reason.message : String(reason)

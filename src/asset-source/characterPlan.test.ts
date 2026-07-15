@@ -38,7 +38,7 @@ describe('character asset planning', () => {
     ])
     expect(skeletonPath('c0201')).toBe('chara/human/c0201/skeleton/base/b0001/skl_c0201b0001.sklb')
     expect(faceSkeletonPath('c0201')).toBe('chara/human/c0201/skeleton/face/f0002/skl_c0201f0002.sklb')
-    expect(hairSkeletonPath('c0201')).toBe('chara/human/c0201/skeleton/hair/h0001/skl_c0201h0001.sklb')
+    expect(hairSkeletonPath('c0201', 1)).toBe('chara/human/c0201/skeleton/hair/h0001/skl_c0201h0001.sklb')
     expect(idleAnimationCandidates('c0201')).toEqual([
       'chara/human/c0201/animation/a0001/bt_common/resident/idle.pap',
       'chara/human/c0101/animation/a0001/bt_common/resident/idle.pap',

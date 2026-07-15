@@ -18,6 +18,7 @@ export interface DecodedAnimationTrack {
 export interface DecodedAnimation {
   name: string
   path: string
+  blendHint: 'normal' | 'additive'
   duration: number
   times: Float32Array
   tracks: DecodedAnimationTrack[]
@@ -434,31 +435,43 @@ function normalizeQuaternion(value: [number, number, number, number]): [number, 
   return value.map((component) => component / length) as [number, number, number, number]
 }
 
-function preferredAnimation(infos: PapAnimationInfo[]): PapAnimationInfo {
+function rankedAnimations(infos: PapAnimationInfo[]): PapAnimationInfo[] {
   const valid = infos.filter((info) => info.havokIndex >= 0)
   assertPap(valid.length > 0, 'The PAP contains no skeletal animation binding.')
   return [...valid].sort((left, right) => {
     const score = (value: string) => {
       const name = value.toLowerCase()
-      return Number(name.includes('idle')) * 8
+      return Number(name.includes('id0')) * 16
+        + Number(name.includes('idle')) * 8
         + Number(name.includes('loop') || name.includes('_lp')) * 4
-        + Number(name.includes('id0')) * 2
     }
     return score(right.name) - score(left.name)
-  })[0]!
+  })
 }
 
 /** Decodes the preferred loop from an FFXIV idle PAP into browser keyframes. */
 export function decodePap(bytes: ArrayBuffer, path = '', sampleRate = 30): DecodedAnimation {
   const pap = parsePapHeader(bytes)
-  const info = preferredAnimation(pap.animations)
   const objects = decodeHavokTagfile(pap.havokData)
   const container = objects.find((object) => object.type.name === 'hkaAnimationContainer')
   assertPap(container, 'The PAP contains no hkaAnimationContainer.')
   const bindingValues = havokValueArray(havokObjectValue(container, 'bindings'), 'bindings')
-  const binding = bindingValues[info.havokIndex]
-  assertPap(typeof binding === 'object' && binding !== null && !Array.isArray(binding) && 'type' in binding, `The PAP binding ${info.havokIndex} is unavailable.`)
-  const bindingObject = binding as HavokObject
+  let selected: { info: PapAnimationInfo; binding: HavokObject; blendHint: number } | undefined
+  for (const info of rankedAnimations(pap.animations)) {
+    const binding = bindingValues[info.havokIndex]
+    if (typeof binding !== 'object' || binding === null || Array.isArray(binding) || !('type' in binding)) continue
+    const candidate = binding as HavokObject
+    const blendHint = numberMember(candidate, 'blendHint')
+    selected ??= { info, binding: candidate, blendHint }
+    // Standing idle playback must prefer a normal binding. Treating an additive
+    // clip as absolute local transforms is the main cause of exploded poses.
+    if (blendHint === 0) {
+      selected = { info, binding: candidate, blendHint }
+      break
+    }
+  }
+  assertPap(selected, 'The PAP contains no usable skeletal animation binding.')
+  const { info, binding: bindingObject, blendHint } = selected
   const trackToBone = numberArray(bindingObject, 'transformTrackToBoneIndices')
   const animationObject = objectMember(bindingObject, 'animation')
   assertPap(animationObject.type.name === 'hkaSplineCompressedAnimation', `Unsupported PAP animation type ${animationObject.type.name}.`)
@@ -489,5 +502,12 @@ export function decodePap(bytes: ArrayBuffer, path = '', sampleRate = 30): Decod
       track.rotations.set(rotation, rotationOffset)
     }
   }
-  return { name: info.name, path, duration: animation.duration, times, tracks }
+  return {
+    name: info.name,
+    path,
+    blendHint: blendHint === 1 ? 'additive' : 'normal',
+    duration: animation.duration,
+    times,
+    tracks,
+  }
 }

@@ -73,6 +73,11 @@ function apiBaseUrl(): URL {
   return url
 }
 
+/** Builds a URL against the configured XIVAPI v2 API root. */
+export function xivapiApiUrl(path: string): URL {
+  return new URL(path.replace(/^\/+/, ''), apiBaseUrl())
+}
+
 function escapeQueryValue(value: string): string {
   return value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')
 }
@@ -99,7 +104,7 @@ export function decodeEquipmentModel(
 }
 
 export function xivapiIconUrl(path: string): string {
-  const url = new URL('asset', apiBaseUrl())
+  const url = xivapiApiUrl('asset')
   url.searchParams.set('path', path)
   url.searchParams.set('format', 'webp')
   return url.toString()

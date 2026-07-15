@@ -127,8 +127,8 @@ export function faceSkeletonCandidates(raceCode: CharacterRaceCode): string[] {
   return ids.map((id) => `chara/human/${raceCode}/skeleton/face/f${id}/skl_${raceCode}f${id}.sklb`)
 }
 
-export function hairSkeletonPath(raceCode: CharacterRaceCode, hairId = 1): string {
-  const id = hairId.toString().padStart(4, '0')
+export function hairSkeletonPath(raceCode: CharacterRaceCode, skeletonId: number): string {
+  const id = skeletonId.toString().padStart(4, '0')
   return `chara/human/${raceCode}/skeleton/hair/h${id}/skl_${raceCode}h${id}.sklb`
 }
 
