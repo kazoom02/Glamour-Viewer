@@ -6,7 +6,7 @@ const INDEX2_ENTRY_SIZE = 8
 const MODEL_HEADER_SIZE = 208
 const MAX_MODEL_HEADER_SIZE = 1024 * 1024
 const MAX_MODEL_RANGE_SIZE = 64 * 1024 * 1024
-const CHARACTER_REPOSITORIES = ['ex5', 'ex4', 'ex3', 'ex2', 'ex1', 'ffxiv'] as const
+const CHARACTER_REPOSITORIES = ['ffxiv', 'ex1', 'ex2', 'ex3', 'ex4', 'ex5'] as const
 
 export interface SqpackLocation {
   dataFileId: number
@@ -33,6 +33,16 @@ export interface ModelPayloadHeader {
 
 function assertRange(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
+}
+
+function errorDescription(error: unknown): string {
+  if (error instanceof DOMException) return `${error.name}: ${error.message || 'No browser error message'}`
+  if (error instanceof Error) return `${error.name}: ${error.message}`
+  return String(error)
+}
+
+function readError(stage: string, target: string, error: unknown): Error {
+  return new Error(`[${stage}] ${target} — ${errorDescription(error)}`)
 }
 
 function magicAt(bytes: Uint8Array): string {
@@ -115,12 +125,32 @@ async function sourceFile(
   name: string,
 ): Promise<File | undefined> {
   if (!source.handle) return fallbackFile(source, repository, name)
+  let repositoryHandle: FileSystemDirectoryHandle
   try {
-    const repositoryHandle = await source.handle.getDirectoryHandle(repository)
-    return await repositoryHandle.getFileHandle(name).then((handle) => handle.getFile())
+    repositoryHandle = await source.handle.getDirectoryHandle(repository)
   } catch (error) {
     if (error instanceof DOMException && error.name === 'NotFoundError') return undefined
-    throw error
+    throw readError('open-repository', `${repository}/`, error)
+  }
+  let fileHandle: FileSystemFileHandle
+  try {
+    fileHandle = await repositoryHandle.getFileHandle(name)
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'NotFoundError') return undefined
+    throw readError('open-file', `${repository}/${name}`, error)
+  }
+  try {
+    return await fileHandle.getFile()
+  } catch (error) {
+    throw readError('snapshot-file', `${repository}/${name}`, error)
+  }
+}
+
+async function readFileSlice(file: File, start: number, end: number, target: string): Promise<ArrayBuffer> {
+  try {
+    return await file.slice(start, end).arrayBuffer()
+  } catch (error) {
+    throw readError('read-range', `${target} bytes ${start}-${end - 1} of ${file.size}`, error)
   }
 }
 
@@ -207,17 +237,18 @@ async function readModelAtLocation(
   assertRange(datFile, `The selected directory is missing ${repository}/040000.win32.dat${location.dataFileId}.`)
   assertRange(location.offset + MODEL_HEADER_SIZE <= datFile.size, 'The model offset points beyond its SqPack data file.')
 
-  const prefix = await datFile.slice(location.offset, location.offset + MODEL_HEADER_SIZE).arrayBuffer()
+  const datName = `${repository}/040000.win32.dat${location.dataFileId}`
+  const prefix = await readFileSlice(datFile, location.offset, location.offset + MODEL_HEADER_SIZE, datName)
   const declaredHeaderSize = new DataView(prefix).getUint32(0, true)
   assertRange(declaredHeaderSize >= MODEL_HEADER_SIZE && declaredHeaderSize <= MAX_MODEL_HEADER_SIZE, 'The model header size is invalid.')
-  const fullHeaderBytes = await datFile.slice(location.offset, location.offset + declaredHeaderSize).arrayBuffer()
+  const fullHeaderBytes = await readFileSlice(datFile, location.offset, location.offset + declaredHeaderSize, datName)
   const header = parseModelPayloadHeader(fullHeaderBytes)
   const rangeSize = modelRangeSize(header)
   if (location.nextOffset !== undefined) {
     assertRange(location.offset + rangeSize <= location.nextOffset, 'The model payload overlaps the next SqPack entry.')
   }
   assertRange(location.offset + rangeSize <= datFile.size, 'The model payload extends beyond its SqPack data file.')
-  return datFile.slice(location.offset, location.offset + rangeSize).arrayBuffer()
+  return readFileSlice(datFile, location.offset, location.offset + rangeSize, datName)
 }
 
 export interface LocalModelReader {
@@ -241,7 +272,14 @@ export function createLocalModelReader(source: Extract<AssetSource, { kind: 'loc
     let pending = indexCache.get(repository)
     if (!pending) {
       pending = cachedSourceFile(repository, '040000.win32.index2')
-        .then((file) => file?.arrayBuffer())
+        .then(async (file) => {
+          if (!file) return undefined
+          try {
+            return await file.arrayBuffer()
+          } catch (error) {
+            throw readError('read-index', `${repository}/040000.win32.index2 (${file.size} bytes)`, error)
+          }
+        })
       indexCache.set(repository, pending)
     }
     return pending
@@ -249,8 +287,15 @@ export function createLocalModelReader(source: Extract<AssetSource, { kind: 'loc
 
   return {
     async read(gamePath: string) {
+      const repositoryErrors: string[] = []
       for (const repository of CHARACTER_REPOSITORIES) {
-        const bytes = await indexBytes(repository)
+        let bytes: ArrayBuffer | undefined
+        try {
+          bytes = await indexBytes(repository)
+        } catch (error) {
+          repositoryErrors.push(error instanceof Error ? error.message : String(error))
+          continue
+        }
         if (!bytes) continue
         try {
           const location = locateIndex2Entry(bytes, gamePath)
@@ -259,6 +304,9 @@ export function createLocalModelReader(source: Extract<AssetSource, { kind: 'loc
           if (error instanceof Error && error.message === `The selected install does not contain ${gamePath}.`) continue
           throw error
         }
+      }
+      if (repositoryErrors.length) {
+        throw new Error(`Could not locate ${gamePath}. Repository errors:\n${repositoryErrors.join('\n')}`)
       }
       throw new Error(`The selected install does not contain ${gamePath} in ffxiv or ex1–ex5.`)
     },

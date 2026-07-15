@@ -105,12 +105,42 @@ function fitCamera(camera: THREE.PerspectiveCamera, controls: OrbitControls, obj
 async function loadRemoteModel(source: Extract<AssetSource, { kind: 'remote' }>, path: string): Promise<THREE.Group> {
   const { GLTFLoader } = await import('three/examples/jsm/loaders/GLTFLoader.js')
   const convertedPath = path.replace(/\.mdl$/i, '.glb')
-  const result = await new GLTFLoader().loadAsync(new URL(convertedPath, source.baseUrl).toString())
-  return result.scene
+  const url = new URL(convertedPath, source.baseUrl).toString()
+  try {
+    const result = await new GLTFLoader().loadAsync(url)
+    return result.scene
+  } catch (error) {
+    const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+    throw new Error(`[fetch-glb] ${url} — ${detail}`)
+  }
 }
 
 function resultMap(results: ModelLoadResult[]): Map<string, ModelLoadResult> {
   return new Map(results.map((result) => [result.path, result]))
+}
+
+async function diagnosticReport(source: AssetSource, failures: string[]): Promise<string> {
+  let permission = 'not applicable'
+  if (source.kind === 'local' && source.handle) {
+    try {
+      permission = await source.handle.queryPermission({ mode: 'read' })
+    } catch (error) {
+      permission = `query failed: ${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}`
+    }
+  }
+  return [
+    `Asset source: ${source.kind}${source.kind === 'local' ? ` (${source.access})` : ''}`,
+    `Source label: ${source.label}`,
+    `Directory handle: ${source.kind === 'local' && source.handle ? 'present' : 'not present'}`,
+    `Read permission: ${permission}`,
+    `Secure context: ${window.isSecureContext}`,
+    `Origin: ${window.location.origin}`,
+    `Cross-origin isolated: ${window.crossOriginIsolated}`,
+    `Browser: ${navigator.userAgent}`,
+    '',
+    'Asset failures:',
+    ...failures,
+  ].join('\n')
 }
 
 export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanvasProps) {
@@ -221,11 +251,17 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
       setStatus(characterParts
         ? `${raceCode} bind-pose character · ${equippedItems}/${selected.length} equipped · drag to rotate`
         : 'Character models could not be decoded')
-      if (failures.length) setError(failures.join('\n'))
+      if (failures.length) {
+        const report = await diagnosticReport(source, failures)
+        if (!disposed) setError(report)
+      }
     })().catch((reason) => {
       if (disposed) return
       setStatus('Character models could not be decoded')
-      setError(reason instanceof Error ? reason.message : 'Unknown character decode error')
+      const failure = reason instanceof Error ? `${reason.name}: ${reason.message}` : 'Unknown character decode error'
+      void diagnosticReport(source, [`worker: ${failure}`]).then((report) => {
+        if (!disposed) setError(report)
+      })
     })
 
     let frame = 0
@@ -265,7 +301,19 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
     <div className="viewer-canvas-wrap">
       <div className="viewer-canvas" ref={container} aria-label="Three-dimensional FFXIV character and armor inspection view" />
       <p className="viewer-status" aria-live="polite">{status}</p>
-      {error && <details className="viewer-error"><summary>Some character assets did not load</summary><pre>{error}</pre></details>}
+      {error && (
+        <details className="viewer-error">
+          <summary>Some character assets did not load</summary>
+          <button
+            className="viewer-copy-debug"
+            type="button"
+            onClick={() => void navigator.clipboard.writeText(error)}
+          >
+            Copy debug report
+          </button>
+          <pre>{error}</pre>
+        </details>
+      )}
     </div>
   )
 }

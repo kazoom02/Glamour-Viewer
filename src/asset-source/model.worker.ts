@@ -21,9 +21,16 @@ self.onmessage = async (event: MessageEvent<Request>) => {
     // reader caches the opened files, while slices still read only requested ranges.
     for (const path of paths) {
       try {
-        results.push({ path, model: await decodeSqpackModel(await reader.read(path)) })
+        const payload = await reader.read(path)
+        try {
+          results.push({ path, model: await decodeSqpackModel(payload) })
+        } catch (error) {
+          const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+          throw new Error(`[decode-model] ${path} — ${detail}`)
+        }
       } catch (error) {
-        results.push({ path, error: error instanceof Error ? error.message : 'The FFXIV model could not be decoded.' })
+        const detail = error instanceof Error ? `${error.name}: ${error.message}` : 'The FFXIV model could not be decoded.'
+        results.push({ path, error: `${path}\n${detail}` })
       }
     }
     const transfer = results.flatMap((result) => result.model?.meshes.flatMap((mesh) => [
