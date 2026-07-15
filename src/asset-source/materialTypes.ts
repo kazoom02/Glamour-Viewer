@@ -17,12 +17,18 @@ export interface DecodedMaterial {
     normal?: DecodedTexture
     mask?: DecodedTexture
     specular?: DecodedTexture
+    index?: DecodedTexture
+    roughness?: DecodedTexture
+    metalness?: DecodedTexture
+    emissive?: DecodedTexture
   }
+  colorTableRows?: number
+  dyeableRows?: number
 }
 
 export interface MaterialLoadResult {
   modelPath: string
   materials: Record<string, DecodedMaterial>
   errors: string[]
+  attributeMask?: number
 }
-

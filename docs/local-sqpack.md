@@ -74,7 +74,7 @@ Do not load multi-gigabyte `.dat` archives into memory. The reader should:
 6. Read the entry header and compressed block table with `File.slice(offset, end).arrayBuffer()`.
 7. Inflate only the blocks belonging to the requested resource.
 
-`src/asset-source/sqpack.ts` implements the `index2` hash lookup, bounded `File.slice()` reads, and reconstruction for standard, model, and streamed texture entries. `src/asset-source/mdl.ts` decodes renderable vertex/index buffers. Geometry runs through `model.worker.ts`; IMC/MTRL/TEX work runs through `material.worker.ts`, keeping binary parsing and texture decompression off the UI thread.
+`src/asset-source/sqpack.ts` implements the `index2` hash lookup, bounded `File.slice()` reads, and reconstruction for standard, model, and streamed texture entries. `src/asset-source/mdl.ts` decodes renderable vertex/index buffers and attribute submeshes. Geometry runs through `model.worker.ts`; IMC/MTRL/TEX work runs through `material.worker.ts`; SKLB/Havok decoding runs through `skeleton.worker.ts`, keeping binary parsing and texture decompression off the UI thread.
 
 ## Decode graph for one armor piece
 
@@ -100,9 +100,9 @@ Ironworks is the best reference for the binary structures because it already cov
 
 Keep filesystem traversal and range reads in TypeScript because the File System Access API is asynchronous. Pass the small extracted buffers—not directory handles or whole archives—into WASM.
 
-The current milestone assembles real `e0000` torso/hands/legs/feet models with face and hair models, then replaces covered slots with selected armor. It renders complete standalone `c0101`, `c0201`, and `c0901` bodies in their shared bind pose. MDL material references feed an IMC/MTRL/TEX pipeline that applies diffuse, normal, and mask/roughness textures. Decoded texture surfaces are cached in worker memory and IndexedDB with a schema/source/path key.
+The current milestone assembles real `e0000` torso/hands/legs/feet models with face and hair models, then replaces covered slots with selected armor. It renders complete standalone `c0101`, `c0201`, and `c0901` bodies bound to their decoded SKLB reference skeleton. MDL material references feed an IMC/MTRL/TEX pipeline that applies attribute visibility, legacy/Dawntrail color tables, diffuse, normal, mask, emissive, roughness, and metalness data. Decoded texture surfaces are cached in worker memory and IndexedDB with a schema/source/path key.
 
-The next layers are SKLB/Havok reference-pose and animation decoding, MTRL color-set/dye shader parity, IMC part masks, PBD/EQDP deformation for races that reuse Midlander geometry, and detailed equipment body-hiding metadata.
+The next layers are STM-backed dye application and UI, PAP animation sampling, PBD/EQDP deformation for races that reuse Midlander geometry, and detailed equipment body-hiding metadata.
 
 ## Vercel behavior
 

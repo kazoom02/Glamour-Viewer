@@ -13,6 +13,27 @@ export interface ParsedMaterial {
   version: number
   shaderPackage: string
   textures: MaterialTextureReference[]
+  colorTable?: MaterialColorTable
+  dyeTable?: MaterialDyeRow[]
+}
+
+export interface MaterialColorRow {
+  diffuse: [number, number, number]
+  specular: [number, number, number]
+  emissive: [number, number, number]
+  roughness: number
+  metalness: number
+}
+
+export interface MaterialColorTable {
+  kind: 'legacy' | 'dawntrail'
+  rows: MaterialColorRow[]
+}
+
+export interface MaterialDyeRow {
+  template: number
+  channel: number
+  flags: number
 }
 
 const SAMPLER_ROLES = new Map<number, TextureRole>([
@@ -44,6 +65,77 @@ function inferRole(path: string): TextureRole {
   return 'unknown'
 }
 
+function halfToFloat(value: number): number {
+  const sign = value & 0x8000 ? -1 : 1
+  const exponent = (value >>> 10) & 0x1f
+  const fraction = value & 0x3ff
+  if (exponent === 0) return sign * 2 ** -14 * (fraction / 1024)
+  if (exponent === 0x1f) return fraction ? Number.NaN : sign * Number.POSITIVE_INFINITY
+  return sign * 2 ** (exponent - 15) * (1 + fraction / 1024)
+}
+
+function finiteHalf(view: DataView, offset: number): number {
+  const value = halfToFloat(view.getUint16(offset, true))
+  return Number.isFinite(value) ? value : 0
+}
+
+function legacyRoughness(shininess: number): number {
+  if (shininess <= 0) return 1
+  const mip = -0.75 * Math.log2(shininess) + 6.25
+  return 1 - Math.sqrt(Math.max(0, 1 - mip / 6))
+}
+
+function readColorTable(view: DataView, start: number, size: number, flags: number): {
+  table?: MaterialColorTable
+  dyeTable?: MaterialDyeRow[]
+} {
+  const hasTable = (flags & 0x4) !== 0
+  if (!hasTable) return {}
+  const dimensionLogs = (flags >>> 4) & 0xff
+  const dawntrail = dimensionLogs === 0x53
+  const legacy = dimensionLogs === 0 || dimensionLogs === 0x42
+  if (!dawntrail && !legacy) return {}
+  const rowCount = dawntrail ? 32 : 16
+  const rowSize = dawntrail ? 64 : 32
+  const tableSize = rowCount * rowSize
+  if (tableSize > size) return {}
+  const rows = Array.from({ length: rowCount }, (_, row): MaterialColorRow => {
+    const offset = start + row * rowSize
+    const vector = (half: number): [number, number, number] => [
+      finiteHalf(view, offset + half * 2),
+      finiteHalf(view, offset + (half + 1) * 2),
+      finiteHalf(view, offset + (half + 2) * 2),
+    ]
+    return {
+      diffuse: vector(0),
+      specular: vector(4),
+      emissive: vector(8),
+      roughness: dawntrail
+        ? finiteHalf(view, offset + 16 * 2)
+        : legacyRoughness(finiteHalf(view, offset + 7 * 2)),
+      metalness: dawntrail ? finiteHalf(view, offset + 18 * 2) : 0,
+    }
+  })
+  const result: { table: MaterialColorTable; dyeTable?: MaterialDyeRow[] } = {
+    table: { kind: dawntrail ? 'dawntrail' : 'legacy', rows },
+  }
+  if ((flags & 0x8) !== 0) {
+    const dyeRowSize = dawntrail ? 4 : 2
+    const dyeStart = start + tableSize
+    if (tableSize + rowCount * dyeRowSize <= size) {
+      result.dyeTable = Array.from({ length: rowCount }, (_, row) => {
+        const raw = dawntrail
+          ? view.getUint32(dyeStart + row * dyeRowSize, true)
+          : view.getUint16(dyeStart + row * dyeRowSize, true)
+        return dawntrail
+          ? { template: (raw >>> 16) & 0x7ff, channel: (raw >>> 27) & 0x3, flags: raw & 0xfff }
+          : { template: raw >>> 5, channel: 0, flags: raw & 0x1f }
+      })
+    }
+  }
+  return { table: result.table, dyeTable: result.dyeTable }
+}
+
 export function parseMtrl(bytes: ArrayBuffer): ParsedMaterial {
   assertRange(bytes.byteLength >= HEADER_SIZE, 'The MTRL header is truncated.')
   const view = new DataView(bytes)
@@ -71,7 +163,15 @@ export function parseMtrl(bytes: ArrayBuffer): ParsedMaterial {
   })
   const shaderPackage = readCString(strings, shaderNameOffset)
 
-  let cursor = stringEnd + additionalDataSize + dataSetSize
+  const additionalDataStart = stringEnd
+  let tableFlags = 0
+  for (let index = 0; index < Math.min(additionalDataSize, 4); index += 1) {
+    tableFlags |= view.getUint8(additionalDataStart + index) << (index * 8)
+  }
+  const dataSetStart = stringEnd + additionalDataSize
+  assertRange(dataSetStart + dataSetSize <= bytes.byteLength, 'The MTRL data set is truncated.')
+  const { table: colorTable, dyeTable } = readColorTable(view, dataSetStart, dataSetSize, tableFlags)
+  let cursor = dataSetStart + dataSetSize
   assertRange(cursor + 12 <= bytes.byteLength, 'The MTRL shader header is truncated.')
   const shaderValueListSize = view.getUint16(cursor, true)
   const shaderKeyCount = view.getUint16(cursor + 2, true)
@@ -88,5 +188,11 @@ export function parseMtrl(bytes: ArrayBuffer): ParsedMaterial {
     texture.samplerId = samplerId
     texture.role = SAMPLER_ROLES.get(samplerId) ?? texture.role
   }
-  return { version, shaderPackage, textures }
+  return {
+    version,
+    shaderPackage,
+    textures,
+    ...(colorTable ? { colorTable } : {}),
+    ...(dyeTable ? { dyeTable } : {}),
+  }
 }

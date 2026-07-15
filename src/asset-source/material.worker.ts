@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 
 import { readImcEntry } from './imc'
+import { bakeCharacterMaterial } from './materialBake'
 import { parseMtrl, type TextureRole } from './mtrl'
 import { createLocalAssetReader, type LocalAssetReader } from './sqpack'
 import { decodeTex, type DecodedTexture } from './tex'
@@ -113,9 +114,12 @@ async function loadRequest(
   const materials: MaterialLoadResult['materials'] = {}
   const errors: string[] = []
   let materialId = request.variant ?? 1
+  let attributeMask: number | undefined
   if (request.imcPath && request.slot && request.variant !== undefined) {
     try {
-      materialId = readImcEntry(await reader.read(request.imcPath), request.slot, request.variant).materialId
+      const entry = readImcEntry(await reader.read(request.imcPath), request.slot, request.variant)
+      materialId = entry.materialId
+      attributeMask = entry.attributeMask
     } catch (error) {
       errors.push(`[imc] ${request.imcPath}: ${error instanceof Error ? error.message : String(error)}`)
     }
@@ -133,7 +137,7 @@ async function loadRequest(
       for (const textureReference of parsed.textures) {
         if (!textureReference.path) continue
         const role = textureReference.role
-        if (!(['diffuse', 'normal', 'mask', 'specular'] as TextureRole[]).includes(role)) continue
+        if (!(['diffuse', 'normal', 'mask', 'specular', 'index'] as TextureRole[]).includes(role)) continue
         if (decoded.textures[role as keyof typeof decoded.textures]) continue
         try {
           decoded.textures[role as keyof typeof decoded.textures] = await loadTexture(reader, sourceKey, textureReference.path)
@@ -141,12 +145,18 @@ async function loadRequest(
           errors.push(`[tex:${role}] ${textureReference.path}: ${error instanceof Error ? error.message : String(error)}`)
         }
       }
+      if (parsed.colorTable) {
+        const baked = bakeCharacterMaterial(parsed.colorTable, decoded.textures)
+        if (baked) Object.assign(decoded.textures, baked)
+        decoded.colorTableRows = parsed.colorTable.rows.length
+        decoded.dyeableRows = parsed.dyeTable?.filter((row) => row.flags !== 0).length ?? 0
+      }
       materials[normalizedMaterialKey(materialReference)] = decoded
     } catch (error) {
       errors.push(`[mtrl] ${materialReference}: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
-  return { modelPath: request.modelPath, materials, errors }
+  return { modelPath: request.modelPath, materials, errors, attributeMask }
 }
 
 async function sourceFingerprint(source: Extract<AssetSource, { kind: 'local' }>): Promise<string> {

@@ -5,6 +5,7 @@ import type { AssetSource } from '../asset-source/types'
 import {
   characterModelPlan,
   equipmentModelCandidates,
+  skeletonPath,
   type CharacterPart,
   type CharacterRaceCode,
 } from '../asset-source/characterPlan'
@@ -12,6 +13,7 @@ import { equipmentAssetPlan } from '../asset-source/equipmentPlan'
 import { loadLocalMaterials, type DecodedMaterial, type MaterialLoadRequest } from '../asset-source/materialLoader'
 import { loadLocalModels, type ModelLoadResult } from '../asset-source/modelLoader'
 import type { DecodedModel } from '../asset-source/mdl'
+import { loadLocalSkeleton, type DecodedSkeleton } from '../asset-source/skeletonLoader'
 import { ARMOR_SLOTS, type ArmorSlot, type EquippedArmor } from '../catalog/types'
 
 interface ViewerCanvasProps {
@@ -69,14 +71,44 @@ function textureFromDecoded(texture: NonNullable<DecodedMaterial['textures']['di
   return result
 }
 
+interface CharacterRig {
+  skeleton: THREE.Skeleton
+  boneIndex: Map<string, number>
+}
+
+function addCharacterRig(target: THREE.Group, decoded: DecodedSkeleton): CharacterRig {
+  const bones = decoded.bones.map((source) => {
+    const bone = new THREE.Bone()
+    bone.name = source.name
+    bone.position.fromArray(source.translation)
+    bone.quaternion.fromArray(source.rotation).normalize()
+    bone.scale.fromArray(source.scale)
+    return bone
+  })
+  decoded.bones.forEach((source, index) => {
+    const bone = bones[index]!
+    const parent = bones[source.parentIndex]
+    if (source.parentIndex >= 0 && parent) parent.add(bone)
+    else target.add(bone)
+  })
+  target.updateMatrixWorld(true)
+  const skeleton = new THREE.Skeleton(bones)
+  skeleton.calculateInverses()
+  return { skeleton, boneIndex: new Map(bones.map((bone, index) => [bone.name, index])) }
+}
+
 function addDecodedModel(
   target: THREE.Group,
   model: DecodedModel,
   color: number,
   label: string,
   decodedMaterials: Record<string, DecodedMaterial> = {},
+  attributeMask?: number,
+  slot?: ArmorSlot,
+  rig?: CharacterRig,
 ): number {
   for (const [index, part] of model.meshes.entries()) {
+    if (slot && attributeMask !== undefined && !isVisibleEquipmentPart(part.attributes, slot, attributeMask)) continue
     const materialPath = model.materialPaths[part.materialIndex]?.toLowerCase() ?? ''
     const decodedMaterial = decodedMaterials[materialPath.replaceAll('\\', '/')]
     let meshColor = color
@@ -89,13 +121,19 @@ function addDecodedModel(
     const diffuse = decodedMaterial?.textures.diffuse
     const normal = decodedMaterial?.textures.normal
     const mask = decodedMaterial?.textures.mask
+    const roughness = decodedMaterial?.textures.roughness ?? mask
+    const metalness = decodedMaterial?.textures.metalness
+    const emissive = decodedMaterial?.textures.emissive
     const material = new THREE.MeshStandardMaterial({
       color: diffuse ? 0xffffff : meshColor,
       map: diffuse ? textureFromDecoded(diffuse, true) : null,
       normalMap: normal ? textureFromDecoded(normal, false) : null,
-      roughnessMap: mask ? textureFromDecoded(mask, false) : null,
-      roughness: mask ? 1 : 0.62,
-      metalness: materialPath.includes('/mt_c') && materialPath.includes('e0000') ? 0 : 0.08,
+      roughnessMap: roughness ? textureFromDecoded(roughness, false) : null,
+      roughness: roughness ? 1 : 0.62,
+      metalnessMap: metalness ? textureFromDecoded(metalness, false) : null,
+      metalness: metalness ? 1 : materialPath.includes('/mt_c') && materialPath.includes('e0000') ? 0 : 0.08,
+      emissiveMap: emissive ? textureFromDecoded(emissive, true) : null,
+      emissive: emissive ? 0xffffff : 0x000000,
       alphaTest: diffuse ? 0.08 : 0,
       side: THREE.DoubleSide,
     })
@@ -103,7 +141,13 @@ function addDecodedModel(
     const geometry = new THREE.BufferGeometry()
     geometry.setAttribute('position', new THREE.BufferAttribute(part.positions, 3))
     if (part.uvs) geometry.setAttribute('uv', new THREE.BufferAttribute(part.uvs, 2))
-    if (part.skinIndices) geometry.setAttribute('skinIndex', new THREE.BufferAttribute(part.skinIndices, 4))
+    let skinIndices = part.skinIndices
+    if (skinIndices && rig) {
+      skinIndices = new Uint16Array(skinIndices).map((globalIndex) => (
+        rig.boneIndex.get(model.boneNames[globalIndex] ?? '') ?? 0
+      ))
+    }
+    if (skinIndices) geometry.setAttribute('skinIndex', new THREE.BufferAttribute(skinIndices, 4))
     if (part.skinWeights) geometry.setAttribute('skinWeight', new THREE.BufferAttribute(part.skinWeights, 4))
     geometry.setIndex(new THREE.BufferAttribute(part.indices, 1))
     // Use stable geometric vertex normals under the decoded normal map. Some packed
@@ -112,11 +156,31 @@ function addDecodedModel(
     geometry.normalizeNormals()
     geometry.computeBoundingBox()
     geometry.computeBoundingSphere()
-    const mesh = new THREE.Mesh(geometry, material)
+    const mesh = rig && skinIndices && part.skinWeights
+      ? new THREE.SkinnedMesh(geometry, material)
+      : new THREE.Mesh(geometry, material)
     mesh.name = `${label}-${index}`
     target.add(mesh)
+    if (mesh instanceof THREE.SkinnedMesh && rig) {
+      target.updateMatrixWorld(true)
+      mesh.bind(rig.skeleton, mesh.matrixWorld)
+    }
   }
   return model.meshes.length
+}
+
+const ATTRIBUTE_PREFIX: Record<ArmorSlot, string> = {
+  head: 'atr_mv_', body: 'atr_tv_', hands: 'atr_gv_', legs: 'atr_dv_', feet: 'atr_sv_',
+}
+
+function isVisibleEquipmentPart(attributes: string[] | undefined, slot: ArmorSlot, mask: number): boolean {
+  const prefix = ATTRIBUTE_PREFIX[slot]
+  const variants = attributes?.filter((attribute) => attribute.toLowerCase().startsWith(prefix)) ?? []
+  if (!variants.length) return true
+  return variants.some((attribute) => {
+    const index = attribute.toLowerCase().charCodeAt(prefix.length) - 97
+    return index >= 0 && index < 10 && (mask & (1 << index)) !== 0
+  })
 }
 
 function fitCamera(camera: THREE.PerspectiveCamera, controls: OrbitControls, object: THREE.Object3D) {
@@ -230,7 +294,14 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
       const failures: string[] = []
       let characterParts = 0
       let equippedItems = 0
+      let rig: CharacterRig | undefined
       if (source.kind === 'local') {
+        try {
+          setStatus(`Reading ${raceCode} skeleton and character models…`)
+          rig = addCharacterRig(characterGroup, await loadLocalSkeleton(source, skeletonPath(raceCode)))
+        } catch (reason) {
+          failures.push(`skeleton: ${reason instanceof Error ? reason.message : String(reason)}`)
+        }
         const paths = [...new Set([
           ...characterPlans.map((plan) => plan.path),
           ...equipmentPlans.flatMap((plan) => plan.candidates),
@@ -273,7 +344,7 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
           const result = byPath.get(plan.path)
           if (result?.model) {
             const materialResult = materialsByModel.get(result.path)
-            addDecodedModel(characterGroup, result.model, PART_COLORS[plan.part], `character-${plan.part}`, materialResult?.materials)
+            addDecodedModel(characterGroup, result.model, PART_COLORS[plan.part], `character-${plan.part}`, materialResult?.materials, undefined, undefined, rig)
             if (materialResult?.errors.length) failures.push(...materialResult.errors.map((error) => `${plan.part} ${error}`))
             characterParts += 1
           } else {
@@ -284,7 +355,16 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
           const result = plan.candidates.map((path) => byPath.get(path)).find((candidate) => candidate?.model)
           if (result?.model) {
             const materialResult = materialsByModel.get(result.path)
-            addDecodedModel(characterGroup, result.model, SLOT_COLORS[plan.slot], `equipment-${plan.slot}`, materialResult?.materials)
+            addDecodedModel(
+              characterGroup,
+              result.model,
+              SLOT_COLORS[plan.slot],
+              `equipment-${plan.slot}`,
+              materialResult?.materials,
+              materialResult?.attributeMask,
+              plan.slot,
+              rig,
+            )
             if (materialResult?.errors.length) failures.push(...materialResult.errors.map((error) => `${plan.item.name} ${error}`))
             equippedItems += 1
           } else {
@@ -321,7 +401,7 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
       fallback.visible = characterParts === 0
       if (characterParts || equippedItems) fitCamera(camera, controls, characterGroup)
       setStatus(characterParts
-        ? `${raceCode} bind-pose character · ${equippedItems}/${selected.length} equipped · drag to rotate`
+        ? `${raceCode} ${rig ? 'skinned' : 'bind-pose'} character · ${equippedItems}/${selected.length} equipped · drag to rotate`
         : 'Character models could not be decoded')
       if (failures.length) {
         const report = await diagnosticReport(source, failures)
@@ -364,7 +444,7 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
         const materials = Array.isArray(object.material) ? object.material : [object.material]
         materials.forEach((item) => {
           if (item instanceof THREE.MeshStandardMaterial) {
-            new Set([item.map, item.normalMap, item.roughnessMap].filter(Boolean)).forEach((texture) => texture?.dispose())
+            new Set([item.map, item.normalMap, item.roughnessMap, item.metalnessMap, item.emissiveMap].filter(Boolean)).forEach((texture) => texture?.dispose())
           }
           item.dispose()
         })
@@ -386,7 +466,7 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
               <small>e{item.modelSet.toString().padStart(4, '0')} v{item.modelVariant.toString().padStart(4, '0')}</small>
             </span>
           ))}
-          <em>Local mode resolves IMC variants and applies MTRL/TEX diffuse, normal, and mask textures.</em>
+          <em>Local mode resolves IMC parts, SKLB skinning, MTRL color tables, and TEX/PBR textures.</em>
         </div>
       )}
       <p className="viewer-status" aria-live="polite">{status}</p>

@@ -9,6 +9,8 @@ export interface ImcEntry {
   attributeAndSound: number
   vfxId: number
   materialAnimationId: number
+  attributeMask: number
+  soundId: number
 }
 
 /** Reads an equipment IMC row. Variants include row zero, matching the game's Variant id. */
@@ -24,14 +26,18 @@ export function readImcEntry(bytes: ArrayBuffer, slot: ArmorSlot, variant: numbe
   }
   const partCount = Array.from({ length: 16 }, (_, index) => (partMask >>> index) & 1)
     .reduce((sum, bit) => sum + bit, 0)
-  const offset = 4 + (variant * partCount + part) * ENTRY_SIZE
+  const partIndex = Array.from({ length: part }, (_, index) => (partMask >>> index) & 1)
+    .reduce((sum, bit) => sum + bit, 0)
+  const offset = 4 + (variant * partCount + partIndex) * ENTRY_SIZE
   if (offset + ENTRY_SIZE > bytes.byteLength) throw new Error('The IMC variant table is truncated.')
+  const attributeAndSound = view.getUint16(offset + 2, true)
   return {
     materialId: view.getUint8(offset),
     decalId: view.getUint8(offset + 1),
-    attributeAndSound: view.getUint16(offset + 2, true),
+    attributeAndSound,
     vfxId: view.getUint8(offset + 4),
     materialAnimationId: view.getUint8(offset + 5),
+    attributeMask: attributeAndSound & 0x3ff,
+    soundId: attributeAndSound >>> 10,
   }
 }
-

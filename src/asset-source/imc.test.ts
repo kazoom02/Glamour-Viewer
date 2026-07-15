@@ -20,7 +20,17 @@ describe('IMC parser', () => {
       attributeAndSound: 0x1234,
       vfxId: 5,
       materialAnimationId: 6,
+      attributeMask: 0x234,
+      soundId: 4,
     })
   })
-})
 
+  it('uses the compact part index when earlier equipment slots are absent', () => {
+    const bytes = new Uint8Array(4 + 2 * 6)
+    const view = new DataView(bytes.buffer)
+    view.setUint16(0, 0, true)
+    view.setUint16(2, 0b1_0010, true) // body + feet
+    bytes[4 + 6] = 9
+    expect(readImcEntry(bytes.buffer, 'feet', 0).materialId).toBe(9)
+  })
+})
