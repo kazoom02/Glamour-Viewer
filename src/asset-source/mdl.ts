@@ -71,18 +71,29 @@ async function decodeBlock(payload: Uint8Array, offset: number, onDiskSize: numb
   assertDecode(offset + BLOCK_HEADER_SIZE <= payload.byteLength, 'A SqPack data block header is truncated.')
   const view = new DataView(payload.buffer, payload.byteOffset + offset, payload.byteLength - offset)
   const headerSize = view.getUint32(0, true)
-  const compression = view.getUint32(8, true)
+  const compressedSize = view.getUint32(8, true)
   const expectedSize = view.getUint32(12, true)
   assertDecode(headerSize === BLOCK_HEADER_SIZE, `Unsupported SqPack block header size ${headerSize}.`)
   assertDecode(expectedSize <= 1024 * 1024, 'A SqPack block exceeds the decoder safety limit.')
 
   let decoded: Uint8Array
-  if (compression === BLOCK_UNCOMPRESSED) {
+  if (compressedSize === BLOCK_UNCOMPRESSED) {
     assertDecode(offset + headerSize + expectedSize <= payload.byteLength, 'An uncompressed SqPack block is truncated.')
     decoded = payload.slice(offset + headerSize, offset + headerSize + expectedSize)
   } else {
-    assertDecode(onDiskSize > headerSize && offset + onDiskSize <= payload.byteLength, 'A compressed SqPack block is truncated.')
-    decoded = await inflateRaw(payload.slice(offset + headerSize, offset + onDiskSize))
+    assertDecode(compressedSize > 0, 'A compressed SqPack block has an invalid compressed size.')
+    assertDecode(
+      headerSize + compressedSize <= onDiskSize && offset + headerSize + compressedSize <= payload.byteLength,
+      'A compressed SqPack block is truncated.',
+    )
+    try {
+      // onDiskSize includes alignment padding. DecompressionStream rejects those
+      // trailing bytes, so use the exact compressed byte count from the block header.
+      decoded = await inflateRaw(payload.slice(offset + headerSize, offset + headerSize + compressedSize))
+    } catch (error) {
+      const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+      throw new Error(`Failed to inflate SqPack block at offset ${offset} (${compressedSize} → ${expectedSize} bytes): ${detail}`)
+    }
   }
   assertDecode(decoded.byteLength === expectedSize, `SqPack block decoded to ${decoded.byteLength} bytes; expected ${expectedSize}.`)
   return decoded

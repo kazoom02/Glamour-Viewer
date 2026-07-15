@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decodeMdl } from './mdl'
+import { decodeMdl, reconstructMdl } from './mdl'
 
 function triangleMdl(): ArrayBuffer {
   const buffer = new ArrayBuffer(526)
@@ -47,5 +47,27 @@ describe('MDL geometry decoding', () => {
     expect(model.materialPaths).toEqual([])
     expect(model.boneNames).toEqual([])
     expect(model.bounds).toEqual({ min: [0, 0, 0], max: [1, 2, 0] })
+  })
+
+  it('ignores SqPack alignment padding after a raw-deflate block', async () => {
+    const headerSize = 210
+    const onDiskSize = 32
+    const payload = new ArrayBuffer(headerSize + onDiskSize)
+    const view = new DataView(payload)
+    view.setUint32(0, headerSize, true)
+    view.setUint32(4, 3, true)
+    view.setUint16(178, 1, true)
+    view.setUint16(208, onDiskSize, true)
+
+    const blockOffset = headerSize
+    const compressed = Uint8Array.from([0xcb, 0x48, 0xcd, 0xc9, 0xc9, 0x07, 0x00]) // raw deflate for "hello"
+    view.setUint32(blockOffset, 16, true)
+    view.setUint32(blockOffset + 8, compressed.byteLength, true)
+    view.setUint32(blockOffset + 12, 5, true)
+    new Uint8Array(payload, blockOffset + 16, compressed.byteLength).set(compressed)
+    new Uint8Array(payload, blockOffset + 16 + compressed.byteLength).fill(0xee)
+
+    const mdl = new Uint8Array(await reconstructMdl(payload))
+    expect(new TextDecoder().decode(mdl.slice(68))).toBe('hello')
   })
 })
