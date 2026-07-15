@@ -4,6 +4,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import type { AssetSource } from '../asset-source/types'
 import {
   auxiliarySkeletonPlan,
+  characterModelCandidates,
   characterModelPlan,
   equipmentModelCandidates,
   faceSkeletonPath,
@@ -141,14 +142,20 @@ function addDecodedModel(
     else if (/e0000_(top|dwn|sho|glv)_/.test(materialPath)) meshColor = 0x554b49
     const diffuse = decodedMaterial?.textures.diffuse
     const normal = decodedMaterial?.textures.normal
-    const mask = decodedMaterial?.textures.mask
     const ao = decodedMaterial?.textures.ao
-    const roughness = decodedMaterial?.textures.roughness ?? mask
+    const roughness = decodedMaterial?.textures.roughness
     const metalness = decodedMaterial?.textures.metalness
     const emissive = decodedMaterial?.textures.emissive
     const alphaMode = decodedMaterial?.alphaMode ?? 'opaque'
     const isIris = decodedMaterial?.shaderPackage.toLowerCase() === 'iris.shpk' || /_iri_[a-z]\.mtrl$/.test(materialPath)
     const isFaceMaterial = /mt_c\d{4}f\d{4}/.test(materialPath)
+    const fallbackRoughness = shaderPackage === 'skin.shpk'
+      ? 0.72
+      : shaderPackage === 'hair.shpk'
+        ? 0.64
+        : shaderPackage === 'iris.shpk'
+          ? 0.46
+          : 0.68
     const material = new THREE.MeshStandardMaterial({
       color: diffuse ? 0xffffff : meshColor,
       map: diffuse ? textureFromDecoded(diffuse, true, anisotropy) : null,
@@ -156,7 +163,7 @@ function addDecodedModel(
       aoMap: ao ? textureFromDecoded(ao, false, anisotropy) : null,
       aoMapIntensity: ao ? 0.65 : 1,
       roughnessMap: roughness ? textureFromDecoded(roughness, false, anisotropy) : null,
-      roughness: roughness ? 1 : 0.62,
+      roughness: roughness ? 1 : fallbackRoughness,
       metalnessMap: metalness ? textureFromDecoded(metalness, false, anisotropy) : null,
       metalness: metalness ? 1 : materialPath.includes('/mt_c') && materialPath.includes('e0000') ? 0 : 0.08,
       emissiveMap: emissive ? textureFromDecoded(emissive, true, anisotropy) : null,
@@ -411,14 +418,14 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
           failures.push(`base skeleton: ${reason instanceof Error ? reason.message : String(reason)}`)
         }
         const paths = [...new Set([
-          ...characterPlans.map((plan) => plan.path),
+          ...characterPlans.flatMap(characterModelCandidates),
           ...equipmentPlans.flatMap((plan) => plan.candidates),
         ])]
         const byPath = resultMap(await loadLocalModels(source, paths))
         if (disposed) return
 
         const characterModels = characterPlans.flatMap((plan) => {
-          const result = byPath.get(plan.path)
+          const result = characterModelCandidates(plan).map((path) => byPath.get(path)).find((candidate) => candidate?.model)
           return result?.model ? [{ plan, result: result as Required<Pick<ModelLoadResult, 'path' | 'model'>> }] : []
         })
         const equipmentModels = equipmentPlans.flatMap((plan) => {
@@ -450,7 +457,8 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
         diagnostics.push(...materialResults.flatMap((result) => result.diagnostics))
 
         for (const plan of characterPlans) {
-          const result = byPath.get(plan.path)
+          const candidates = characterModelCandidates(plan)
+          const result = candidates.map((path) => byPath.get(path)).find((candidate) => candidate?.model)
           if (result?.model) {
             const materialResult = materialsByModel.get(result.path)
             addDecodedModel(
@@ -468,7 +476,8 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
             diagnostics.push(...modelMaterialDiagnostics(`character ${plan.part}`, result.model, materialResult, false))
             characterParts += 1
           } else if (!plan.optional) {
-            failures.push(`${plan.part}: ${result?.error || 'model not found'}`)
+            const attempted = candidates.map((path) => byPath.get(path)?.error).filter(Boolean).join(' / ')
+            failures.push(`${plan.part}: ${attempted || 'model not found'}`)
           }
         }
         for (const plan of equipmentPlans) {
@@ -496,12 +505,20 @@ export default function ViewerCanvas({ source, equipped, raceCode }: ViewerCanva
         }
       } else {
         for (const plan of characterPlans) {
-          try {
-            characterGroup.add(await loadRemoteModel(source, plan.path))
-            characterParts += 1
-          } catch (reason) {
-            if (plan.optional) continue
-            failures.push(`${plan.part}: ${reason instanceof Error ? reason.message : 'model not found'}`)
+          let loaded = false
+          let lastReason: unknown
+          for (const path of characterModelCandidates(plan)) {
+            try {
+              characterGroup.add(await loadRemoteModel(source, path))
+              characterParts += 1
+              loaded = true
+              break
+            } catch (reason) {
+              lastReason = reason
+            }
+          }
+          if (!loaded && !plan.optional) {
+            failures.push(`${plan.part}: ${lastReason instanceof Error ? lastReason.message : 'model not found'}`)
           }
         }
         for (const plan of equipmentPlans) {

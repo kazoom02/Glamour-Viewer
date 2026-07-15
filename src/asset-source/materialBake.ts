@@ -121,6 +121,8 @@ export function bakeCharacterMaterial(
   },
   shaderPackage = 'character.shpk',
 ): BakedCharacterMaterial | undefined {
+  const shader = shaderPackage.toLowerCase()
+  const legacyShader = shader === 'characterlegacy.shpk'
   const selector = table.kind === 'dawntrail' ? textures.index : textures.normal
   if (!selector) return undefined
   const reference = textures.diffuse ?? selector
@@ -163,10 +165,16 @@ export function bakeCharacterMaterial(
       }
       diffuse[target + 3] = clampByte((base[3] / 255) * opacity)
       const rowRoughness = mix(a.roughness, b.roughness)
-      const maskRoughness = textures.mask ? mask[1] / 255 : 1
-      const rough = clampByte(shaderPackage.toLowerCase() === 'characterlegacy.shpk'
-        ? 1 - maskRoughness
-        : rowRoughness * maskRoughness)
+      // Modern masks store roughness directly in green. Legacy masks instead
+      // store specular power in red and gloss intensity in green, so red must be
+      // inverted for an approximate metal/roughness conversion. Preserve the
+      // rougher of the texture and colorset values: multiplying them makes both
+      // values artificially smoother in Three's different lighting model.
+      const textureRoughness = textures.mask
+        ? legacyShader ? 1 - mask[0] / 255 : mask[1] / 255
+        : rowRoughness
+      const pbrRoughness = Math.max(0.32, rowRoughness, textureRoughness)
+      const rough = clampByte(pbrRoughness)
       const occlusion = textures.mask ? mask[2] : 255
       ao[target] = ao[target + 1] = ao[target + 2] = occlusion
       roughness[target] = roughness[target + 1] = roughness[target + 2] = rough

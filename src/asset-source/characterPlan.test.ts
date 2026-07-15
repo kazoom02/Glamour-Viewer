@@ -3,6 +3,7 @@ import type { ArmorItem } from '../catalog/types'
 import {
   auxiliarySkeletonPlan,
   CHARACTER_PRESETS,
+  characterModelCandidates,
   characterModelPlan,
   equipmentModelCandidates,
   faceSkeletonPath,
@@ -76,6 +77,21 @@ describe('character asset planning', () => {
       'chara/equipment/e0190/model/c1001e0190_top.mdl',
       'chara/equipment/e0190/model/c0201e0190_top.mdl',
       'chara/equipment/e0190/model/c0101e0190_top.mdl',
+    ])
+  })
+
+  it('uses shared body geometry when a race-specific naked model is absent', () => {
+    const [miqoteTorso] = characterModelPlan('c0701')
+    expect(characterModelCandidates(miqoteTorso!)).toEqual([
+      'chara/equipment/e0000/model/c0701e0000_top.mdl',
+      'chara/equipment/e0000/model/c0101e0000_top.mdl',
+    ])
+
+    const [vieraFemaleTorso] = characterModelPlan('c1801')
+    expect(characterModelCandidates(vieraFemaleTorso!)).toEqual([
+      'chara/equipment/e0000/model/c1801e0000_top.mdl',
+      'chara/equipment/e0000/model/c0201e0000_top.mdl',
+      'chara/equipment/e0000/model/c0101e0000_top.mdl',
     ])
   })
 })

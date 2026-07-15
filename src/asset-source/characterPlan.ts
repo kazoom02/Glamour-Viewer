@@ -28,6 +28,7 @@ export type CharacterPart = 'torso' | 'hands' | 'legs' | 'feet' | 'face' | 'hair
 export interface CharacterModelPlan {
   part: CharacterPart
   path: string
+  fallbackPaths?: string[]
   coveredBy?: 'body' | 'hands' | 'legs' | 'feet'
   optional?: boolean
 }
@@ -67,17 +68,30 @@ function modelPath(raceCode: CharacterRaceCode, category: string, prefix: string
 }
 
 export function characterModelPlan(raceCode: CharacterRaceCode): CharacterModelPlan[] {
+  const basePart = (
+    part: 'torso' | 'hands' | 'legs' | 'feet',
+    coveredBy: 'body' | 'hands' | 'legs' | 'feet',
+    suffix: 'top' | 'glv' | 'dwn' | 'sho',
+  ): CharacterModelPlan => {
+    const paths = [raceCode, ...EQUIPMENT_FALLBACKS[raceCode]]
+      .map((candidate) => `chara/equipment/e0000/model/${candidate}e0000_${suffix}.mdl`)
+    return { part, coveredBy, path: paths[0]!, fallbackPaths: paths.slice(1) }
+  }
   const result: CharacterModelPlan[] = [
-    { part: 'torso', coveredBy: 'body', path: `chara/equipment/e0000/model/${raceCode}e0000_top.mdl` },
-    { part: 'hands', coveredBy: 'hands', path: `chara/equipment/e0000/model/${raceCode}e0000_glv.mdl` },
-    { part: 'legs', coveredBy: 'legs', path: `chara/equipment/e0000/model/${raceCode}e0000_dwn.mdl` },
-    { part: 'feet', coveredBy: 'feet', path: `chara/equipment/e0000/model/${raceCode}e0000_sho.mdl` },
+    basePart('torso', 'body', 'top'),
+    basePart('hands', 'hands', 'glv'),
+    basePart('legs', 'legs', 'dwn'),
+    basePart('feet', 'feet', 'sho'),
     { part: 'face', path: modelPath(raceCode, 'face', 'f', 'fac') },
     { part: 'hair', path: modelPath(raceCode, 'hair', 'h', 'hir') },
   ]
   if (TAIL_RACES.has(raceCode)) result.push({ part: 'tail', path: modelPath(raceCode, 'tail', 't', 'til'), optional: true })
   if (EAR_RACES.has(raceCode)) result.push({ part: 'ears', path: modelPath(raceCode, 'zear', 'z', 'zer'), optional: true })
   return result
+}
+
+export function characterModelCandidates(plan: CharacterModelPlan): string[] {
+  return [plan.path, ...(plan.fallbackPaths ?? [])]
 }
 
 export function skeletonPath(raceCode: CharacterRaceCode): string {
