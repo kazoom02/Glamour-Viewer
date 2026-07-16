@@ -34,7 +34,7 @@ import {
 } from '../catalog/types'
 import type { CharacterCustomization } from '../customization/types'
 import { animationClipFromDecoded } from './idleAnimation'
-import { bustWeightSummary, isBustBoneName, muscleNormalStrength } from './bodyCustomization'
+import { applyBustDeformation, bustWeightSummary, isBustBoneName, muscleNormalStrength } from './bodyCustomization'
 
 interface ViewerCanvasProps {
   source: AssetSource
@@ -171,6 +171,20 @@ function bustRigDiagnostic(rig: CharacterRig | undefined, stage: string, request
     `${bone.name}@${rig!.boneIndex.get(bone.name) ?? '?'} scale=${bone.scale.toArray().map((value) => value.toFixed(4)).join(',')}`
   ))
   return `bust rig ${stage}: requestedScale=${requested.map((value) => value.toFixed(4)).join(',')} detectedBones=${bones.length}${values.length ? ` ${values.join(' | ')}` : ' none'}`
+}
+
+function neutralizeBustRig(rig: CharacterRig, appliedScale: BustScale): void {
+  const safeScale = appliedScale.map((value) => value || 1) as BustScale
+  rig.skeleton.bones.forEach((bone) => {
+    if (!isBustBoneName(bone.name)) return
+    bone.scale.set(
+      bone.scale.x / safeScale[0],
+      bone.scale.y / safeScale[1],
+      bone.scale.z / safeScale[2],
+    )
+  })
+  rig.skeleton.bones.forEach((bone) => bone.updateWorldMatrix(true, false))
+  rig.skeleton.update()
 }
 
 function bustModelDiagnostic(label: string, path: string, model: DecodedModel): string {
@@ -646,13 +660,25 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           const result = plan.candidates.map((path) => byPath.get(path)).find((candidate) => candidate?.model)
           return result?.model ? [{ plan, result: result as Required<Pick<ModelLoadResult, 'path' | 'model'>> }] : []
         })
-        if (customization.gender === 'female') {
-          characterModels
-            .filter(({ plan }) => plan.part === 'torso')
-            .forEach(({ result }) => diagnostics.push(bustModelDiagnostic('character torso', result.path, result.model)))
-          equipmentModels
-            .filter(({ plan }) => plan.slot === 'body')
-            .forEach(({ plan, result }) => diagnostics.push(bustModelDiagnostic(plan.item.name, result.path, result.model)))
+        if (customization.gender === 'female' && rig) {
+          const activeRig = rig
+          const bustModels = [
+            ...characterModels
+              .filter(({ plan }) => plan.part === 'torso')
+              .map(({ result }) => ({ label: 'character torso', result })),
+            ...equipmentModels
+              .filter(({ plan }) => plan.slot === 'body')
+              .map(({ plan, result }) => ({ label: plan.item.name, result })),
+          ]
+          bustModels.forEach(({ label, result }) => {
+            diagnostics.push(bustModelDiagnostic(label, result.path, result.model))
+            const deformation = applyBustDeformation(result.model, activeRig.skeleton, activeRig.boneIndex)
+            diagnostics.push(
+              `bust deformation ${label}: mode=CPU-weighted vertices=${deformation.weightedVertices} maxDisplacement=${deformation.maximumDisplacement.toFixed(6)}`,
+            )
+          })
+          neutralizeBustRig(activeRig, bustScale)
+          diagnostics.push(bustRigDiagnostic(activeRig, 'after CPU bake (neutral for animation)', bustScale))
         }
         const materialRequests: MaterialLoadRequest[] = [
           ...characterModels.map(({ result }) => ({
@@ -746,7 +772,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             setStatus(`Preparing ${raceCode} idle animation…`)
             const decodedAnimation = await idleAnimationPromise
             if (disposed) return
-            const clip = animationClipFromDecoded(decodedAnimation, rig.skeleton, bustScale)
+            const clip = animationClipFromDecoded(decodedAnimation, rig.skeleton)
             activeIdleMixer = new THREE.AnimationMixer(characterGroup)
             const action = activeIdleMixer.clipAction(clip)
             action.setLoop(THREE.LoopRepeat, Infinity)
@@ -758,7 +784,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             action.play()
             activeIdleMixer.update(0)
             action.paused = true
-            diagnostics.push(bustRigDiagnostic(rig, 'after idle frame 0', bustScale))
+            diagnostics.push(bustRigDiagnostic(rig, 'after idle frame 0 (CPU-baked geometry)', bustScale))
             idleMixer.current = activeIdleMixer
             idleAction.current = action
             idleReady = true

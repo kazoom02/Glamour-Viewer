@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { DecodedModel } from '../asset-source/mdl'
-import { bustWeightSummary, isBustBoneName, muscleNormalStrength } from './bodyCustomization'
+import * as THREE from 'three'
+import { applyBustDeformation, bustWeightSummary, isBustBoneName, muscleNormalStrength } from './bodyCustomization'
 
 describe('body customization rendering', () => {
   it('recognizes vanilla breast bones case-insensitively', () => {
@@ -36,5 +37,33 @@ describe('body customization rendering', () => {
       totalWeight: 1.25,
       maximumWeight: 0.75,
     })
+  })
+
+  it('bakes the weighted breast-bone scale into model positions', () => {
+    const breast = new THREE.Bone()
+    breast.name = 'j_mune_l'
+    breast.updateMatrixWorld(true)
+    const skeleton = new THREE.Skeleton([breast])
+    skeleton.calculateInverses()
+    breast.scale.set(2, 1, 1)
+    breast.updateMatrixWorld(true)
+    const model = {
+      boneNames: ['j_mune_l'],
+      meshes: [{
+        positions: new Float32Array([1, 0, 0]),
+        normals: new Float32Array([1, 0, 0]),
+        indices: new Uint16Array([0]),
+        materialIndex: 0,
+        skinIndices: new Uint16Array([0, 0, 0, 0]),
+        skinWeights: new Float32Array([1, 0, 0, 0]),
+      }],
+      materialPaths: [],
+      bounds: { min: [0, 0, 0], max: [1, 0, 0] },
+    } as DecodedModel
+
+    const result = applyBustDeformation(model, skeleton, new Map([['j_mune_l', 0]]))
+    expect(model.meshes[0]!.positions[0]).toBeCloseTo(2)
+    expect(result.weightedVertices).toBe(1)
+    expect(result.maximumDisplacement).toBeCloseTo(1)
   })
 })
