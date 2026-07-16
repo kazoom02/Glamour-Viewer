@@ -65,5 +65,22 @@ describe('body customization rendering', () => {
     expect(model.meshes[0]!.positions[0]).toBeCloseTo(2)
     expect(result.weightedVertices).toBe(1)
     expect(result.maximumDisplacement).toBeCloseTo(1)
+    expect(result.averageDisplacement).toEqual([1, 0, 0])
+    expect(result.beforeBounds).toMatchObject({ min: [1, 0, 0], max: [1, 0, 0] })
+    expect(result.afterBounds).toMatchObject({ min: [2, 0, 0], max: [2, 0, 0] })
+    expect(result.maximumVertex).toMatchObject({
+      meshIndex: 0,
+      vertexIndex: 0,
+      displacement: [1, 0, 0],
+      bustWeight: 1,
+      influences: ['j_mune_l@0:1.000000'],
+    })
+    expect(result.bones).toMatchObject([{
+      name: 'j_mune_l',
+      modelIndex: 0,
+      rigIndex: 0,
+      mapped: true,
+      deltaScale: [2, 1, 1],
+    }])
   })
 })

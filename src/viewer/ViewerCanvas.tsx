@@ -34,7 +34,13 @@ import {
 } from '../catalog/types'
 import type { CharacterCustomization } from '../customization/types'
 import { animationClipFromDecoded } from './idleAnimation'
-import { applyBustDeformation, bustWeightSummary, isBustBoneName, muscleNormalStrength } from './bodyCustomization'
+import {
+  applyBustDeformation,
+  bustWeightSummary,
+  isBustBoneName,
+  muscleNormalStrength,
+  type BustDeformationResult,
+} from './bodyCustomization'
 
 interface ViewerCanvasProps {
   source: AssetSource
@@ -189,7 +195,37 @@ function neutralizeBustRig(rig: CharacterRig, appliedScale: BustScale): void {
 
 function bustModelDiagnostic(label: string, path: string, model: DecodedModel): string {
   const summary = bustWeightSummary(model)
-  return `bust weights ${label}: path=${path} modelBones=${summary.modelBones.join(',') || 'none'} weightedVertices=${summary.weightedVertices} totalWeight=${summary.totalWeight.toFixed(4)} maxVertexWeight=${summary.maximumWeight.toFixed(4)}`
+  const boundsSize = model.bounds.max.map((value, axis) => value - model.bounds.min[axis]!)
+  const raceDeformation = model.deformation
+    ? `PBD c${model.deformation.sourceRaceCode.toString().padStart(4, '0')}→c${model.deformation.targetRaceCode.toString().padStart(4, '0')} vertices=${model.deformation.vertices} normals=${model.deformation.normals}`
+    : 'native'
+  return [
+    `bust trace v3 ${label}: path=${path}`,
+    `  source=${raceDeformation} lod=${model.lod ?? 'unknown'} meshes=${model.meshes.length}`,
+    `  modelBounds min=${formatVector(model.bounds.min)} max=${formatVector(model.bounds.max)} size=${formatVector(boundsSize)}`,
+    `  modelBones=${summary.modelBones.join(',') || 'none'} weightedVertices=${summary.weightedVertices} totalWeight=${summary.totalWeight.toFixed(6)} maxVertexWeight=${summary.maximumWeight.toFixed(6)}`,
+  ].join('\n')
+}
+
+function formatVector(values: readonly number[], digits = 6): string {
+  return `[${values.map((value) => Number.isFinite(value) ? value.toFixed(digits) : String(value)).join(',')}]`
+}
+
+function bustDeformationDiagnostic(label: string, result: BustDeformationResult): string {
+  const maximum = result.maximumVertex
+  return [
+    `bust deformation v3 ${label}: mode=CPU-weighted weightedVertices=${result.weightedVertices} vertexBuffers=${result.uniqueVertexBuffers}`,
+    `  topology affectedTriangles=${result.affectedTriangles}/${result.totalTriangles}`,
+    `  beforeBounds min=${formatVector(result.beforeBounds.min)} max=${formatVector(result.beforeBounds.max)} size=${formatVector(result.beforeBounds.size)} center=${formatVector(result.beforeBounds.center)}`,
+    `  afterBounds min=${formatVector(result.afterBounds.min)} max=${formatVector(result.afterBounds.max)} size=${formatVector(result.afterBounds.size)} center=${formatVector(result.afterBounds.center)}`,
+    `  displacement averageVector=${formatVector(result.averageDisplacement)} averageDistance=${result.averageDistance.toFixed(6)} maximumDistance=${result.maximumDisplacement.toFixed(6)}`,
+    maximum
+      ? `  maximumVertex mesh=${maximum.meshIndex} vertex=${maximum.vertexIndex} original=${formatVector(maximum.original)} deformed=${formatVector(maximum.deformed)} delta=${formatVector(maximum.displacement)} bustWeight=${maximum.bustWeight.toFixed(6)} influences=${maximum.influences.join(',')}`
+      : '  maximumVertex none',
+    ...result.bones.map((bone) => bone.mapped
+      ? `  bone ${bone.name}: modelIndex=${bone.modelIndex} rigIndex=${bone.rigIndex} parent=${bone.parentName ?? 'none'} localPosition=${formatVector(bone.localPosition!)} bindWorldPosition=${formatVector(bone.bindWorldPosition!)} currentWorldPosition=${formatVector(bone.currentWorldPosition!)} localScale=${formatVector(bone.localScale!)} deltaScale=${formatVector(bone.deltaScale!)} determinant=${bone.transformDeterminant!.toFixed(8)}`
+      : `  bone ${bone.name}: modelIndex=${bone.modelIndex} rigIndex=${bone.rigIndex ?? 'missing'} mapped=false`),
+  ].join('\n')
 }
 
 function colorNumber(value: string, fallback = 0xffffff): number {
@@ -450,8 +486,9 @@ function modelMaterialDiagnostics(
     const reference = model.materialPaths[mesh.materialIndex]?.replaceAll('\\', '/').toLowerCase() ?? '(missing)'
     const material = materialResult?.materials[reference]
     const face = label === 'character face'
+    const torso = label === 'character torso'
     const iris = material?.shaderPackage.toLowerCase() === 'iris.shpk' || reference.includes('_iri_')
-    if (!equipment && !face && !iris) return []
+    if (!equipment && !face && !torso && !iris) return []
     return [
       `${label} mesh ${index}: materialIndex=${mesh.materialIndex} reference=${reference}`,
       `  shader=${material?.shaderPackage ?? 'unresolved'} vertices=${mesh.positions.length / 3} triangles=${mesh.indices.length / 3}`,
@@ -683,9 +720,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           bustModels.forEach(({ label, result }) => {
             diagnostics.push(bustModelDiagnostic(label, result.path, result.model))
             const deformation = applyBustDeformation(result.model, activeRig.skeleton, activeRig.boneIndex)
-            diagnostics.push(
-              `bust deformation ${label}: mode=CPU-weighted vertices=${deformation.weightedVertices} maxDisplacement=${deformation.maximumDisplacement.toFixed(6)}`,
-            )
+            diagnostics.push(bustDeformationDiagnostic(label, deformation))
           })
           neutralizeBustRig(activeRig, bustScale)
           diagnostics.push(bustRigDiagnostic(activeRig, 'after CPU bake (neutral for animation)', bustScale))
