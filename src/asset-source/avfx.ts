@@ -137,6 +137,7 @@ export interface AvfxUvSet {
 
 export interface AvfxEmitterDefinition {
   type: number
+  childLimit: number
   life: number
   lifeRandom: number
   loopStart: number
@@ -187,6 +188,9 @@ export interface AvfxModelGeometry {
   normals: Float32Array
   colors: Uint8Array
   uvs: Float32Array
+  uvs2: Float32Array
+  uvs3: Float32Array
+  uvs4: Float32Array
   indices: Uint16Array
   emitPositions: Float32Array
   emitNormals: Float32Array
@@ -396,6 +400,7 @@ function decodeEmitter(node: AvfxNode): AvfxEmitterDefinition {
   const data = lastChild(node, 'Data')
   return {
     type: nodeInt(node, 'EVT'),
+    childLimit: Math.max(0, nodeInt(node, 'ClCn')),
     life: nodeFloat(lastChild(node, 'Life'), 'Val', 60),
     lifeRandom: nodeFloat(lastChild(node, 'Life'), 'ValR'),
     loopStart: nodeInt(node, 'LpSt'),
@@ -472,6 +477,9 @@ function decodeModel(node: AvfxNode): AvfxModelGeometry {
   const normals = new Float32Array(vertexCount * 3)
   const colors = new Uint8Array(vertexCount * 4)
   const uvs = new Float32Array(vertexCount * 2)
+  const uvs2 = new Float32Array(vertexCount * 2)
+  const uvs3 = new Float32Array(vertexCount * 2)
+  const uvs4 = new Float32Array(vertexCount * 2)
   if (vertexNode) {
     const view = new DataView(vertexNode.data.buffer, vertexNode.data.byteOffset, vertexNode.data.byteLength)
     for (let index = 0; index < vertexCount; index++) {
@@ -480,6 +488,9 @@ function decodeModel(node: AvfxNode): AvfxModelGeometry {
       normals.set([(vertexNode.data[offset + 8]! - 128) / 127, (vertexNode.data[offset + 9]! - 128) / 127, (vertexNode.data[offset + 10]! - 128) / 127], index * 3)
       colors.set(vertexNode.data.subarray(offset + 16, offset + 20), index * 4)
       uvs.set([halfFloat(view.getUint16(offset + 20, true)), halfFloat(view.getUint16(offset + 22, true))], index * 2)
+      uvs2.set([halfFloat(view.getUint16(offset + 24, true)), halfFloat(view.getUint16(offset + 26, true))], index * 2)
+      uvs3.set([halfFloat(view.getUint16(offset + 28, true)), halfFloat(view.getUint16(offset + 30, true))], index * 2)
+      uvs4.set([halfFloat(view.getUint16(offset + 32, true)), halfFloat(view.getUint16(offset + 34, true))], index * 2)
     }
   }
   const indices = new Uint16Array(indexNode?.size ? indexNode.size / 2 : 0)
@@ -505,7 +516,7 @@ function decodeModel(node: AvfxNode): AvfxModelGeometry {
     const view = new DataView(orderNode.data.buffer, orderNode.data.byteOffset, orderNode.data.byteLength)
     for (let index = 0; index < emitOrder.length; index++) emitOrder[index] = view.getUint16(index * 2, true)
   }
-  return { positions, normals, colors, uvs, indices, emitPositions, emitNormals, emitColors, emitOrder }
+  return { positions, normals, colors, uvs, uvs2, uvs3, uvs4, indices, emitPositions, emitNormals, emitColors, emitOrder }
 }
 
 function decodeTimeline(node: AvfxNode): AvfxTimeline {

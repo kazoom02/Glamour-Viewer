@@ -14,6 +14,7 @@ describe('AVFX runtime', () => {
   it('follows an emitter rule and expires authored particles', () => {
     const emitter: AvfxEmitterDefinition = {
       type: 0,
+      childLimit: 30,
       life: 3,
       lifeRandom: 0,
       loopStart: 0,
@@ -78,5 +79,17 @@ describe('AVFX runtime', () => {
     expect(runtime.renderedParticles).toBe(0)
     runtime.dispose()
     expect(target.children).toHaveLength(0)
+
+    emitter.childLimit = 1
+    emitter.life = 4
+    emitter.createInterval = constant(1)
+    particle.life = 10
+    const limitedTarget = new THREE.Group()
+    const limitedRuntime = createAvfxRuntime(limitedTarget, avfx, [], 1)
+    limitedRuntime.update(1 / 60)
+    limitedRuntime.update(1 / 60)
+    limitedRuntime.update(1 / 60)
+    expect(limitedRuntime.renderedParticles).toBe(1)
+    limitedRuntime.dispose()
   })
 })

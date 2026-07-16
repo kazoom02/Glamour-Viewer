@@ -1,10 +1,12 @@
 import * as THREE from 'three'
 import type {
+  AvfxCurve,
   AvfxColorCurve,
   AvfxEmitterDefinition,
   AvfxModelGeometry,
   AvfxParticleDefinition,
   AvfxSpawnRule,
+  AvfxTextureBinding,
   AvfxVectorCurve,
   DecodedAvfx,
 } from '../asset-source/avfx'
@@ -21,12 +23,15 @@ interface RuntimeEmitter {
   nextParticle: number[]
   nextEmitter: number[]
   seed: number
+  activeChildren: number
+  parent?: RuntimeEmitter
 }
 
 interface RuntimeParticle {
   definition: AvfxParticleDefinition
   object: THREE.Object3D
-  material: THREE.MeshBasicMaterial | THREE.SpriteMaterial
+  material: THREE.ShaderMaterial
+  textureLayers: AvfxTextureBinding[]
   age: number
   life: number
   position: THREE.Vector3
@@ -34,6 +39,7 @@ interface RuntimeParticle {
   rotation: THREE.Euler
   inheritedScale: THREE.Vector3
   seed: number
+  parent: RuntimeEmitter
 }
 
 export interface AvfxRuntime {
@@ -44,7 +50,7 @@ export interface AvfxRuntime {
   dispose(): void
 }
 
-const MAX_PARTICLES = 384
+const MAX_PARTICLES = 768
 
 function seeded(seed: number): number {
   let value = seed | 0
@@ -102,14 +108,8 @@ function wrapping(value: number): THREE.Wrapping {
   return value === 0 ? THREE.RepeatWrapping : value === 2 ? THREE.MirroredRepeatWrapping : THREE.ClampToEdgeWrapping
 }
 
-function decodedTexture(source: DecodedTexture, anisotropy: number, colorToAlpha = false): THREE.DataTexture {
-  const rgba = colorToAlpha ? new Uint8Array(source.rgba) : source.rgba
-  if (colorToAlpha) {
-    for (let offset = 0; offset < rgba.length; offset += 4) {
-      rgba[offset + 3] = Math.max(rgba[offset]!, rgba[offset + 1]!, rgba[offset + 2]!)
-    }
-  }
-  const map = new THREE.DataTexture(rgba, source.width, source.height, THREE.RGBAFormat, THREE.UnsignedByteType)
+function decodedTexture(source: DecodedTexture, anisotropy: number): THREE.DataTexture {
+  const map = new THREE.DataTexture(source.rgba, source.width, source.height, THREE.RGBAFormat, THREE.UnsignedByteType)
   map.colorSpace = THREE.SRGBColorSpace
   map.minFilter = THREE.LinearMipmapLinearFilter
   map.magFilter = THREE.LinearFilter
@@ -127,6 +127,25 @@ function blending(drawMode: number): THREE.Blending {
   return THREE.NormalBlending
 }
 
+function configureBlendState(material: THREE.Material, drawMode: number): void {
+  if (drawMode === 4 || drawMode === 12) {
+    material.blending = THREE.CustomBlending
+    material.blendEquation = THREE.AddEquation
+    material.blendSrc = THREE.OneFactor
+    material.blendDst = THREE.OneMinusSrcColorFactor
+  } else if (drawMode === 5) {
+    material.blending = THREE.CustomBlending
+    material.blendEquation = THREE.ReverseSubtractEquation
+    material.blendSrc = THREE.SrcAlphaFactor
+    material.blendDst = THREE.OneFactor
+  } else if (drawMode === 6 || drawMode === 7) {
+    material.blending = THREE.CustomBlending
+    material.blendEquation = drawMode === 6 ? THREE.MinEquation : THREE.MaxEquation
+    material.blendSrc = THREE.OneFactor
+    material.blendDst = THREE.OneFactor
+  }
+}
+
 function modelGeometry(source: AvfxModelGeometry): THREE.BufferGeometry | undefined {
   if (!source.positions.length || !source.indices.length) return undefined
   const geometry = new THREE.BufferGeometry()
@@ -134,6 +153,10 @@ function modelGeometry(source: AvfxModelGeometry): THREE.BufferGeometry | undefi
   if (source.normals.length) geometry.setAttribute('normal', new THREE.BufferAttribute(source.normals, 3))
   if (source.colors.length) geometry.setAttribute('color', new THREE.BufferAttribute(source.colors, 4, true))
   if (source.uvs.length) geometry.setAttribute('uv', new THREE.BufferAttribute(source.uvs, 2))
+  if (source.uvs2.length) geometry.setAttribute('avfxUv1', new THREE.BufferAttribute(source.uvs2, 2))
+  if (source.uvs3.length) geometry.setAttribute('avfxUv2', new THREE.BufferAttribute(source.uvs3, 2))
+  if (source.uvs4.length) geometry.setAttribute('avfxUv3', new THREE.BufferAttribute(source.uvs4, 2))
+  if (source.colors.length) geometry.setAttribute('avfxColor', new THREE.BufferAttribute(source.colors, 4, true))
   geometry.setIndex(new THREE.BufferAttribute(source.indices, 1))
   geometry.computeBoundingSphere()
   return geometry
@@ -142,7 +165,21 @@ function modelGeometry(source: AvfxModelGeometry): THREE.BufferGeometry | undefi
 function discGeometry(definition: AvfxParticleDefinition): THREE.BufferGeometry {
   const segmentsValue = definition.data.PCnV
   const segments = Math.max(12, Math.min(128, typeof segmentsValue === 'number' ? Math.round(segmentsValue) : 32))
-  const geometry = new THREE.RingGeometry(0.72, 1, segments, 1)
+  const dataCurve = (tag: string): AvfxCurve | undefined => {
+    const value = definition.data[tag]
+    return value && !Array.isArray(value) && typeof value === 'object' && 'keys' in value ? value as AvfxCurve : undefined
+  }
+  const radius = Math.max(
+    0.001,
+    Math.abs(evaluateAvfxCurve(dataCurve('RB'), 0, 1)),
+    Math.abs(evaluateAvfxCurve(dataCurve('RE'), 0, 1)),
+  )
+  const width = Math.min(radius, Math.max(
+    0.001,
+    Math.abs(evaluateAvfxCurve(dataCurve('WB'), 0, radius * 0.28)),
+    Math.abs(evaluateAvfxCurve(dataCurve('WE'), 0, radius * 0.28)),
+  ))
+  const geometry = new THREE.RingGeometry(Math.max(0, radius - width), radius, segments, 1)
   geometry.rotateX(-Math.PI / 2)
   return geometry
 }
@@ -151,12 +188,157 @@ function spriteGeometry(): THREE.PlaneGeometry {
   return new THREE.PlaneGeometry(1, 1)
 }
 
-function firstTextureIndex(definition: AvfxParticleDefinition): number | undefined {
-  for (const binding of definition.colorTextures) {
-    if (binding.enabled && binding.textureIndices.length) return binding.textureIndices[0]
+function ensureShaderAttributes(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
+  const position = geometry.getAttribute('position')
+  const uv = geometry.getAttribute('uv')
+  if (!position) return geometry
+  if (!uv) geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(position.count * 2), 2))
+  const baseUv = geometry.getAttribute('uv')
+  if (!geometry.getAttribute('avfxUv1')) geometry.setAttribute('avfxUv1', baseUv)
+  if (!geometry.getAttribute('avfxUv2')) geometry.setAttribute('avfxUv2', baseUv)
+  if (!geometry.getAttribute('avfxUv3')) geometry.setAttribute('avfxUv3', baseUv)
+  if (!geometry.getAttribute('avfxColor')) {
+    const colors = new Float32Array(position.count * 4)
+    colors.fill(1)
+    geometry.setAttribute('avfxColor', new THREE.BufferAttribute(colors, 4))
   }
-  return undefined
+  return geometry
 }
+
+const AVFX_VERTEX_SHADER = /* glsl */`
+  attribute vec2 avfxUv1;
+  attribute vec2 avfxUv2;
+  attribute vec2 avfxUv3;
+  attribute vec4 avfxColor;
+  uniform float uBillboard;
+  varying vec2 vAvfxUv0;
+  varying vec2 vAvfxUv1;
+  varying vec2 vAvfxUv2;
+  varying vec2 vAvfxUv3;
+  varying vec4 vAvfxColor;
+
+  void main() {
+    vAvfxUv0 = uv;
+    vAvfxUv1 = avfxUv1;
+    vAvfxUv2 = avfxUv2;
+    vAvfxUv3 = avfxUv3;
+    vAvfxColor = avfxColor;
+    if (uBillboard > 0.5) {
+      vec4 center = modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+      float scaleX = length(vec3(modelViewMatrix[0]));
+      float scaleY = length(vec3(modelViewMatrix[1]));
+      center.xy += position.xy * vec2(scaleX, scaleY);
+      gl_Position = projectionMatrix * center;
+    } else {
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  }
+`
+
+const AVFX_FRAGMENT_SHADER = /* glsl */`
+  uniform vec3 uTint;
+  uniform float uBrightness;
+  uniform float uOpacity;
+  varying vec2 vAvfxUv0;
+  varying vec2 vAvfxUv1;
+  varying vec2 vAvfxUv2;
+  varying vec2 vAvfxUv3;
+  varying vec4 vAvfxColor;
+
+  uniform sampler2D uTexture0;
+  uniform sampler2D uTexture1;
+  uniform sampler2D uTexture2;
+  uniform sampler2D uTexture3;
+  uniform float uTextureEnabled0;
+  uniform float uTextureEnabled1;
+  uniform float uTextureEnabled2;
+  uniform float uTextureEnabled3;
+  uniform float uColorToAlpha0;
+  uniform float uColorToAlpha1;
+  uniform float uColorToAlpha2;
+  uniform float uColorToAlpha3;
+  uniform int uColorMode0;
+  uniform int uColorMode1;
+  uniform int uColorMode2;
+  uniform int uColorMode3;
+  uniform int uAlphaMode0;
+  uniform int uAlphaMode1;
+  uniform int uAlphaMode2;
+  uniform int uAlphaMode3;
+  uniform int uUvSet0;
+  uniform int uUvSet1;
+  uniform int uUvSet2;
+  uniform int uUvSet3;
+  uniform vec4 uUvTransform0;
+  uniform vec4 uUvTransform1;
+  uniform vec4 uUvTransform2;
+  uniform vec4 uUvTransform3;
+  uniform float uUvRotation0;
+  uniform float uUvRotation1;
+  uniform float uUvRotation2;
+  uniform float uUvRotation3;
+
+  vec2 uvSet(int index) {
+    if (index == 1) return vAvfxUv1;
+    if (index == 2) return vAvfxUv2;
+    if (index == 3) return vAvfxUv3;
+    return vAvfxUv0;
+  }
+
+  vec2 transformUv(vec2 source, vec4 transform, float rotation) {
+    vec2 value = source * transform.xy;
+    float sine = sin(rotation);
+    float cosine = cos(rotation);
+    value = mat2(cosine, -sine, sine, cosine) * value;
+    return value + transform.zw;
+  }
+
+  vec4 prepareLayer(vec4 value, float colorToAlpha) {
+    if (colorToAlpha > 0.5) value.a = max(value.r, max(value.g, value.b));
+    return value;
+  }
+
+  vec4 combineLayer(vec4 base, vec4 layer, int colorMode, int alphaMode) {
+    if (colorMode == 0) base.rgb *= layer.rgb;
+    else if (colorMode == 1) base.rgb += layer.rgb;
+    else if (colorMode == 2) base.rgb -= layer.rgb;
+    else if (colorMode == 3) base.rgb = max(base.rgb, layer.rgb);
+    else if (colorMode == 4) base.rgb = min(base.rgb, layer.rgb);
+    else base.rgb *= layer.rgb;
+    if (alphaMode == 0) base.a *= layer.a;
+    else if (alphaMode == 1) base.a = max(base.a, layer.a);
+    else if (alphaMode == 2) base.a = min(base.a, layer.a);
+    return base;
+  }
+
+  void main() {
+    vec4 result = vec4(1.0);
+    float hasTexture = 0.0;
+    if (uTextureEnabled0 > 0.5) {
+      result = prepareLayer(texture2D(uTexture0, transformUv(uvSet(uUvSet0), uUvTransform0, uUvRotation0)), uColorToAlpha0);
+      hasTexture = 1.0;
+    }
+    if (uTextureEnabled1 > 0.5) {
+      vec4 layer = prepareLayer(texture2D(uTexture1, transformUv(uvSet(uUvSet1), uUvTransform1, uUvRotation1)), uColorToAlpha1);
+      result = hasTexture > 0.5 ? combineLayer(result, layer, uColorMode1, uAlphaMode1) : layer;
+      hasTexture = 1.0;
+    }
+    if (uTextureEnabled2 > 0.5) {
+      vec4 layer = prepareLayer(texture2D(uTexture2, transformUv(uvSet(uUvSet2), uUvTransform2, uUvRotation2)), uColorToAlpha2);
+      result = hasTexture > 0.5 ? combineLayer(result, layer, uColorMode2, uAlphaMode2) : layer;
+      hasTexture = 1.0;
+    }
+    if (uTextureEnabled3 > 0.5) {
+      vec4 layer = prepareLayer(texture2D(uTexture3, transformUv(uvSet(uUvSet3), uUvTransform3, uUvRotation3)), uColorToAlpha3);
+      result = hasTexture > 0.5 ? combineLayer(result, layer, uColorMode3, uAlphaMode3) : layer;
+    }
+    result.rgb *= uTint * uBrightness * vAvfxColor.rgb;
+    result.a *= uOpacity * vAvfxColor.a;
+    if (result.a <= 0.002) discard;
+    gl_FragColor = result;
+    #include <colorspace_fragment>
+  }
+`
 
 function emitterFrame(definition: AvfxEmitterDefinition, age: number): number {
   if (definition.loopEnd > definition.loopStart && age > definition.loopEnd) {
@@ -176,8 +358,13 @@ export function createAvfxRuntime(
   group.name = 'equipment-avfx-runtime'
   target.add(group)
   const textureSources = new Map(decodedTextures.map((entry) => [entry.path.toLowerCase(), entry.texture]))
-  const textureCache = new Map<number, THREE.Texture>()
-  const geometryCache = avfx.models.map(modelGeometry)
+  const textureCache = new Map<string, THREE.Texture>()
+  const fallbackTexture = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1)
+  fallbackTexture.needsUpdate = true
+  const geometryCache = avfx.models.map((source) => {
+    const geometry = modelGeometry(source)
+    return geometry ? ensureShaderAttributes(geometry) : undefined
+  })
   const proceduralGeometryCache = new Map<number, THREE.BufferGeometry>()
   const emitters: RuntimeEmitter[] = []
   const particles: RuntimeParticle[] = []
@@ -187,20 +374,20 @@ export function createAvfxRuntime(
   const mainTimeline = avfx.timelines.find((timeline) => timeline.items.some((item) => item.emitter >= 0))
   const loopEnd = mainTimeline?.loopEnd && mainTimeline.loopEnd > 0 ? mainTimeline.loopEnd : 0
 
-  const textureFor = (definition: AvfxParticleDefinition, definitionIndex: number): THREE.Texture | undefined => {
-    const cached = textureCache.get(definitionIndex)
-    if (cached) return cached
-    const index = firstTextureIndex(definition)
+  const textureFor = (binding: AvfxTextureBinding): THREE.Texture | undefined => {
+    const index = binding.textureIndices[0]
     if (index === undefined) return undefined
+    const key = `${index}:${binding.filter}:${binding.borderU}:${binding.borderV}`
+    const cached = textureCache.get(key)
+    if (cached) return cached
     const path = avfx.textures[index]
     const source = path ? textureSources.get(path) : undefined
     if (!source) return undefined
-    const binding = definition.colorTextures.find((candidate) => candidate.enabled && candidate.textureIndices.includes(index))
-    const map = decodedTexture(source, anisotropy, binding?.colorToAlpha)
-    map.wrapS = wrapping(binding?.borderU ?? 1)
-    map.wrapT = wrapping(binding?.borderV ?? 1)
-    map.magFilter = binding?.filter === 0 ? THREE.NearestFilter : THREE.LinearFilter
-    textureCache.set(definitionIndex, map)
+    const map = decodedTexture(source, anisotropy)
+    map.wrapS = wrapping(binding.borderU)
+    map.wrapT = wrapping(binding.borderV)
+    map.magFilter = binding.filter === 0 ? THREE.NearestFilter : THREE.LinearFilter
+    textureCache.set(key, map)
     return map
   }
 
@@ -216,9 +403,14 @@ export function createAvfxRuntime(
     return new THREE.Vector3(positions[point * 3], positions[point * 3 + 1], positions[point * 3 + 2])
   }
 
-  const addEmitter = (definition: number, position = new THREE.Vector3(), parentSeed = seed++) => {
+  const addEmitter = (
+    definition: number,
+    position = new THREE.Vector3(),
+    parentSeed = seed++,
+    parent?: RuntimeEmitter,
+  ): boolean => {
     const source = avfx.emitters[definition]
-    if (!source) return
+    if (!source) return false
     emitters.push({
       definition,
       age: 0,
@@ -229,42 +421,63 @@ export function createAvfxRuntime(
       nextParticle: source.particleRules.map((rule) => rule.createTime),
       nextEmitter: source.emitterRules.map((rule) => rule.createTime),
       seed: parentSeed,
+      activeChildren: 0,
+      ...(parent ? { parent } : {}),
     })
+    if (parent) parent.activeChildren++
+    return true
   }
 
-  const materialFor = (definition: AvfxParticleDefinition, map: THREE.Texture | undefined): THREE.MeshBasicMaterial | THREE.SpriteMaterial => {
-    const common = {
-      ...(map ? { map } : {}),
-      color: 0xffffff,
+  const materialFor = (definition: AvfxParticleDefinition) => {
+    const layers = definition.colorTextures
+      .filter((binding) => binding.enabled && binding.textureIndices.length)
+      .map((binding) => ({ binding, map: textureFor(binding) }))
+      .filter((layer): layer is { binding: AvfxTextureBinding; map: THREE.Texture } => Boolean(layer.map))
+      .slice(0, 4)
+    const uniforms: Record<string, THREE.IUniform> = {
+      uTint: { value: new THREE.Color(1, 1, 1) },
+      uBrightness: { value: 1 },
+      uOpacity: { value: 1 },
+      uBillboard: { value: definition.type === 1 ? 1 : 0 },
+    }
+    for (let index = 0; index < 4; index++) {
+      const layer = layers[index]
+      uniforms[`uTexture${index}`] = { value: layer?.map ?? fallbackTexture }
+      uniforms[`uTextureEnabled${index}`] = { value: layer ? 1 : 0 }
+      uniforms[`uColorToAlpha${index}`] = { value: layer?.binding.colorToAlpha ? 1 : 0 }
+      uniforms[`uColorMode${index}`] = { value: layer?.binding.colorMode ?? 0 }
+      uniforms[`uAlphaMode${index}`] = { value: layer?.binding.alphaMode ?? 0 }
+      uniforms[`uUvSet${index}`] = { value: Math.max(0, Math.min(3, layer?.binding.uvSet ?? 0)) }
+      uniforms[`uUvTransform${index}`] = { value: new THREE.Vector4(1, 1, 0, 0) }
+      uniforms[`uUvRotation${index}`] = { value: 0 }
+    }
+    const material = new THREE.ShaderMaterial({
+      uniforms,
+      vertexShader: AVFX_VERTEX_SHADER,
+      fragmentShader: AVFX_FRAGMENT_SHADER,
       transparent: true,
-      opacity: 1,
       blending: blending(definition.drawMode),
       depthTest: definition.depthTest,
       depthWrite: definition.depthWrite,
       toneMapped: false,
-    }
-    return definition.type === 1
-      ? new THREE.SpriteMaterial(common)
-      : new THREE.MeshBasicMaterial({ ...common, vertexColors: definition.type === 5 || definition.type === 13, side: THREE.DoubleSide })
+      side: THREE.DoubleSide,
+    })
+    configureBlendState(material, definition.drawMode)
+    return { material, layers: layers.map((layer) => layer.binding) }
   }
 
-  const addParticle = (rule: AvfxSpawnRule, parent: RuntimeEmitter) => {
+  const addParticle = (rule: AvfxSpawnRule, parent: RuntimeEmitter, instanceSeed: number): boolean => {
     const definition = avfx.particles[rule.target]
-    if (!definition || particles.length >= MAX_PARTICLES) return
-    const instanceSeed = seed++
-    if (seeded(instanceSeed + 101) * 100 > rule.probability) return
+    if (!definition || particles.length >= MAX_PARTICLES) return false
     const modelIndex = definition.modelIndices[Math.floor(seeded(instanceSeed + 7) * Math.max(definition.modelIndices.length, 1))]
     const authoredGeometry = modelIndex === undefined ? undefined : geometryCache[modelIndex]
-    const map = textureFor(definition, rule.target)
-    const material = materialFor(definition, map)
+    const { material, layers } = materialFor(definition)
     let proceduralGeometry = proceduralGeometryCache.get(rule.target)
-    if (!authoredGeometry && definition.type !== 1 && !proceduralGeometry) {
-      proceduralGeometry = definition.type === 12 ? discGeometry(definition) : spriteGeometry()
+    if (!authoredGeometry && !proceduralGeometry) {
+      proceduralGeometry = ensureShaderAttributes(definition.type === 12 ? discGeometry(definition) : spriteGeometry())
       proceduralGeometryCache.set(rule.target, proceduralGeometry)
     }
-    const object: THREE.Object3D = definition.type === 1
-      ? new THREE.Sprite(material as THREE.SpriteMaterial)
-      : new THREE.Mesh(authoredGeometry ?? proceduralGeometry!, material as THREE.MeshBasicMaterial)
+    const object = new THREE.Mesh(authoredGeometry ?? proceduralGeometry!, material)
     object.name = `avfx-particle-${rule.target}`
     object.renderOrder = 20 + definition.drawPriority
     const local = parent.definition >= 0 && avfx.emitters[parent.definition]?.type === 5
@@ -279,6 +492,7 @@ export function createAvfxRuntime(
       definition,
       object,
       material,
+      textureLayers: layers,
       age: rule.startFrame,
       life: rule.overrideLife ?? Math.max(1, definition.life + randomLife),
       position,
@@ -286,29 +500,39 @@ export function createAvfxRuntime(
       rotation: rule.rotationInfluence ? parent.rotation.clone() : new THREE.Euler(),
       inheritedScale: rule.scaleInfluence ? parent.scale.clone() : new THREE.Vector3(1, 1, 1),
       seed: instanceSeed,
+      parent,
     })
+    parent.activeChildren++
+    return true
   }
 
   const triggerRule = (rule: AvfxSpawnRule, parent: RuntimeEmitter, emitterRule: boolean) => {
-    const countCurve = avfx.emitters[parent.definition]?.createCount
-    const count = Math.max(1, Math.round(evaluateAvfxCurve(countCurve, parent.age, 1))) * Math.max(1, rule.createCount)
+    const source = avfx.emitters[parent.definition]
+    const randomCount = curveRandom(source?.createCountRandom, parent.age, parent.seed + 107)
+    const count = Math.max(1, Math.round(evaluateAvfxCurve(source?.createCount, parent.age, 1) + randomCount)) * Math.max(1, rule.createCount)
     for (let index = 0; index < count; index++) {
+      if (source?.childLimit && parent.activeChildren >= source.childLimit) break
+      const instanceSeed = seed++
+      if (seeded(instanceSeed + 101) * 100 > rule.probability) continue
       if (emitterRule) {
-        const source = avfx.emitters[parent.definition]
-        const local = source?.type === 5 ? sampleEmitterPoint(source, seed + index) : new THREE.Vector3()
+        const local = source?.type === 5 ? sampleEmitterPoint(source, instanceSeed) : new THREE.Vector3()
         local.multiply(parent.scale).applyEuler(parent.rotation)
-        addEmitter(rule.target, parent.position.clone().add(local), seed + index)
-      } else addParticle(rule, parent)
+        addEmitter(rule.target, parent.position.clone().add(local), instanceSeed, parent)
+      } else addParticle(rule, parent, instanceSeed)
     }
   }
 
-  const resetGraph = () => {
+  const clearGraph = () => {
     for (const particle of particles.splice(0)) {
       group.remove(particle.object)
       particle.material.dispose()
     }
     emitters.length = 0
     startedTimelineItems.clear()
+  }
+
+  const resetGraph = () => {
+    clearGraph()
     avfx.rootEmitterIndices.forEach((index) => addEmitter(index))
     mainTimeline?.items.forEach((item, index) => {
       if (item.enabled && item.startFrame === 0 && item.emitter >= 0) startedTimelineItems.add(index)
@@ -345,7 +569,11 @@ export function createAvfxRuntime(
         emitter.position.copy(emitter.origin).add(vectorAt(definition.position, frame, 0, emitter.seed))
         emitter.rotation.setFromVector3(vectorAt(definition.rotation, frame, 0, emitter.seed))
         emitter.scale.copy(vectorAt(definition.scale, frame, 1, emitter.seed))
-        const interval = Math.max(1, evaluateAvfxCurve(definition.createInterval, frame, 1))
+        const interval = Math.max(
+          1,
+          evaluateAvfxCurve(definition.createInterval, frame, 1)
+            + curveRandom(definition.createIntervalRandom, frame, emitter.seed + 149),
+        )
         definition.particleRules.forEach((rule, index) => {
           if (!rule.enabled) return
           while (frame >= emitter.nextParticle[index]! && emitter.nextParticle[index]! <= definition.life) {
@@ -360,7 +588,10 @@ export function createAvfxRuntime(
             emitter.nextEmitter[index]! += interval
           }
         })
-        if (emitter.age > definition.life) emitters.splice(emitterIndex, 1)
+        if (emitter.age > definition.life) {
+          if (emitter.parent) emitter.parent.activeChildren = Math.max(0, emitter.parent.activeChildren - 1)
+          emitters.splice(emitterIndex, 1)
+        }
       }
       for (let index = particles.length - 1; index >= 0; index--) {
         const particle = particles[index]!
@@ -368,6 +599,7 @@ export function createAvfxRuntime(
         if (particle.age >= particle.life) {
           group.remove(particle.object)
           particle.material.dispose()
+          particle.parent.activeChildren = Math.max(0, particle.parent.activeChildren - 1)
           particles.splice(index, 1)
           continue
         }
@@ -390,28 +622,28 @@ export function createAvfxRuntime(
         particle.object.scale.copy(vectorAt(particle.definition.scale, frame, 1, particle.seed)).multiply(particle.inheritedScale)
         const color = colorAt(particle.definition.color, frame)
         const brightness = evaluateAvfxCurve(particle.definition.color.brightness, frame, 1)
-        particle.material.color.copy(color).multiplyScalar(brightness)
-        particle.material.opacity = THREE.MathUtils.clamp(
+        ;(particle.material.uniforms.uTint!.value as THREE.Color).copy(color)
+        particle.material.uniforms.uBrightness!.value = brightness
+        particle.material.uniforms.uOpacity!.value = THREE.MathUtils.clamp(
           evaluateAvfxCurve(particle.definition.color.alpha, frame, 1) * evaluateAvfxCurve(particle.definition.color.scaleAlpha, frame, 1),
           0,
           1,
         )
-        const binding = particle.definition.colorTextures.find((candidate) => candidate.enabled && candidate.textureIndices.length)
-        const uv = particle.definition.uvSets[binding?.uvSet ?? 0]
-        const map = particle.material.map
-        if (map && uv) {
+        particle.textureLayers.forEach((binding, layerIndex) => {
+          const uv = particle.definition.uvSets[binding.uvSet]
+          if (!uv) return
           const scale = vectorAt(uv.scale, frame, 1, particle.seed)
           const scroll = vectorAt(uv.scroll, frame, 0, particle.seed)
-          map.repeat.set(scale.x, scale.y)
-          map.offset.set(scroll.x, scroll.y)
-          map.rotation = evaluateAvfxCurve(uv.rotation, frame)
-        }
+          ;(particle.material.uniforms[`uUvTransform${layerIndex}`]!.value as THREE.Vector4).set(scale.x, scale.y, scroll.x, scroll.y)
+          particle.material.uniforms[`uUvRotation${layerIndex}`]!.value = evaluateAvfxCurve(uv.rotation, frame)
+        })
       }
     },
     dispose() {
-      resetGraph()
+      clearGraph()
       textureCache.forEach((texture) => texture.dispose())
       textureCache.clear()
+      fallbackTexture.dispose()
       for (const geometry of geometryCache) geometry?.dispose()
       proceduralGeometryCache.forEach((geometry) => geometry.dispose())
       proceduralGeometryCache.clear()
