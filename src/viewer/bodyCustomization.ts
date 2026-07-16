@@ -46,6 +46,7 @@ export function bustWeightSummary(model: DecodedModel): BustWeightSummary {
 }
 
 export interface BustDeformationResult {
+  transformSpace: 'model-bind-axis'
   weightedVertices: number
   maximumDisplacement: number
   averageDisplacement: [number, number, number]
@@ -118,6 +119,7 @@ export function applyBustDeformation(
   model: DecodedModel,
   skeleton: THREE.Skeleton,
   rigBoneIndex: ReadonlyMap<string, number>,
+  requestedScale: readonly [number, number, number],
 ): BustDeformationResult {
   const transforms = new Map<number, THREE.Matrix4>()
   const normalTransforms = new Map<number, THREE.Matrix3>()
@@ -132,17 +134,25 @@ export function applyBustDeformation(
       bones.push({ name, modelIndex, rigIndex, mapped: false })
       return
     }
-    const transform = new THREE.Matrix4().multiplyMatrices(bone.matrixWorld, inverse)
+    const bindMatrix = inverse.clone().invert()
+    const bindPosition = new THREE.Vector3().setFromMatrixPosition(bindMatrix)
+    // human.cmp stores character/model-axis X/Y/Z scale. Applying it through
+    // Bone.scale rotates those axes with j_mune and swaps most of the intended
+    // forward depth into character width. Scale around the authored bind pivot
+    // in model space, which preserves the CMP axis meanings.
+    const transform = new THREE.Matrix4()
+      .makeTranslation(bindPosition.x, bindPosition.y, bindPosition.z)
+      .multiply(new THREE.Matrix4().makeScale(...requestedScale))
+      .multiply(new THREE.Matrix4().makeTranslation(-bindPosition.x, -bindPosition.y, -bindPosition.z))
     transforms.set(modelIndex, transform)
     normalTransforms.set(modelIndex, new THREE.Matrix3().getNormalMatrix(transform))
-    const bindMatrix = inverse.clone().invert()
     bones.push({
       name,
       modelIndex,
       rigIndex,
       parentName: bone.parent?.name || undefined,
       localPosition: tuple3(bone.position),
-      bindWorldPosition: tuple3(new THREE.Vector3().setFromMatrixPosition(bindMatrix)),
+      bindWorldPosition: tuple3(bindPosition),
       currentWorldPosition: tuple3(new THREE.Vector3().setFromMatrixPosition(bone.matrixWorld)),
       localScale: tuple3(bone.scale),
       deltaScale: tuple3(new THREE.Vector3().setFromMatrixScale(transform)),
@@ -258,6 +268,7 @@ export function applyBustDeformation(
   }
   const divisor = Math.max(1, weightedVertices)
   return {
+    transformSpace: 'model-bind-axis',
     weightedVertices,
     maximumDisplacement,
     averageDisplacement: [sumDeltaX / divisor, sumDeltaY / divisor, sumDeltaZ / divisor],

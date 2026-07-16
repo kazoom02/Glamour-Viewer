@@ -61,7 +61,7 @@ describe('body customization rendering', () => {
       bounds: { min: [0, 0, 0], max: [1, 0, 0] },
     } as DecodedModel
 
-    const result = applyBustDeformation(model, skeleton, new Map([['j_mune_l', 0]]))
+    const result = applyBustDeformation(model, skeleton, new Map([['j_mune_l', 0]]), [2, 1, 1])
     expect(model.meshes[0]!.positions[0]).toBeCloseTo(2)
     expect(result.weightedVertices).toBe(1)
     expect(result.maximumDisplacement).toBeCloseTo(1)
@@ -82,5 +82,35 @@ describe('body customization rendering', () => {
       mapped: true,
       deltaScale: [2, 1, 1],
     }])
+  })
+
+  it('keeps CMP scale on model axes when the breast bone is rotated', () => {
+    const breast = new THREE.Bone()
+    breast.name = 'j_mune_l'
+    breast.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2)
+    breast.updateMatrixWorld(true)
+    const skeleton = new THREE.Skeleton([breast])
+    skeleton.calculateInverses()
+    breast.scale.set(2, 1, 3)
+    breast.updateMatrixWorld(true)
+    const model = {
+      boneNames: ['j_mune_l'],
+      meshes: [{
+        positions: new Float32Array([1, 0, 1]),
+        normals: new Float32Array([Math.SQRT1_2, 0, Math.SQRT1_2]),
+        indices: new Uint16Array([0]),
+        materialIndex: 0,
+        skinIndices: new Uint16Array([0, 0, 0, 0]),
+        skinWeights: new Float32Array([1, 0, 0, 0]),
+      }],
+      materialPaths: [],
+      bounds: { min: [1, 0, 1], max: [1, 0, 1] },
+    } as DecodedModel
+
+    const result = applyBustDeformation(model, skeleton, new Map([['j_mune_l', 0]]), [2, 1, 3])
+
+    expect(Array.from(model.meshes[0]!.positions)).toEqual([2, 0, 3])
+    expect(result.transformSpace).toBe('model-bind-axis')
+    expect(result.bones[0]?.deltaScale).toEqual([2, 1, 3])
   })
 })

@@ -214,7 +214,7 @@ function formatVector(values: readonly number[], digits = 6): string {
 function bustDeformationDiagnostic(label: string, result: BustDeformationResult): string {
   const maximum = result.maximumVertex
   return [
-    `bust deformation v3 ${label}: mode=CPU-weighted weightedVertices=${result.weightedVertices} vertexBuffers=${result.uniqueVertexBuffers}`,
+    `bust deformation v3 ${label}: mode=CPU-weighted transformSpace=${result.transformSpace} weightedVertices=${result.weightedVertices} vertexBuffers=${result.uniqueVertexBuffers}`,
     `  topology affectedTriangles=${result.affectedTriangles}/${result.totalTriangles}`,
     `  beforeBounds min=${formatVector(result.beforeBounds.min)} max=${formatVector(result.beforeBounds.max)} size=${formatVector(result.beforeBounds.size)} center=${formatVector(result.beforeBounds.center)}`,
     `  afterBounds min=${formatVector(result.afterBounds.min)} max=${formatVector(result.afterBounds.max)} size=${formatVector(result.afterBounds.size)} center=${formatVector(result.afterBounds.center)}`,
@@ -719,7 +719,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           ]
           bustModels.forEach(({ label, result }) => {
             diagnostics.push(bustModelDiagnostic(label, result.path, result.model))
-            const deformation = applyBustDeformation(result.model, activeRig.skeleton, activeRig.boneIndex)
+            const deformation = applyBustDeformation(result.model, activeRig.skeleton, activeRig.boneIndex, bustScale)
             diagnostics.push(bustDeformationDiagnostic(label, deformation))
           })
           neutralizeBustRig(activeRig, bustScale)
