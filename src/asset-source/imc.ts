@@ -26,6 +26,17 @@ export interface ImcEntry {
   soundId: number
 }
 
+/** Resolves the AVFX convention used by equipment and weapon IMC rows. */
+export function equipmentVfxPath(modelPath: string, vfxId: number): string | undefined {
+  if (!Number.isInteger(vfxId) || vfxId <= 0) return undefined
+  const effect = vfxId.toString().padStart(4, '0')
+  const weapon = /^(chara\/weapon\/w\d{4}\/obj\/body\/b\d{4})\//i.exec(modelPath)
+  if (weapon) return `${weapon[1]}/vfx/eff/vw${effect}.avfx`.toLowerCase()
+  const equipment = /^(chara\/equipment\/e\d{4})\//i.exec(modelPath)
+  if (equipment) return `${equipment[1]}/vfx/eff/ve${effect}.avfx`.toLowerCase()
+  return undefined
+}
+
 /** Reads an equipment IMC row. Variants include row zero, matching the game's Variant id. */
 export function readImcEntry(bytes: ArrayBuffer, slot: EquipmentSlot, variant: number): ImcEntry {
   if (bytes.byteLength < 4) throw new Error('The IMC preamble is truncated.')

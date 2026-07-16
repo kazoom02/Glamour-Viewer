@@ -40,6 +40,12 @@ export interface MaterialLoadResult {
   errors: string[]
   diagnostics: string[]
   attributeMask?: number
+  /** Equipment effect selected by the active IMC row. Zero means no AVFX. */
+  vfxId?: number
+  /** Equipment material animation selected by the active IMC row. */
+  materialAnimationId?: number
+  /** Resolved game path for the selected equipment AVFX, when known. */
+  vfxPath?: string
   headHairHidden?: boolean
   headScalpHidden?: boolean
 }

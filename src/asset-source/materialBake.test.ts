@@ -76,6 +76,23 @@ describe('character colorset baking', () => {
     expect(Array.from(result.roughness.rgba.slice(0, 3))).toEqual([128, 128, 128])
   })
 
+  it('keeps very smooth character rows above the wet-looking roughness range', () => {
+    const rows = Array.from({ length: 32 }, () => ({
+      diffuse: [1, 1, 1] as [number, number, number],
+      specular: [1, 1, 1] as [number, number, number],
+      specularMask: 1,
+      emissive: [0, 0, 0] as [number, number, number],
+      roughness: 0.05,
+      metalness: 0,
+    }))
+    const result = bakeCharacterMaterial({ kind: 'dawntrail', rows }, {
+      index: texture([0, 255, 0, 255]),
+      mask: texture([255, 16, 255, 255]),
+    }, 'character.shpk')!
+
+    expect(result.roughness.rgba[0]).toBe(92)
+  })
+
   it('builds facial-hair color and opacity from normal and mask channels', () => {
     const result = bakeHairMaterial(texture([128, 128, 0, 64]), texture([0, 0, 0, 255]))!
     expect(Array.from(result.diffuse.rgba)).toEqual([184, 184, 184, 64])

@@ -216,7 +216,10 @@ export function bakeCharacterMaterial(
       const textureRoughness = textures.mask
         ? mask[1] / 255
         : rowRoughness
-      const pbrRoughness = Math.max(0.32, rowRoughness, textureRoughness)
+      // Three's microfacet response is noticeably sharper than the authored
+      // character shader. A small floor prevents cloth/leather from becoming
+      // wet-looking while still leaving polished colorset rows visibly shiny.
+      const pbrRoughness = Math.max(0.36, rowRoughness, textureRoughness)
       const rough = clampByte(pbrRoughness)
       const occlusion = textures.mask ? mask[2] : 255
       const rowSpecularMask = legacyShader ? mix(a.specularMask, b.specularMask) : 1

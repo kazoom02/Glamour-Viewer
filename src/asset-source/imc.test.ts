@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { readImcEntry } from './imc'
+import { equipmentVfxPath, readImcEntry } from './imc'
 
 describe('IMC parser', () => {
   it('selects the requested equipment slot and variant', () => {
@@ -43,5 +43,13 @@ describe('IMC parser', () => {
     bytes[4 + 4 * 6] = 9
     expect(readImcEntry(bytes.buffer, 'rightRing', 0).materialId).toBe(8)
     expect(readImcEntry(bytes.buffer, 'leftRing', 0).materialId).toBe(9)
+  })
+
+  it('resolves equipment and weapon AVFX paths from an IMC effect id', () => {
+    expect(equipmentVfxPath('chara/equipment/e0123/model/c0101e0123_top.mdl', 7))
+      .toBe('chara/equipment/e0123/vfx/eff/ve0007.avfx')
+    expect(equipmentVfxPath('chara/weapon/w0456/obj/body/b0001/model/w0456b0001.mdl', 12))
+      .toBe('chara/weapon/w0456/obj/body/b0001/vfx/eff/vw0012.avfx')
+    expect(equipmentVfxPath('chara/accessory/a0001/model/c0101a0001_ear.mdl', 3)).toBeUndefined()
   })
 })

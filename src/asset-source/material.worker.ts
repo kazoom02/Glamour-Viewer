@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 
-import { readImcEntry } from './imc'
+import { equipmentVfxPath, readImcEntry } from './imc'
 import { EQUIPMENT_PARAMETER_PATH, headEquipmentVisibility } from './eqp'
 import {
   bakeCharacterMaterial,
@@ -33,7 +33,7 @@ interface Request {
 
 // Bump whenever decoded/baked texture semantics change so IndexedDB cannot
 // retain an older, glossier material interpretation across deployments.
-const CACHE_VERSION = 3
+const CACHE_VERSION = 4
 const memoryCache = new Map<string, DecodedTexture>()
 const stainingTemplateCache = new Map<string, Promise<StainingTemplate>>()
 const equipmentParameterCache = new Map<string, Promise<ArrayBuffer>>()
@@ -173,6 +173,8 @@ async function loadRequest(
   const diagnostics: string[] = []
   let materialId = request.variant ?? 1
   let attributeMask: number | undefined
+  let vfxId: number | undefined
+  let materialAnimationId: number | undefined
   let headHairHidden: boolean | undefined
   let headScalpHidden: boolean | undefined
   if (request.imcPath && request.slot && request.variant !== undefined) {
@@ -180,6 +182,11 @@ async function loadRequest(
       const entry = readImcEntry(await reader.read(request.imcPath), request.slot, request.variant)
       materialId = entry.materialId
       attributeMask = entry.attributeMask
+      vfxId = entry.vfxId
+      materialAnimationId = entry.materialAnimationId
+      diagnostics.push(
+        `equipment IMC effects: vfxId=${vfxId} materialAnimationId=${materialAnimationId}`,
+      )
     } catch (error) {
       errors.push(`[imc] ${request.imcPath}: ${error instanceof Error ? error.message : String(error)}`)
     }
@@ -214,7 +221,7 @@ async function loadRequest(
         `  model: ${request.modelPath}`,
         `  resolved MTRL: ${materialFile.path}`,
         `  shader: ${parsed.shaderPackage || '(empty)'}`,
-        `  IMC: variant=${request.variant ?? 'n/a'} materialId=${materialId} attributeMask=${attributeMask ?? 'n/a'}`,
+        `  IMC: variant=${request.variant ?? 'n/a'} materialId=${materialId} attributeMask=${attributeMask ?? 'n/a'} vfxId=${vfxId ?? 'n/a'} materialAnimationId=${materialAnimationId ?? 'n/a'}`,
         `  color table: ${parsed.colorTable ? `${parsed.colorTable.kind} ${parsed.colorTable.rows.length} rows` : 'none'}`,
         `  dyes: channel1=${request.stains?.[0] ?? 0} channel2=${request.stains?.[1] ?? 0} dyeRows=${parsed.dyeTable?.filter((row) => row.flags !== 0).length ?? 0}`,
         '  declared samplers:',
@@ -308,6 +315,9 @@ async function loadRequest(
     errors,
     diagnostics,
     attributeMask,
+    ...(vfxId !== undefined ? { vfxId } : {}),
+    ...(materialAnimationId !== undefined ? { materialAnimationId } : {}),
+    ...(vfxId ? { vfxPath: equipmentVfxPath(request.modelPath, vfxId) } : {}),
     ...(headHairHidden !== undefined ? { headHairHidden } : {}),
     ...(headScalpHidden !== undefined ? { headScalpHidden } : {}),
   }

@@ -146,6 +146,22 @@ interface CharacterRig {
 
 type IdleAnimationState = 'loading' | 'ready' | 'playing' | 'paused' | 'unavailable'
 
+interface AnimatedMaterial {
+  material: THREE.MeshPhysicalMaterial
+  baseEmissiveIntensity: number
+  phase: number
+}
+
+function hasVisibleRgb(texture: NonNullable<DecodedMaterial['textures']['emissive']>): boolean {
+  const pixelCount = texture.width * texture.height
+  const stride = Math.max(1, Math.floor(pixelCount / 8_192))
+  for (let pixel = 0; pixel < pixelCount; pixel += stride) {
+    const offset = pixel * 4
+    if (texture.rgba[offset]! > 4 || texture.rgba[offset + 1]! > 4 || texture.rgba[offset + 2]! > 4) return true
+  }
+  return false
+}
+
 function addCharacterRig(target: THREE.Group, decoded: DecodedSkeleton, bustScale: BustScale = [1, 1, 1]): CharacterRig {
   const bones = decoded.bones.map((source) => {
     const bone = new THREE.Bone()
@@ -246,6 +262,8 @@ function addDecodedModel(
   anisotropy = 1,
   customization?: CharacterCustomization,
   refineCurvature = false,
+  materialAnimationId = 0,
+  animatedMaterials: AnimatedMaterial[] = [],
 ): number {
   for (const [index, part] of model.meshes.entries()) {
     if (slot && attributeMask !== undefined && !isVisibleEquipmentPart(part.attributes, slot, attributeMask)) continue
@@ -303,14 +321,14 @@ function addDecodedModel(
           ? 0.52
           : 0.28
     const mappedSpecularIntensity = shaderPackage === 'skin.shpk'
-      ? 0.3
+      ? 0.25
       : shaderPackage === 'hair.shpk'
-        ? 0.35
+        ? 0.28
         : shaderPackage === 'iris.shpk'
-          ? 0.7
+          ? 0.72
           : shaderPackage.startsWith('character')
-            ? 0.62
-            : 0.5
+            ? 0.38
+            : 0.32
     const resolvedMuscleNormalStrength = customization
       && shaderPackage === 'skin.shpk'
       && !isFaceMaterial
@@ -336,7 +354,7 @@ function addDecodedModel(
       map: diffuse ? textureFromDecoded(diffuse, true, anisotropy) : null,
       normalMap: normal ? textureFromDecoded(normal, false, anisotropy) : null,
       aoMap,
-      aoMapIntensity: aoMap ? 0.65 : 1,
+      aoMapIntensity: aoMap ? 0.85 : 1,
       roughnessMap,
       roughness: roughnessMap ? 1 : fallbackRoughness,
       metalnessMap: metalness ? textureFromDecoded(metalness, false, anisotropy) : null,
@@ -348,17 +366,28 @@ function addDecodedModel(
       specularColorMap: specularColor ? textureFromDecoded(specularColor, true, anisotropy) : null,
       specularIntensityMap,
       specularIntensity: specularIntensityMap ? mappedSpecularIntensity : fallbackSpecularIntensity,
-      ior: 1.5,
+      ior: 1.45,
       clearcoat: 0,
       sheen: 0,
-      alphaTest: diffuse && alphaMode === 'mask' ? 0.5 : 0,
+      alphaTest: diffuse && alphaMode === 'mask' ? (shaderPackage === 'hair.shpk' ? 0.34 : 0.46) : 0,
       transparent: alphaMode === 'blend',
       depthWrite: alphaMode !== 'blend',
-      side: isFaceMaterial ? THREE.FrontSide : THREE.DoubleSide,
+      side: alphaMode !== 'opaque' || shaderPackage === 'hair.shpk' ? THREE.DoubleSide : THREE.FrontSide,
+      dithering: true,
+      flatShading: false,
       polygonOffset: isIris,
       polygonOffsetFactor: isIris ? -1 : 0,
       polygonOffsetUnits: isIris ? -1 : 0,
     })
+    const hasEmissivePixels = emissive && hasVisibleRgb(emissive)
+    if (materialAnimationId > 0 && hasEmissivePixels) {
+      material.emissiveIntensity = 1
+      animatedMaterials.push({
+        material,
+        baseEmissiveIntensity: material.emissiveIntensity,
+        phase: (index * 1.618 + materialAnimationId * 0.73) % (Math.PI * 2),
+      })
+    }
     if (normal) material.normalScale.set(resolvedMuscleNormalStrength, resolvedMuscleNormalStrength)
     const geometry = new THREE.BufferGeometry()
     geometry.setAttribute('position', new THREE.BufferAttribute(renderPart.positions, 3))
@@ -495,17 +524,24 @@ function equipmentTarget(
     : handWeaponTarget(character, rig, slot)
 }
 
-function fitCamera(camera: THREE.PerspectiveCamera, controls: OrbitControls, object: THREE.Object3D) {
+function fitCamera(camera: THREE.PerspectiveCamera, controls: OrbitControls, object: THREE.Object3D, padding = 1.36) {
   const box = new THREE.Box3().setFromObject(object)
   if (box.isEmpty()) return
   const center = box.getCenter(new THREE.Vector3())
   const size = box.getSize(new THREE.Vector3())
-  const radius = Math.max(size.x, size.y, size.z, 0.8)
+  const verticalFov = THREE.MathUtils.degToRad(camera.fov)
+  const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * Math.max(camera.aspect, 0.1))
+  const verticalDistance = (Math.max(size.y, 0.8) / 2) / Math.tan(verticalFov / 2)
+  const horizontalDistance = (Math.max(size.x, 0.4) / 2) / Math.tan(horizontalFov / 2)
+  const distance = (Math.max(verticalDistance, horizontalDistance) + size.z / 2) * padding
+  const viewDirection = new THREE.Vector3(0.1, 0.025, 1).normalize()
   controls.target.copy(center)
-  camera.position.set(center.x + radius * 0.18, center.y + radius * 0.08, center.z + radius * 1.9)
-  camera.near = Math.max(radius / 100, 0.01)
-  camera.far = Math.max(radius * 20, 50)
+  camera.position.copy(center).addScaledVector(viewDirection, distance)
+  camera.near = Math.max(distance / 100, 0.01)
+  camera.far = Math.max(distance + size.length() * 12, 50)
   camera.updateProjectionMatrix()
+  controls.minDistance = Math.max(size.y * 0.12, 0.2)
+  controls.maxDistance = Math.max(distance * 4, 12)
   controls.update()
 }
 
@@ -600,6 +636,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
   const container = useRef<HTMLDivElement>(null)
   const idleAction = useRef<THREE.AnimationAction | null>(null)
   const idleMixer = useRef<THREE.AnimationMixer | null>(null)
+  const resetView = useRef<(() => void) | null>(null)
   const previewItems = EQUIPMENT_SLOTS.flatMap((slot) => equipped[slot] ? [[slot, equipped[slot]!] as const] : [])
   const [status, setStatus] = useState('Loading character…')
   const [error, setError] = useState<string>()
@@ -643,12 +680,15 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
     renderer.setPixelRatio(renderPixelRatio)
     renderer.outputColorSpace = THREE.SRGBColorSpace
     renderer.toneMapping = THREE.NeutralToneMapping
-    renderer.toneMappingExposure = 0.9
+    renderer.toneMappingExposure = 0.96
     const maxAnisotropy = renderer.capabilities.getMaxAnisotropy()
     host.appendChild(renderer.domElement)
 
     const controls = new OrbitControls(camera, renderer.domElement)
     controls.enableDamping = true
+    controls.dampingFactor = 0.075
+    controls.rotateSpeed = 0.7
+    controls.zoomSpeed = 0.8
     controls.target.set(0, 0.95, 0)
     controls.minDistance = 0.25
     controls.maxDistance = 12
@@ -657,6 +697,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
     characterGroup.name = `${raceCode}-character`
     scene.add(characterGroup)
     let activeIdleMixer: THREE.AnimationMixer | undefined
+    const animatedMaterials: AnimatedMaterial[] = []
     idleAction.current = null
     idleMixer.current = null
     setIdleLabel('Idle')
@@ -664,14 +705,14 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
 
     // A restrained neutral studio rig keeps colors readable without the hard,
     // glossy streaks produced by the previous 2.4-strength directional key.
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x282b31, 0.9))
-    const key = new THREE.DirectionalLight(0xffffff, 1.2)
+    scene.add(new THREE.HemisphereLight(0xf7f8ff, 0x28251f, 0.72))
+    const key = new THREE.DirectionalLight(0xffffff, 1.08)
     key.position.set(4, 5, 6)
     scene.add(key)
-    const fill = new THREE.DirectionalLight(0xffffff, 0.38)
+    const fill = new THREE.DirectionalLight(0xf3f6ff, 0.32)
     fill.position.set(-4, 3, 5)
     scene.add(fill)
-    const rim = new THREE.DirectionalLight(0xffffff, 0.18)
+    const rim = new THREE.DirectionalLight(0xfff4e8, 0.16)
     rim.position.set(-4, 4, -4)
     scene.add(rim)
 
@@ -694,7 +735,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
     void (async () => {
       const failures: string[] = []
       const diagnostics: string[] = [
-        `render quality: authoredGeometry=LOD0 pixelRatio=${renderPixelRatio.toFixed(2)} precision=highp antialias=MSAA textureAnisotropy=${maxAnisotropy}`,
+        `render quality: authoredGeometry=LOD0 pixelRatio=${renderPixelRatio.toFixed(2)} precision=highp antialias=MSAA textureFilter=trilinear-mipmap textureAnisotropy=${maxAnisotropy} output=sRGB toneMapping=Neutral exposure=${renderer.toneMappingExposure.toFixed(2)}`,
         `customization sliders: race=${raceCode} tribe=${customization.tribeId} gender=${customization.gender} bustSize=${customization.bustSize} muscleTone=${customization.muscleTone} muscleNormalStrength=${muscleNormalStrength(customization.muscleTone).toFixed(4)}`,
       ]
       let characterParts = 0
@@ -846,7 +887,9 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               rig,
               maxAnisotropy,
               customization,
-              plan.part === 'torso',
+              plan.part === 'torso' || plan.part === 'face',
+              0,
+              animatedMaterials,
             )
             if (result.warning) failures.push(`${plan.part}: ${result.warning}`)
             if (materialResult?.errors.length) failures.push(...materialResult.errors.map((error) => `${plan.part} ${error}`))
@@ -857,14 +900,15 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             failures.push(`${plan.part}: ${attempted || 'model not found'}`)
           }
         }
-        if (characterModels.some(({ plan }) => plan.part === 'torso')) {
-          diagnostics.push('character torso render refinement: curved subdivision level=1 triangles=4x corners=preserved skinWeights=interpolated')
+        if (characterModels.some(({ plan }) => plan.part === 'torso' || plan.part === 'face')) {
+          diagnostics.push('character render refinement: torso+face curved subdivision level=1 triangles=4x corners=preserved skinWeights=interpolated')
         }
         for (const plan of equipmentPlans) {
           const result = plan.candidates.map((path) => byPath.get(path)).find((candidate) => candidate?.model)
           if (result?.model) {
             const materialResult = materialsByModel.get(result.path)
             const weapon = isWeaponSlot(plan.slot)
+            const animatedMaterialCount = animatedMaterials.length
             const attachment = weapon
               ? equipmentTarget(characterGroup, rig, plan.slot, plan.item.weaponPlacement ?? 'hand', result.model)
               : { target: characterGroup, diagnostic: '' }
@@ -879,8 +923,17 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               weapon ? undefined : rig,
               maxAnisotropy,
               customization,
+              false,
+              materialResult?.materialAnimationId ?? 0,
+              animatedMaterials,
             )
             if (weapon) diagnostics.push(`weapon attachment ${plan.item.name}: slot=${plan.slot} ${attachment.diagnostic}`)
+            if (materialResult?.materialAnimationId) {
+              diagnostics.push(`equipment material animation ${plan.item.name}: IMC id=${materialResult.materialAnimationId} authoredTrackDecoded=false approximateEmissivePulseMaterials=${animatedMaterials.length - animatedMaterialCount}`)
+            }
+            if (materialResult?.vfxId) {
+              diagnostics.push(`equipment AVFX ${plan.item.name}: IMC id=${materialResult.vfxId} path=${materialResult.vfxPath ?? 'unresolved'} renderer=metadata-only`)
+            }
             if (result.warning) failures.push(`${plan.item.name}: ${result.warning}`)
             if (materialResult?.errors.length) failures.push(...materialResult.errors.map((error) => `${plan.item.name} ${error}`))
             diagnostics.push(...modelMaterialDiagnostics(plan.item.name, result.model, materialResult, true))
@@ -959,7 +1012,11 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
 
       if (disposed) return
       fallback.visible = characterParts === 0
-      if (characterParts || equippedItems) fitCamera(camera, controls, characterGroup)
+      if (characterParts || equippedItems) {
+        const refit = () => fitCamera(camera, controls, characterGroup)
+        resetView.current = refit
+        refit()
+      }
       setStatus(characterParts
         ? `${raceCode} ${rig ? 'skinned' : 'bind-pose'} character · ${equippedItems}/${selected.length} equipped${source.kind === 'local' ? ` · idle ${idleReady ? 'ready' : 'unavailable'}` : ''} · drag to rotate`
         : 'Character models could not be decoded')
@@ -990,8 +1047,14 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
     observer.observe(host)
     resize()
     const clock = new THREE.Clock()
+    let elapsed = 0
     const render = () => {
-      activeIdleMixer?.update(Math.min(clock.getDelta(), 0.1))
+      const delta = Math.min(clock.getDelta(), 0.1)
+      elapsed += delta
+      activeIdleMixer?.update(delta)
+      animatedMaterials.forEach(({ material, baseEmissiveIntensity, phase }) => {
+        material.emissiveIntensity = baseEmissiveIntensity * (0.88 + Math.sin(elapsed * 2.4 + phase) * 0.12)
+      })
       controls.update()
       renderer.render(scene, camera)
       frame = requestAnimationFrame(render)
@@ -1000,6 +1063,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
 
     return () => {
       disposed = true
+      resetView.current = null
       cancelAnimationFrame(frame)
       observer.disconnect()
       controls.dispose()
@@ -1084,6 +1148,13 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           title="Pause the character idle animation"
         >
           Pause
+        </button>
+        <button
+          type="button"
+          onClick={() => resetView.current?.()}
+          title="Fit the complete character in the preview"
+        >
+          Fit
         </button>
       </div>
       <p className="viewer-status" aria-live="polite">{status}</p>
