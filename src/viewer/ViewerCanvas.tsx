@@ -10,6 +10,7 @@ import {
   faceSkeletonCandidates,
   idleAnimationCandidates,
   skeletonPath,
+  weaponRaceScale,
   type CharacterPart,
   type CharacterRaceCode,
 } from '../asset-source/characterPlan'
@@ -1041,8 +1042,20 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             const attachment = weapon
               ? equipmentTarget(characterGroup, rig, plan.slot, plan.item.weaponPlacement ?? 'hand', result.model)
               : { target: characterGroup, diagnostic: '' }
+            // FFXIV sizes a weapon to the wielder's race. Scale the weapon mesh
+            // and its VFX together inside a group under the attach point so the
+            // whole effect stays proportional on small races such as Lalafell.
+            const weaponScale = weapon ? weaponRaceScale(raceCode) : 1
+            let renderTarget = attachment.target
+            if (weapon && weaponScale !== 1) {
+              const scaled = new THREE.Group()
+              scaled.name = `equipment-${plan.slot}-scale`
+              scaled.scale.setScalar(weaponScale)
+              attachment.target.add(scaled)
+              renderTarget = scaled
+            }
             addDecodedModel(
-              attachment.target,
+              renderTarget,
               result.model,
               SLOT_COLORS[plan.slot],
               `equipment-${plan.slot}`,
@@ -1061,7 +1074,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             // model geometry with baked vertex colors and no texture layers.
             const vfxDrawsGeometry = materialResult?.vfx?.models.some((model) => model.positions.length && model.indices.length)
             const vfxRuntime = materialResult?.vfx && (materialResult.vfxTextures?.length || vfxDrawsGeometry)
-              ? createAvfxRuntime(attachment.target, materialResult.vfx, materialResult.vfxTextures ?? [], maxAnisotropy)
+              ? createAvfxRuntime(renderTarget, materialResult.vfx, materialResult.vfxTextures ?? [], maxAnisotropy)
               : undefined
             if (vfxRuntime) {
               avfxRuntimes.push(vfxRuntime)
@@ -1075,7 +1088,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               const cloud = vfxRuntime.particleBounds()
               const drawn = vfxRuntime.renderedBounds()
               const bounds = result.model.bounds
-              const attachScale = attachment.target.getWorldScale(new THREE.Vector3())
+              const attachScale = renderTarget.getWorldScale(new THREE.Vector3())
               const vfx = materialResult?.vfx
               const timelines = vfx?.timelines ?? []
               const axes = (curve: { x?: unknown; y?: unknown; z?: unknown }) => `${curve.x ? 'X' : ''}${curve.y ? 'Y' : ''}${curve.z ? 'Z' : ''}` || '0'
@@ -1097,7 +1110,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
                 `  timeline binders=${timelines.flatMap((line) => line.items.map((item) => item.binder)).join(',') || 'none'} effectors=${timelines.flatMap((line) => line.items.map((item) => item.effector)).join(',') || 'none'}`,
               ].join('\n'))
             }
-            if (weapon) diagnostics.push(`weapon attachment ${plan.item.name}: slot=${plan.slot} ${attachment.diagnostic}`)
+            if (weapon) diagnostics.push(`weapon attachment ${plan.item.name}: slot=${plan.slot} raceScale=${weaponScale.toFixed(2)} ${attachment.diagnostic}`)
             if (materialResult?.materialAnimationId) {
               diagnostics.push(`equipment material animation ${plan.item.name}: IMC id=${materialResult.materialAnimationId} authoredTrackDecoded=false approximateEmissivePulseMaterials=${animatedMaterials.length - animatedMaterialCount}`)
             }

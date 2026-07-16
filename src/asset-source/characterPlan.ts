@@ -105,6 +105,28 @@ export function skeletonPath(raceCode: CharacterRaceCode): string {
   return `chara/human/${raceCode}/skeleton/base/b0001/skl_${raceCode}b0001.sklb`
 }
 
+// FFXIV renders one weapon model at a size that depends on the wielder's race:
+// the same greatsword is tiny on a Lalafell and huge on a Roegadyn. Weapon MDLs
+// are authored for Hyur proportions, so those stay at 1.0 (no change to the
+// current default) and the other races scale relative to their standing height.
+// Applied to the weapon mesh and its VFX together; tune per race here alone.
+const WEAPON_RACE_SCALE: Record<CharacterRaceCode, number> = {
+  c0101: 1.00, c0201: 1.00, // Hyur Midlander (authoring reference)
+  c0301: 1.08, c0401: 1.05, // Hyur Highlander
+  c0501: 1.10, c0601: 1.06, // Elezen
+  c0701: 1.00, c0801: 0.97, // Miqo'te
+  c0901: 1.15, c1001: 1.10, // Roegadyn
+  c1101: 0.62, c1201: 0.60, // Lalafell
+  c1301: 1.04, c1401: 0.98, // Au Ra
+  c1501: 1.14, c1601: 1.10, // Hrothgar
+  c1701: 1.04, c1801: 1.03, // Viera
+}
+
+/** In-game weapon size multiplier for the wielder's race (Hyur = 1.0). */
+export function weaponRaceScale(raceCode: CharacterRaceCode): number {
+  return WEAPON_RACE_SCALE[raceCode] ?? 1
+}
+
 /** Race-authored standing idle loops, followed by compatible skeleton fallbacks. */
 export function idleAnimationCandidates(raceCode: CharacterRaceCode): string[] {
   return [raceCode, ...EQUIPMENT_FALLBACKS[raceCode]].map((candidate) => (
