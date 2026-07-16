@@ -240,10 +240,13 @@ export function bakeCharacterMaterial(
       const specularStrength = clampByte(rowSpecularMask * textureSpecularMask * specularAlpha)
       ao[target] = ao[target + 1] = ao[target + 2] = occlusion
       roughness[target] = roughness[target + 1] = roughness[target + 2] = rough
-      // FFXIV's character shader uses a colored-specular workflow. Feeding its
-      // table value directly into Three's metallic workflow removes the diffuse
-      // contribution and turns leather/cloth black without an environment map.
-      metalness[target] = metalness[target + 1] = metalness[target + 2] = 0
+      // Character colorsets carry a real metalness value. With a reflection
+      // environment now present, feed it through so metal gear reflects (the
+      // glossy in-game look) while colored-specular cloth/leather (metalness 0)
+      // stays matte. This used to be forced to zero because, without anything to
+      // reflect, metallic surfaces rendered as flat black.
+      const rowMetalness = mix(a.metalness, b.metalness)
+      metalness[target] = metalness[target + 1] = metalness[target + 2] = clampByte(rowMetalness)
       specularIntensity[target] = specularIntensity[target + 1] = specularIntensity[target + 2] = 255
       specularIntensity[target + 3] = specularStrength
       specularColor[target + 3] = 255

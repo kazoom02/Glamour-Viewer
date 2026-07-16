@@ -37,7 +37,8 @@ describe('character colorset baking', () => {
       mask: texture([255, 255, 255, 255]),
     })!
     expect(Array.from(result.diffuse.rgba.slice(0, 3))).toEqual([207, 207, 207])
-    expect(Array.from(result.metalness.rgba.slice(0, 3))).toEqual([0, 0, 0])
+    // Colorset metalness now flows through (both selected rows are metal).
+    expect(Array.from(result.metalness.rgba.slice(0, 3))).toEqual([255, 255, 255])
   })
 
   it('keeps legacy ambient occlusion, roughness and specular controls separate', () => {

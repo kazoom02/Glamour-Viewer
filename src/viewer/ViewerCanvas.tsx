@@ -884,7 +884,9 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
     const pmrem = new THREE.PMREMGenerator(renderer)
     const environmentTexture = pmrem.fromScene(environmentScene, 0.04).texture
     scene.environment = environmentTexture
-    scene.environmentIntensity = 0.6
+    // Metal gear is now metallic, so its whole look is the reflection; give it a
+    // touch more environment to read as polished rather than dark.
+    scene.environmentIntensity = 0.8
     pmrem.dispose()
     environmentScene.traverse((object) => {
       if (!(object instanceof THREE.Mesh)) return
