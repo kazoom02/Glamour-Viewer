@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import type { AssetSource } from '../asset-source/types'
 import {
   auxiliarySkeletonPlan,
@@ -838,7 +839,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
     renderer.setPixelRatio(renderPixelRatio)
     renderer.outputColorSpace = THREE.SRGBColorSpace
     renderer.toneMapping = THREE.NeutralToneMapping
-    renderer.toneMappingExposure = 0.96
+    renderer.toneMappingExposure = 1.05
     const maxAnisotropy = renderer.capabilities.getMaxAnisotropy()
     host.appendChild(renderer.domElement)
 
@@ -862,18 +863,35 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
     setIdleLabel('Idle')
     setIdleState(source.kind === 'local' ? 'loading' : 'unavailable')
 
-    // A restrained neutral studio rig keeps colors readable without the hard,
-    // glossy streaks produced by the previous 2.4-strength directional key.
-    scene.add(new THREE.HemisphereLight(0xf7f8ff, 0x28251f, 0.72))
-    const key = new THREE.DirectionalLight(0xffffff, 1.08)
+    // A brighter neutral studio rig so dark, reflective gear reads as metal
+    // instead of black. Neutral tone mapping still rolls off the highlights, so
+    // the stronger key does not blow out skin.
+    scene.add(new THREE.HemisphereLight(0xf7f8ff, 0x2b2820, 1.0))
+    const key = new THREE.DirectionalLight(0xffffff, 1.55)
     key.position.set(4, 5, 6)
     scene.add(key)
-    const fill = new THREE.DirectionalLight(0xf3f6ff, 0.32)
+    const fill = new THREE.DirectionalLight(0xf3f6ff, 0.55)
     fill.position.set(-4, 3, 5)
     scene.add(fill)
-    const rim = new THREE.DirectionalLight(0xfff4e8, 0.16)
+    const rim = new THREE.DirectionalLight(0xfff4e8, 0.3)
     rim.position.set(-4, 4, -4)
     scene.add(rim)
+    // Image-based reflections. In-game these dark-diffuse weapon materials are
+    // lit almost entirely by specular reflection; with no environment to
+    // reflect, they render flat black. A neutral room gives them highlights and
+    // surface detail. ShaderMaterial-based AVFX particles are unaffected.
+    const environmentScene = new RoomEnvironment()
+    const pmrem = new THREE.PMREMGenerator(renderer)
+    const environmentTexture = pmrem.fromScene(environmentScene, 0.04).texture
+    scene.environment = environmentTexture
+    scene.environmentIntensity = 0.6
+    pmrem.dispose()
+    environmentScene.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return
+      object.geometry.dispose()
+      const materials = Array.isArray(object.material) ? object.material : [object.material]
+      materials.forEach((material) => material.dispose())
+    })
 
     const allCharacterPlans = characterModelPlan(raceCode, { faceId: customization.face, hairId: customization.hairstyle })
     const selected = (Object.entries(equipped) as Array<[EquipmentSlot, EquippedArmor[EquipmentSlot]]>)
@@ -1329,6 +1347,8 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           item.dispose()
         })
       })
+      scene.environment = null
+      environmentTexture.dispose()
       renderer.dispose()
       renderer.domElement.remove()
     }
