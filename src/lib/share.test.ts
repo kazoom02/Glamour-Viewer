@@ -10,6 +10,19 @@ import {
 } from './share'
 
 const equipped: EquippedArmor = {
+  mainHand: {
+    id: 9012,
+    name: 'Back-mounted blade',
+    modelValue: 4_295_035_733,
+    modelSet: 2901,
+    modelBase: 1,
+    modelVariant: 1,
+    slot: 'mainHand',
+    dyeCount: 0,
+    equipLevel: 90,
+    jobs: 'Gladiator',
+    weaponPlacement: 'back',
+  },
   head: {
     id: 1234,
     name: 'Étoile beret',
@@ -70,6 +83,8 @@ describe('shared glamour recipes', () => {
     const invalidDye = { ...valid, items: [{ ...valid.items[0]!, dyes: [{ id: 999, name: 'Invalid', color: 0 }] }] } as unknown as SharedSet
     const invalidHair = { ...valid, items: [{ ...valid.items[0]!, headHairVisibility: 'sometimes' }] } as unknown as SharedSet
     const feetHairOverride = { ...valid, items: valid.items.map((item) => item.slot === 'feet' ? { ...item, headHairVisibility: 'hide' } : item) } as unknown as SharedSet
+    const invalidPlacement = { ...valid, items: valid.items.map((item) => item.slot === 'mainHand' ? { ...item, weaponPlacement: 'floating' } : item) } as unknown as SharedSet
+    const feetPlacement = { ...valid, items: valid.items.map((item) => item.slot === 'feet' ? { ...item, weaponPlacement: 'back' } : item) } as unknown as SharedSet
 
     expect(parseSharedSet(`#/set/${encodeSharedSet(invalidRace)}`)).toBeNull()
     expect(parseSharedSet(`#/set/${encodeSharedSet(duplicateSlots)}`)).toBeNull()
@@ -77,5 +92,7 @@ describe('shared glamour recipes', () => {
     expect(parseSharedSet(`#/set/${encodeSharedSet(invalidDye)}`)).toBeNull()
     expect(parseSharedSet(`#/set/${encodeSharedSet(invalidHair)}`)).toBeNull()
     expect(parseSharedSet(`#/set/${encodeSharedSet(feetHairOverride)}`)).toBeNull()
+    expect(parseSharedSet(`#/set/${encodeSharedSet(invalidPlacement)}`)).toBeNull()
+    expect(parseSharedSet(`#/set/${encodeSharedSet(feetPlacement)}`)).toBeNull()
   })
 })

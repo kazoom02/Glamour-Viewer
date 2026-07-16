@@ -2,12 +2,15 @@ import { type FormEvent, useEffect, useRef, useState } from 'react'
 import type { AssetSource } from '../asset-source/types'
 import {
   EQUIPMENT_SLOTS,
+  isWeaponSlot,
   SLOT_LABELS,
   type ArmorItem,
   type EquipmentDye,
   type EquipmentSlot,
   type EquippedArmor,
   type HairVisibility,
+  type WeaponPlacement,
+  type WeaponSlot,
 } from '../catalog/types'
 import { dyeCssColor } from '../catalog/stains'
 import { continueArmorSearch, searchArmor, xivapiIconUrl } from '../catalog/xivapi'
@@ -20,6 +23,7 @@ interface Props {
   onRemove: (slot: EquipmentSlot) => void
   onDye: (slot: EquipmentSlot, channel: 0 | 1, dye: EquipmentDye | null) => void
   onHeadHairVisibility: (visibility: HairVisibility) => void
+  onWeaponPlacement: (slot: WeaponSlot, placement: WeaponPlacement) => void
 }
 
 const LEFT_SLOTS: EquipmentSlot[] = ['mainHand', 'head', 'body', 'hands', 'legs', 'feet']
@@ -29,7 +33,7 @@ const SLOT_GLYPHS: Record<EquipmentSlot, string> = {
   ears: '◉', neck: '◡', wrists: '◌', rightRing: '○', leftRing: '○',
 }
 
-export default function ArmorCatalog({ source, equipped, onEquip, onRemove, onDye, onHeadHairVisibility }: Props) {
+export default function ArmorCatalog({ source, equipped, onEquip, onRemove, onDye, onHeadHairVisibility, onWeaponPlacement }: Props) {
   const [query, setQuery] = useState('')
   const [selectedSlot, setSelectedSlot] = useState<EquipmentSlot | null>(null)
   const [results, setResults] = useState<ArmorItem[]>([])
@@ -166,6 +170,19 @@ export default function ArmorCatalog({ source, equipped, onEquip, onRemove, onDy
               <option value="auto">Auto (game setting)</option>
               <option value="hide">Hide hair</option>
               <option value="show">Show hair</option>
+            </select>
+          </label>
+        )}
+        {item && isWeaponSlot(slot) && (
+          <label className="dressing-slot-placement">
+            <span>Placement</span>
+            <select
+              value={item.weaponPlacement ?? 'hand'}
+              onChange={(event) => onWeaponPlacement(slot, event.target.value as WeaponPlacement)}
+              aria-label={`${SLOT_LABELS[slot]} placement`}
+            >
+              <option value="hand">In hand</option>
+              <option value="back">On back</option>
             </select>
           </label>
         )}

@@ -169,6 +169,10 @@ h2 { margin: 0; font-size: clamp(28px, 3.2vw, 42px); line-height: 1.1; letter-sp
 .dressing-slot-hair span { padding-left: 2px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .dressing-slot-hair select { min-width: 0; height: 25px; padding: 0 22px 0 7px; border: 1px solid #4b453d; border-radius: 4px; background: #181a1f; color: #d8d3ca; cursor: pointer; font: inherit; }
 .dressing-slot-hair select:focus-visible { outline: 2px solid #b7955e; outline-offset: 1px; }
+.dressing-slot-placement { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 7px; padding: 0 5px 6px; color: #92949a; font-size: 8px; }
+.dressing-slot-placement span { padding-left: 2px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.dressing-slot-placement select { min-width: 0; height: 25px; padding: 0 22px 0 7px; border: 1px solid #4b453d; border-radius: 4px; background: #181a1f; color: #d8d3ca; cursor: pointer; font: inherit; }
+.dressing-slot-placement select:focus-visible { outline: 2px solid #b7955e; outline-offset: 1px; }
 .dressing-figure { display: grid; place-items: center; align-content: center; min-height: 410px; color: #777067; text-align: center; }
 .dressing-figure > span { width: 54px; height: 250px; margin-bottom: 16px; border: 1px solid #50483d; border-radius: 50% 50% 35% 35%; background: linear-gradient(#2d2b2b, #1b1c20); clip-path: polygon(28% 0, 72% 0, 92% 17%, 72% 48%, 82% 100%, 18% 100%, 28% 48%, 8% 17%); }
 .dressing-figure strong { color: var(--gold-bright); font-size: 20px; }

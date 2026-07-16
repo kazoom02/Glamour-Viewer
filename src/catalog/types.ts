@@ -15,6 +15,7 @@ export type AccessorySlot = (typeof ACCESSORY_SLOTS)[number]
 export type WeaponSlot = (typeof WEAPON_SLOTS)[number]
 export type EquipmentSlot = (typeof EQUIPMENT_SLOTS)[number]
 export type HairVisibility = 'auto' | 'show' | 'hide'
+export type WeaponPlacement = 'hand' | 'back'
 
 export const SLOT_LABELS: Record<EquipmentSlot, string> = {
   mainHand: 'Weapon',
@@ -60,6 +61,8 @@ export interface ArmorItem {
   dyes?: [EquipmentDye | null, EquipmentDye | null]
   /** Optional dressing-room override for head equipment hair suppression. */
   headHairVisibility?: HairVisibility
+  /** Viewer placement for equipped main-hand and off-hand models. */
+  weaponPlacement?: WeaponPlacement
 }
 
 export interface EquipmentDye {

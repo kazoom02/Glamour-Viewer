@@ -1,5 +1,14 @@
 import { CHARACTER_PRESETS, type CharacterRaceCode } from '../asset-source/characterPlan'
-import { ARMOR_SLOTS, type ArmorItem, type EquipmentDye, type EquipmentSlot, type EquippedArmor, type HairVisibility } from '../catalog/types'
+import {
+  ARMOR_SLOTS,
+  isWeaponSlot,
+  type ArmorItem,
+  type EquipmentDye,
+  type EquipmentSlot,
+  type EquippedArmor,
+  type HairVisibility,
+  type WeaponPlacement,
+} from '../catalog/types'
 
 export interface SharedSet {
   version: 1
@@ -11,6 +20,7 @@ export interface SharedSet {
 const RACE_CODES = new Set<string>(CHARACTER_PRESETS.map(({ code }) => code))
 const ARMOR_SLOT_SET = new Set<string>(ARMOR_SLOTS)
 const HAIR_VISIBILITY = new Set<HairVisibility>(['auto', 'show', 'hide'])
+const WEAPON_PLACEMENT = new Set<WeaponPlacement>(['hand', 'back'])
 
 function toBase64Url(value: string): string {
   const bytes = new TextEncoder().encode(value)
@@ -64,6 +74,9 @@ function decodeSharedItem(value: unknown): ArmorItem | null {
   const headHairVisibility = candidate.headHairVisibility
   if (headHairVisibility !== undefined && !HAIR_VISIBILITY.has(headHairVisibility)) return null
   if (headHairVisibility !== undefined && candidate.slot !== 'head') return null
+  const weaponPlacement = candidate.weaponPlacement
+  if (weaponPlacement !== undefined && !WEAPON_PLACEMENT.has(weaponPlacement)) return null
+  if (weaponPlacement !== undefined && !isWeaponSlot(candidate.slot as EquipmentSlot)) return null
 
   return {
     id: candidate.id!,
@@ -79,6 +92,7 @@ function decodeSharedItem(value: unknown): ArmorItem | null {
     jobs: typeof candidate.jobs === 'string' ? candidate.jobs.slice(0, 500) : 'All classes',
     ...(dyes ? { dyes } : {}),
     ...(headHairVisibility ? { headHairVisibility } : {}),
+    ...(weaponPlacement ? { weaponPlacement } : {}),
   }
 }
 

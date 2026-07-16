@@ -11,7 +11,15 @@ import {
   sharedSetHash,
   type SharedSet,
 } from './lib/share'
-import type { ArmorItem, EquipmentDye, EquipmentSlot, EquippedArmor, HairVisibility } from './catalog/types'
+import type {
+  ArmorItem,
+  EquipmentDye,
+  EquipmentSlot,
+  EquippedArmor,
+  HairVisibility,
+  WeaponPlacement,
+  WeaponSlot,
+} from './catalog/types'
 import { CHARACTER_PRESETS, type CharacterRaceCode } from './asset-source/characterPlan'
 import { customizationForRaceCode, type CharacterCustomization } from './customization/types'
 
@@ -118,6 +126,12 @@ export function App() {
   function setHeadHairVisibility(visibility: HairVisibility) {
     setEquipped((current) => current.head
       ? { ...current, head: { ...current.head, headHairVisibility: visibility } }
+      : current)
+  }
+
+  function setWeaponPlacement(slot: WeaponSlot, placement: WeaponPlacement) {
+    setEquipped((current) => current[slot]
+      ? { ...current, [slot]: { ...current[slot], weaponPlacement: placement } }
       : current)
   }
 
@@ -229,6 +243,7 @@ export function App() {
                     onRemove={unequip}
                     onDye={dyeEquipment}
                     onHeadHairVisibility={setHeadHairVisibility}
+                    onWeaponPlacement={setWeaponPlacement}
                   />
                 ) : (
                   <CustomizationPanel

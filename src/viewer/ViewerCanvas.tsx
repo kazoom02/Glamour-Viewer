@@ -31,9 +31,11 @@ import {
   isWeaponSlot,
   type EquipmentSlot,
   type EquippedArmor,
+  type WeaponPlacement,
 } from '../catalog/types'
 import type { CharacterCustomization } from '../customization/types'
 import { animationClipFromDecoded } from './idleAnimation'
+import { subdivideCurvedMesh } from './geometryQuality'
 import {
   applyBustDeformation,
   bustWeightSummary,
@@ -243,9 +245,11 @@ function addDecodedModel(
   rig?: CharacterRig,
   anisotropy = 1,
   customization?: CharacterCustomization,
+  refineCurvature = false,
 ): number {
   for (const [index, part] of model.meshes.entries()) {
     if (slot && attributeMask !== undefined && !isVisibleEquipmentPart(part.attributes, slot, attributeMask)) continue
+    const renderPart = refineCurvature ? subdivideCurvedMesh(part) : part
     const materialPath = model.materialPaths[part.materialIndex]?.toLowerCase() ?? ''
     const decodedMaterial = decodedMaterials[materialPath.replaceAll('\\', '/')]
     const shaderPackage = decodedMaterial?.shaderPackage.toLowerCase() ?? ''
@@ -357,29 +361,29 @@ function addDecodedModel(
     })
     if (normal) material.normalScale.set(resolvedMuscleNormalStrength, resolvedMuscleNormalStrength)
     const geometry = new THREE.BufferGeometry()
-    geometry.setAttribute('position', new THREE.BufferAttribute(part.positions, 3))
-    if (part.uvs) {
-      geometry.setAttribute('uv', new THREE.BufferAttribute(part.uvs, 2))
-      geometry.setAttribute('uv1', new THREE.BufferAttribute(part.uvs, 2))
+    geometry.setAttribute('position', new THREE.BufferAttribute(renderPart.positions, 3))
+    if (renderPart.uvs) {
+      geometry.setAttribute('uv', new THREE.BufferAttribute(renderPart.uvs, 2))
+      geometry.setAttribute('uv1', new THREE.BufferAttribute(renderPart.uvs, 2))
     }
-    if (part.uvs2) geometry.setAttribute('uv2', new THREE.BufferAttribute(part.uvs2, 2))
-    let skinIndices = part.skinIndices
+    if (renderPart.uvs2) geometry.setAttribute('uv2', new THREE.BufferAttribute(renderPart.uvs2, 2))
+    let skinIndices = renderPart.skinIndices
     if (skinIndices && rig) {
       skinIndices = new Uint16Array(skinIndices).map((globalIndex) => (
         rig.boneIndex.get(model.boneNames[globalIndex] ?? '') ?? 0
       ))
     }
     if (skinIndices) geometry.setAttribute('skinIndex', new THREE.BufferAttribute(skinIndices, 4))
-    if (part.skinWeights) geometry.setAttribute('skinWeight', new THREE.BufferAttribute(part.skinWeights, 4))
-    geometry.setIndex(new THREE.BufferAttribute(part.indices, 1))
+    if (renderPart.skinWeights) geometry.setAttribute('skinWeight', new THREE.BufferAttribute(renderPart.skinWeights, 4))
+    geometry.setIndex(new THREE.BufferAttribute(renderPart.indices, 1))
     // FFXIV's authored normals preserve smoothing across material submeshes. Recomputing
     // them independently makes the face look faceted at every material boundary.
-    if (part.normals?.every(Number.isFinite)) geometry.setAttribute('normal', new THREE.BufferAttribute(part.normals, 3))
+    if (renderPart.normals?.every(Number.isFinite)) geometry.setAttribute('normal', new THREE.BufferAttribute(renderPart.normals, 3))
     else geometry.computeVertexNormals()
     geometry.normalizeNormals()
     geometry.computeBoundingBox()
     geometry.computeBoundingSphere()
-    const mesh = rig && skinIndices && part.skinWeights
+    const mesh = rig && skinIndices && renderPart.skinWeights
       ? new THREE.SkinnedMesh(geometry, material)
       : new THREE.Mesh(geometry, material)
     mesh.name = `${label}-${index}`
@@ -417,12 +421,78 @@ function isVisibleEquipmentPart(attributes: string[] | undefined, slot: Equipmen
   })
 }
 
-function equipmentTarget(character: THREE.Group, rig: CharacterRig | undefined, slot: EquipmentSlot): THREE.Object3D {
-  if (!rig || !isWeaponSlot(slot)) return character
+interface EquipmentAttachment {
+  target: THREE.Object3D
+  diagnostic: string
+}
+
+function handWeaponTarget(character: THREE.Group, rig: CharacterRig | undefined, slot: EquipmentSlot): EquipmentAttachment {
+  if (!rig || !isWeaponSlot(slot)) return { target: character, diagnostic: 'placement=hand bone=unavailable fallback=character-root' }
   const names = slot === 'mainHand'
     ? ['j_buki_r', 'n_buki_r', 'j_te_r', 'j_hand_r']
     : ['j_buki_l', 'n_buki_l', 'j_te_l', 'j_hand_l']
-  return names.map((name) => rig.skeleton.bones.find((bone) => bone.name === name)).find(Boolean) ?? character
+  const bone = names.map((name) => rig.skeleton.bones.find((candidate) => candidate.name === name)).find(Boolean)
+  return bone
+    ? { target: bone, diagnostic: `placement=hand bone=${bone.name} fallback=false` }
+    : { target: character, diagnostic: `placement=hand bone=unavailable candidates=${names.join(',')} fallback=character-root` }
+}
+
+function backWeaponTarget(
+  character: THREE.Group,
+  rig: CharacterRig | undefined,
+  slot: EquipmentSlot,
+  model: DecodedModel,
+): EquipmentAttachment {
+  if (!rig || !isWeaponSlot(slot)) return { target: character, diagnostic: 'placement=back bone=unavailable fallback=character-root' }
+  character.updateMatrixWorld(true)
+  const spineNames = ['j_sebo_c', 'j_sebo_b', 'j_sebo_a', 'j_kosi']
+  const spine = spineNames.map((name) => rig.skeleton.bones.find((bone) => bone.name === name)).find(Boolean)
+  const anchor = spine
+    ? spine.getWorldPosition(new THREE.Vector3())
+    : new THREE.Vector3(0, 1.2, 0)
+  anchor.add(new THREE.Vector3(slot === 'mainHand' ? -0.1 : 0.1, 0.03, -0.15))
+
+  const size = new THREE.Vector3(
+    model.bounds.max[0] - model.bounds.min[0],
+    model.bounds.max[1] - model.bounds.min[1],
+    model.bounds.max[2] - model.bounds.min[2],
+  )
+  const longestAxisIndex = size.x >= size.y && size.x >= size.z ? 0 : size.y >= size.z ? 1 : 2
+  const longestAxis = new THREE.Vector3(
+    longestAxisIndex === 0 ? 1 : 0,
+    longestAxisIndex === 1 ? 1 : 0,
+    longestAxisIndex === 2 ? 1 : 0,
+  )
+  const desiredDirection = new THREE.Vector3(slot === 'mainHand' ? 0.55 : -0.55, 0.835, 0).normalize()
+  const orientation = new THREE.Quaternion().setFromUnitVectors(longestAxis, desiredDirection)
+  const center = new THREE.Vector3(
+    (model.bounds.min[0] + model.bounds.max[0]) / 2,
+    (model.bounds.min[1] + model.bounds.max[1]) / 2,
+    (model.bounds.min[2] + model.bounds.max[2]) / 2,
+  )
+  const mount = new THREE.Group()
+  mount.name = `${slot}-back-mount`
+  mount.quaternion.copy(orientation)
+  mount.position.copy(anchor).sub(center.applyQuaternion(orientation))
+  character.add(mount)
+  character.updateMatrixWorld(true)
+  if (spine) spine.attach(mount)
+  return {
+    target: mount,
+    diagnostic: `placement=back bone=${spine?.name ?? 'character-root'} longestModelAxis=${['x', 'y', 'z'][longestAxisIndex]} anchor=${formatVector(anchor.toArray())} diagonal=${formatVector(desiredDirection.toArray())} fallback=${!spine}`,
+  }
+}
+
+function equipmentTarget(
+  character: THREE.Group,
+  rig: CharacterRig | undefined,
+  slot: EquipmentSlot,
+  placement: WeaponPlacement,
+  model: DecodedModel,
+): EquipmentAttachment {
+  return placement === 'back'
+    ? backWeaponTarget(character, rig, slot, model)
+    : handWeaponTarget(character, rig, slot)
 }
 
 function fitCamera(camera: THREE.PerspectiveCamera, controls: OrbitControls, object: THREE.Object3D) {
@@ -719,7 +789,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           ]
           bustModels.forEach(({ label, result }) => {
             diagnostics.push(bustModelDiagnostic(label, result.path, result.model))
-            const deformation = applyBustDeformation(result.model, activeRig.skeleton, activeRig.boneIndex, bustScale)
+            const deformation = applyBustDeformation(result.model, activeRig.skeleton, activeRig.boneIndex)
             diagnostics.push(bustDeformationDiagnostic(label, deformation))
           })
           neutralizeBustRig(activeRig, bustScale)
@@ -776,6 +846,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               rig,
               maxAnisotropy,
               customization,
+              plan.part === 'torso',
             )
             if (result.warning) failures.push(`${plan.part}: ${result.warning}`)
             if (materialResult?.errors.length) failures.push(...materialResult.errors.map((error) => `${plan.part} ${error}`))
@@ -786,13 +857,19 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             failures.push(`${plan.part}: ${attempted || 'model not found'}`)
           }
         }
+        if (characterModels.some(({ plan }) => plan.part === 'torso')) {
+          diagnostics.push('character torso render refinement: curved subdivision level=1 triangles=4x corners=preserved skinWeights=interpolated')
+        }
         for (const plan of equipmentPlans) {
           const result = plan.candidates.map((path) => byPath.get(path)).find((candidate) => candidate?.model)
           if (result?.model) {
             const materialResult = materialsByModel.get(result.path)
             const weapon = isWeaponSlot(plan.slot)
+            const attachment = weapon
+              ? equipmentTarget(characterGroup, rig, plan.slot, plan.item.weaponPlacement ?? 'hand', result.model)
+              : { target: characterGroup, diagnostic: '' }
             addDecodedModel(
-              equipmentTarget(characterGroup, rig, plan.slot),
+              attachment.target,
               result.model,
               SLOT_COLORS[plan.slot],
               `equipment-${plan.slot}`,
@@ -803,6 +880,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               maxAnisotropy,
               customization,
             )
+            if (weapon) diagnostics.push(`weapon attachment ${plan.item.name}: slot=${plan.slot} ${attachment.diagnostic}`)
             if (result.warning) failures.push(`${plan.item.name}: ${result.warning}`)
             if (materialResult?.errors.length) failures.push(...materialResult.errors.map((error) => `${plan.item.name} ${error}`))
             diagnostics.push(...modelMaterialDiagnostics(plan.item.name, result.model, materialResult, true))
