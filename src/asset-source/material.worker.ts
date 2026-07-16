@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 
 import { readImcEntry } from './imc'
+import { EQUIPMENT_PARAMETER_PATH, headEquipmentVisibility } from './eqp'
 import {
   bakeCharacterMaterial,
   bakeHairMaterial,
@@ -32,9 +33,10 @@ interface Request {
 
 // Bump whenever decoded/baked texture semantics change so IndexedDB cannot
 // retain an older, glossier material interpretation across deployments.
-const CACHE_VERSION = 2
+const CACHE_VERSION = 3
 const memoryCache = new Map<string, DecodedTexture>()
 const stainingTemplateCache = new Map<string, Promise<StainingTemplate>>()
+const equipmentParameterCache = new Map<string, Promise<ArrayBuffer>>()
 
 function textureSummary(texture: DecodedTexture | undefined): string {
   if (!texture) return 'missing'
@@ -152,6 +154,15 @@ function loadStainingTemplate(
   return pending
 }
 
+function loadEquipmentParameters(reader: LocalAssetReader, sourceKey: string): Promise<ArrayBuffer> {
+  let pending = equipmentParameterCache.get(sourceKey)
+  if (!pending) {
+    pending = reader.read(EQUIPMENT_PARAMETER_PATH)
+    equipmentParameterCache.set(sourceKey, pending)
+  }
+  return pending
+}
+
 async function loadRequest(
   reader: LocalAssetReader,
   sourceKey: string,
@@ -162,6 +173,8 @@ async function loadRequest(
   const diagnostics: string[] = []
   let materialId = request.variant ?? 1
   let attributeMask: number | undefined
+  let headHairHidden: boolean | undefined
+  let headScalpHidden: boolean | undefined
   if (request.imcPath && request.slot && request.variant !== undefined) {
     try {
       const entry = readImcEntry(await reader.read(request.imcPath), request.slot, request.variant)
@@ -169,6 +182,23 @@ async function loadRequest(
       attributeMask = entry.attributeMask
     } catch (error) {
       errors.push(`[imc] ${request.imcPath}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  if (request.slot === 'head' && request.equipmentSetId !== undefined) {
+    try {
+      const visibility = headEquipmentVisibility(
+        await loadEquipmentParameters(reader, sourceKey),
+        request.equipmentSetId,
+      )
+      headHairHidden = visibility.hairHidden
+      headScalpHidden = visibility.hideScalp && !visibility.showHairOverride
+      diagnostics.push(
+        `head EQP: ${EQUIPMENT_PARAMETER_PATH} set=${request.equipmentSetId} hideScalp=${visibility.hideScalp} hideHair=${visibility.hideHair} showOverride=${visibility.showHairOverride} resolvedHairHidden=${visibility.hairHidden}`,
+      )
+    } catch (error) {
+      // EQP is optional here because some browser selections do not expose
+      // resident metadata files. The dressing room still offers an override.
+      diagnostics.push(`head EQP unavailable: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 
@@ -272,7 +302,15 @@ async function loadRequest(
       errors.push(`[mtrl] ${materialReference}: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
-  return { modelPath: request.modelPath, materials, errors, diagnostics, attributeMask }
+  return {
+    modelPath: request.modelPath,
+    materials,
+    errors,
+    diagnostics,
+    attributeMask,
+    ...(headHairHidden !== undefined ? { headHairHidden } : {}),
+    ...(headScalpHidden !== undefined ? { headScalpHidden } : {}),
+  }
 }
 
 async function sourceFingerprint(source: Extract<AssetSource, { kind: 'local' }>): Promise<string> {

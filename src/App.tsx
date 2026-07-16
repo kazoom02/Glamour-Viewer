@@ -11,7 +11,7 @@ import {
   sharedSetHash,
   type SharedSet,
 } from './lib/share'
-import type { ArmorItem, EquipmentDye, EquipmentSlot, EquippedArmor } from './catalog/types'
+import type { ArmorItem, EquipmentDye, EquipmentSlot, EquippedArmor, HairVisibility } from './catalog/types'
 import { CHARACTER_PRESETS, type CharacterRaceCode } from './asset-source/characterPlan'
 import { customizationForRaceCode, type CharacterCustomization } from './customization/types'
 
@@ -115,6 +115,12 @@ export function App() {
     })
   }
 
+  function setHeadHairVisibility(visibility: HairVisibility) {
+    setEquipped((current) => current.head
+      ? { ...current, head: { ...current.head, headHairVisibility: visibility } }
+      : current)
+  }
+
   return (
     <div className="app-shell">
       <header className="site-header">
@@ -216,7 +222,14 @@ export function App() {
               </nav>
               <Suspense fallback={<div className="catalog-loading">Loading workspace…</div>}>
                 {workspaceTab === 'dressing' ? (
-                  <ArmorCatalog source={source} equipped={equipped} onEquip={equip} onRemove={unequip} onDye={dyeEquipment} />
+                  <ArmorCatalog
+                    source={source}
+                    equipped={equipped}
+                    onEquip={equip}
+                    onRemove={unequip}
+                    onDye={dyeEquipment}
+                    onHeadHairVisibility={setHeadHairVisibility}
+                  />
                 ) : (
                   <CustomizationPanel
                     raceCode={raceCode}

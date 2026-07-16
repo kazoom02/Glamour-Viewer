@@ -7,6 +7,7 @@ import {
   type EquipmentDye,
   type EquipmentSlot,
   type EquippedArmor,
+  type HairVisibility,
 } from '../catalog/types'
 import { dyeCssColor } from '../catalog/stains'
 import { continueArmorSearch, searchArmor, xivapiIconUrl } from '../catalog/xivapi'
@@ -18,6 +19,7 @@ interface Props {
   onEquip: (item: ArmorItem) => void
   onRemove: (slot: EquipmentSlot) => void
   onDye: (slot: EquipmentSlot, channel: 0 | 1, dye: EquipmentDye | null) => void
+  onHeadHairVisibility: (visibility: HairVisibility) => void
 }
 
 const LEFT_SLOTS: EquipmentSlot[] = ['mainHand', 'head', 'body', 'hands', 'legs', 'feet']
@@ -27,7 +29,7 @@ const SLOT_GLYPHS: Record<EquipmentSlot, string> = {
   ears: '◉', neck: '◡', wrists: '◌', rightRing: '○', leftRing: '○',
 }
 
-export default function ArmorCatalog({ source, equipped, onEquip, onRemove, onDye }: Props) {
+export default function ArmorCatalog({ source, equipped, onEquip, onRemove, onDye, onHeadHairVisibility }: Props) {
   const [query, setQuery] = useState('')
   const [selectedSlot, setSelectedSlot] = useState<EquipmentSlot | null>(null)
   const [results, setResults] = useState<ArmorItem[]>([])
@@ -152,6 +154,20 @@ export default function ArmorCatalog({ source, equipped, onEquip, onRemove, onDy
               )
             })}
           </div>
+        )}
+        {item && slot === 'head' && (
+          <label className="dressing-slot-hair">
+            <span>Hair</span>
+            <select
+              value={item.headHairVisibility ?? 'auto'}
+              onChange={(event) => onHeadHairVisibility(event.target.value as HairVisibility)}
+              aria-label="Hair visibility with head equipment"
+            >
+              <option value="auto">Auto (game setting)</option>
+              <option value="hide">Hide hair</option>
+              <option value="show">Show hair</option>
+            </select>
+          </label>
         )}
       </div>
     )

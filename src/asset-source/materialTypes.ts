@@ -10,6 +10,7 @@ export interface MaterialLoadRequest {
   variant?: number
   /** In-game Stain row IDs for dye channels 1 and 2. */
   stains?: [number, number]
+  equipmentSetId?: number
 }
 
 export interface DecodedMaterial {
@@ -39,4 +40,6 @@ export interface MaterialLoadResult {
   errors: string[]
   diagnostics: string[]
   attributeMask?: number
+  headHairHidden?: boolean
+  headScalpHidden?: boolean
 }

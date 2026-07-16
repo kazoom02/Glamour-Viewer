@@ -78,7 +78,7 @@ describe('character colorset baking', () => {
 
   it('builds facial-hair color and opacity from normal and mask channels', () => {
     const result = bakeHairMaterial(texture([128, 128, 0, 64]), texture([0, 0, 0, 255]))!
-    expect(Array.from(result.diffuse.rgba)).toEqual([130, 64, 13, 64])
+    expect(Array.from(result.diffuse.rgba)).toEqual([184, 184, 184, 64])
     expect(Array.from(result.normal.rgba)).toEqual([128, 128, 255, 255])
   })
 

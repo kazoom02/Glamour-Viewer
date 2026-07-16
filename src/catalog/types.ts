@@ -14,6 +14,7 @@ export type ArmorSlot = (typeof BODY_SLOTS)[number]
 export type AccessorySlot = (typeof ACCESSORY_SLOTS)[number]
 export type WeaponSlot = (typeof WEAPON_SLOTS)[number]
 export type EquipmentSlot = (typeof EQUIPMENT_SLOTS)[number]
+export type HairVisibility = 'auto' | 'show' | 'hide'
 
 export const SLOT_LABELS: Record<EquipmentSlot, string> = {
   mainHand: 'Weapon',
@@ -57,6 +58,8 @@ export interface ArmorItem {
   jobs: string
   /** Applied in-game stain metadata for dye channels 1 and 2. */
   dyes?: [EquipmentDye | null, EquipmentDye | null]
+  /** Optional dressing-room override for head equipment hair suppression. */
+  headHairVisibility?: HairVisibility
 }
 
 export interface EquipmentDye {

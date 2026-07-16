@@ -515,6 +515,8 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       candidates: equipmentModelCandidates(item, raceCode),
     }))
     const characterPlans = allCharacterPlans.filter((plan) => !plan.coveredBy || !equipped[plan.coveredBy])
+    const headHairVisibility = equipped.head?.headHairVisibility ?? 'auto'
+    let hairHidden = headHairVisibility === 'hide'
     setError(undefined)
     setDebug(undefined)
     setStatus(`Reading ${raceCode} character models…`)
@@ -602,6 +604,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             slot: plan.slot,
             variant: plan.asset.variant,
             stains: [plan.item.dyes?.[0]?.id ?? 0, plan.item.dyes?.[1]?.id ?? 0],
+            equipmentSetId: plan.item.modelSet,
           })),
         ]
         setStatus(`Resolving ${materialRequests.length} material sets and textures…`)
@@ -614,8 +617,17 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
         if (disposed) return
         const materialsByModel = new Map(materialResults.map((result) => [result.modelPath, result]))
         diagnostics.push(...materialResults.flatMap((result) => result.diagnostics))
+        const headEquipmentModel = equipmentModels.find(({ plan }) => plan.slot === 'head')
+        const headMaterialResult = headEquipmentModel
+          ? materialsByModel.get(headEquipmentModel.result.path)
+          : undefined
+        if (headHairVisibility === 'auto') hairHidden = headMaterialResult?.headHairHidden === true
+        diagnostics.push(
+          `head hair visibility: mode=${headHairVisibility} eqp=${headMaterialResult?.headHairHidden ?? 'unavailable'} resolvedHidden=${hairHidden}`,
+        )
 
         for (const plan of characterPlans) {
+          if (plan.part === 'hair' && hairHidden) continue
           const candidates = characterModelCandidates(plan)
           const result = candidates.map((path) => byPath.get(path)).find((candidate) => candidate?.model)
           if (result?.model) {
@@ -699,6 +711,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
         }
       } else {
         for (const plan of characterPlans) {
+          if (plan.part === 'hair' && hairHidden) continue
           let loaded = false
           let lastReason: unknown
           for (const path of characterModelCandidates(plan)) {

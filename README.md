@@ -29,6 +29,8 @@ The current viewer decodes the actual highest-detail MDL LOD, base body pieces, 
 
 For local installs, the browser also reads the equipment IMC row selected by XIVAPI's model variant, applies its attribute visibility bits to MDL submeshes, resolves the corresponding `material/v####` MTRL files, follows their shader sampler references, and decodes TEX surfaces including BC1, BC3, BC5, and BC7. Legacy and Dawntrail color tables are baked through the material's index texture into base-color, emissive, roughness, and metalness maps; diffuse, normal, and mask inputs are combined in the worker. Decoded RGBA surfaces are cached in the material worker and in browser IndexedDB; no cache entry or game byte leaves the device.
 
+Head equipment also reads the local `equipmentparameter.eqp` flags to suppress hairstyles when the game marks a helmet as hiding hair. The Head slot offers an Auto/Show/Hide override for unusual pieces or incomplete installs.
+
 The browser parses `chara/xls/boneDeformer/human.pbd` and applies its sequential, skin-weighted race matrices whenever a body or equipment model falls back to an ancestor race. This keeps shared Midlander geometry aligned with race-specific skeletons such as Elezen. Equipment can be dyed per supported channel from the complete XIVAPI `Stain` catalog: the material worker reads the MTRL template/channel flags and applies the selected stain through `stainingtemplate.stm` or Dawntrail's `stainingtemplate_gud.stm`, including diffuse, specular, emissive, roughness, metalness, and legacy specular controls. PAP animation sampling, EQDP selection, and detailed equipment body-hiding metadata are still required for full in-game parity.
 
 ## Self-hosted cache CORS

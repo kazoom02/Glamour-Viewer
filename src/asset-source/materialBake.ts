@@ -79,8 +79,11 @@ export function bakeHairMaterial(
 ): { diffuse: DecodedTexture; normal: DecodedTexture } | undefined {
   if (!normal || !mask) return undefined
   const rgba = new Uint8Array(normal.width * normal.height * 4)
-  const base = [130, 64, 13]
-  const highlight = [77, 126, 240]
+  // Hair hue belongs to character customization and is multiplied in the
+  // renderer. Keep this baked source neutral; a colored ramp leaks that hue
+  // into every hairstyle (the old blue highlight caused visible blue locks).
+  const base = 184
+  const highlight = 255
   for (let y = 0; y < normal.height; y += 1) {
     for (let x = 0; x < normal.width; x += 1) {
       const target = (y * normal.width + x) * 4
@@ -88,9 +91,8 @@ export function bakeHairMaterial(
       const maskPixel = sample(mask, x, y, normal.width, normal.height)
       const tint = normalPixel[2] / 255
       const strength = maskPixel[3] / 255
-      for (let channel = 0; channel < 3; channel += 1) {
-        rgba[target + channel] = Math.round((base[channel]! + (highlight[channel]! - base[channel]!) * tint) * strength)
-      }
+      const brightness = Math.round((base + (highlight - base) * tint) * strength)
+      rgba[target] = rgba[target + 1] = rgba[target + 2] = brightness
       rgba[target + 3] = normalPixel[3]
     }
   }

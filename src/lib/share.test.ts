@@ -26,6 +26,7 @@ const equipped: EquippedArmor = {
       { id: 4, name: 'Slate Grey', color: 0x656565 },
       { id: 2, name: 'Ash Grey', color: 0xaca8a2 },
     ],
+    headHairVisibility: 'hide',
   },
   feet: {
     id: 5678,
@@ -67,10 +68,14 @@ describe('shared glamour recipes', () => {
     const duplicateSlots = { ...valid, items: [valid.items[0]!, valid.items[0]!] }
     const missingModel = { ...valid, items: [{ ...valid.items[0]!, modelSet: 0 }] }
     const invalidDye = { ...valid, items: [{ ...valid.items[0]!, dyes: [{ id: 999, name: 'Invalid', color: 0 }] }] } as unknown as SharedSet
+    const invalidHair = { ...valid, items: [{ ...valid.items[0]!, headHairVisibility: 'sometimes' }] } as unknown as SharedSet
+    const feetHairOverride = { ...valid, items: valid.items.map((item) => item.slot === 'feet' ? { ...item, headHairVisibility: 'hide' } : item) } as unknown as SharedSet
 
     expect(parseSharedSet(`#/set/${encodeSharedSet(invalidRace)}`)).toBeNull()
     expect(parseSharedSet(`#/set/${encodeSharedSet(duplicateSlots)}`)).toBeNull()
     expect(parseSharedSet(`#/set/${encodeSharedSet(missingModel)}`)).toBeNull()
     expect(parseSharedSet(`#/set/${encodeSharedSet(invalidDye)}`)).toBeNull()
+    expect(parseSharedSet(`#/set/${encodeSharedSet(invalidHair)}`)).toBeNull()
+    expect(parseSharedSet(`#/set/${encodeSharedSet(feetHairOverride)}`)).toBeNull()
   })
 })
