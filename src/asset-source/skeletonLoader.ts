@@ -53,7 +53,17 @@ export async function loadLocalHairSkeleton(
   raceCode: CharacterRaceCode,
   hairId: number,
 ): Promise<{ path: string; skeleton: DecodedSkeleton } | undefined> {
-  const table = await createLocalAssetReader(source).read(HAIR_EST_PATH)
+  let table: ArrayBuffer
+  try {
+    table = await createLocalAssetReader(source).read(HAIR_EST_PATH)
+  } catch (reason) {
+    // Hair EST is a CharacterUtility resident resource in the game client. Some
+    // SqPack layouts do not expose it as a normal hashed file, so its absence
+    // means that this optional auxiliary skeleton cannot be resolved. The hair
+    // model still uses the race skeleton and must remain renderable.
+    if (isMissingLocalSkeletonError(reason, HAIR_EST_PATH)) return undefined
+    throw reason
+  }
   const skeletonId = extraSkeletonId(table, Number(raceCode.slice(1)), hairId)
   if (!skeletonId) return undefined
   const path = hairSkeletonPath(raceCode, skeletonId)

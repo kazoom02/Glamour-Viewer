@@ -29,7 +29,7 @@ The current viewer decodes the actual highest-detail MDL LOD, base body pieces, 
 
 For local installs, the browser also reads the equipment IMC row selected by XIVAPI's model variant, applies its attribute visibility bits to MDL submeshes, resolves the corresponding `material/v####` MTRL files, follows their shader sampler references, and decodes TEX surfaces including BC1, BC3, BC5, and BC7. Legacy and Dawntrail color tables are baked through the material's index texture into base-color, emissive, roughness, and metalness maps; diffuse, normal, and mask inputs are combined in the worker. Decoded RGBA surfaces are cached in the material worker and in browser IndexedDB; no cache entry or game byte leaves the device.
 
-The browser parses `chara/xls/boneDeformer/human.pbd` and applies its sequential, skin-weighted race matrices whenever a body or equipment model falls back to an ancestor race. This keeps shared Midlander geometry aligned with race-specific skeletons such as Elezen. The MTRL dye-row templates/channels are parsed, but applying a user-selected dye still requires the game stain-template (`.stm`) data and a dye picker. PAP animation sampling, EQDP selection, and detailed equipment body-hiding metadata are also still required for animated, dye-accurate Fanbyte-level parity.
+The browser parses `chara/xls/boneDeformer/human.pbd` and applies its sequential, skin-weighted race matrices whenever a body or equipment model falls back to an ancestor race. This keeps shared Midlander geometry aligned with race-specific skeletons such as Elezen. Equipment can be dyed per supported channel from the complete XIVAPI `Stain` catalog: the material worker reads the MTRL template/channel flags and applies the selected stain through `stainingtemplate.stm` or Dawntrail's `stainingtemplate_gud.stm`, including diffuse, specular, emissive, roughness, metalness, and legacy specular controls. PAP animation sampling, EQDP selection, and detailed equipment body-hiding metadata are still required for full in-game parity.
 
 ## Self-hosted cache CORS
 
@@ -69,7 +69,7 @@ The Vite build writes to `dist` with `base: '/'`. The build script measures the 
 
 Import the repository in Vercel and accept the auto-detected Vite preset. Do not add framework, build, or output-directory overrides. The app uses hash routes such as `/#/set/<encoded>`, so it needs no SPA rewrite and no `vercel.json`.
 
-Share links contain only the selected race and XIVAPI catalog/model metadata. Opening a valid link imports the recipe automatically, and the same URL can be pasted into the import field. The recipient still supplies their own local install or asset bucket; no model or texture bytes are embedded in the hash.
+Share links contain only the selected race, XIVAPI catalog/model metadata, and selected dye IDs. Opening a valid link imports the recipe automatically, and the same URL can be pasted into the import field. The recipient still supplies their own local install or asset bucket; no model or texture bytes are embedded in the hash.
 
 Environment variables are not required. Any future public build-time setting must use the `VITE_` prefix. A secret in the browser bundle is not secret and should never be added.
 

@@ -4,16 +4,20 @@ import {
   EQUIPMENT_SLOTS,
   SLOT_LABELS,
   type ArmorItem,
+  type EquipmentDye,
   type EquipmentSlot,
   type EquippedArmor,
 } from '../catalog/types'
+import { dyeCssColor } from '../catalog/stains'
 import { continueArmorSearch, searchArmor, xivapiIconUrl } from '../catalog/xivapi'
+import DyePicker from './DyePicker'
 
 interface Props {
   source: AssetSource
   equipped: EquippedArmor
   onEquip: (item: ArmorItem) => void
   onRemove: (slot: EquipmentSlot) => void
+  onDye: (slot: EquipmentSlot, channel: 0 | 1, dye: EquipmentDye | null) => void
 }
 
 const LEFT_SLOTS: EquipmentSlot[] = ['mainHand', 'head', 'body', 'hands', 'legs', 'feet']
@@ -23,7 +27,7 @@ const SLOT_GLYPHS: Record<EquipmentSlot, string> = {
   ears: '◉', neck: '◡', wrists: '◌', rightRing: '○', leftRing: '○',
 }
 
-export default function ArmorCatalog({ source, equipped, onEquip, onRemove }: Props) {
+export default function ArmorCatalog({ source, equipped, onEquip, onRemove, onDye }: Props) {
   const [query, setQuery] = useState('')
   const [selectedSlot, setSelectedSlot] = useState<EquipmentSlot | null>(null)
   const [results, setResults] = useState<ArmorItem[]>([])
@@ -31,6 +35,7 @@ export default function ArmorCatalog({ source, equipped, onEquip, onRemove }: Pr
   const [version, setVersion] = useState<string>()
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
+  const [dyePicker, setDyePicker] = useState<{ slot: EquipmentSlot; channel: 0 | 1 } | null>(null)
   const abortRef = useRef<AbortController>(null)
 
   async function loadCatalog(search: string, slot: EquipmentSlot) {
@@ -111,6 +116,7 @@ export default function ArmorCatalog({ source, equipped, onEquip, onRemove }: Pr
 
   function SlotButton({ slot }: { slot: EquipmentSlot }) {
     const item = equipped[slot]
+    const channelCount = Math.min(2, item?.dyeCount ?? 0)
     return (
       <div className={`dressing-slot ${item ? 'filled' : ''}`}>
         <button type="button" className="dressing-slot-main" onClick={() => openSlot(slot)}>
@@ -126,6 +132,26 @@ export default function ArmorCatalog({ source, equipped, onEquip, onRemove }: Pr
         </button>
         {item && (
           <button className="dressing-slot-remove" type="button" onClick={() => onRemove(slot)} aria-label={`Unequip ${item.name}`} title="Unequip">×</button>
+        )}
+        {item && channelCount > 0 && (
+          <div className="dressing-slot-dyes" aria-label={`${item.name} dyes`}>
+            {Array.from({ length: channelCount }, (_, channel) => {
+              const dye = item.dyes?.[channel]
+              return (
+                <button
+                  className={dye ? 'applied' : ''}
+                  type="button"
+                  key={channel}
+                  disabled={source.kind !== 'local'}
+                  onClick={() => setDyePicker({ slot, channel: channel as 0 | 1 })}
+                  title={source.kind === 'local' ? `Change dye channel ${channel + 1}` : 'Accurate dye preview requires Local install mode'}
+                >
+                  <i style={dye ? { backgroundColor: dyeCssColor(dye.color) } : undefined} />
+                  <span>{dye?.name ?? `Dye ${channel + 1}`}</span>
+                </button>
+              )
+            })}
+          </div>
         )}
       </div>
     )
@@ -222,6 +248,18 @@ export default function ArmorCatalog({ source, equipped, onEquip, onRemove }: Pr
             )}
           </section>
         </div>
+      )}
+      {dyePicker && equipped[dyePicker.slot] && (
+        <DyePicker
+          itemName={equipped[dyePicker.slot]!.name}
+          channel={dyePicker.channel}
+          selected={equipped[dyePicker.slot]!.dyes?.[dyePicker.channel]}
+          onSelect={(dye) => {
+            onDye(dyePicker.slot, dyePicker.channel, dye)
+            setDyePicker(null)
+          }}
+          onClose={() => setDyePicker(null)}
+        />
       )}
     </section>
   )

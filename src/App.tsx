@@ -11,7 +11,7 @@ import {
   sharedSetHash,
   type SharedSet,
 } from './lib/share'
-import type { ArmorItem, EquippedArmor } from './catalog/types'
+import type { ArmorItem, EquipmentDye, EquipmentSlot, EquippedArmor } from './catalog/types'
 import { CHARACTER_PRESETS, type CharacterRaceCode } from './asset-source/characterPlan'
 import { customizationForRaceCode, type CharacterCustomization } from './customization/types'
 
@@ -102,6 +102,19 @@ export function App() {
     })
   }
 
+  function dyeEquipment(slot: EquipmentSlot, channel: 0 | 1, dye: EquipmentDye | null) {
+    setEquipped((current) => {
+      const item = current[slot]
+      if (!item || channel >= Math.min(2, item.dyeCount)) return current
+      const dyes: [EquipmentDye | null, EquipmentDye | null] = [
+        item.dyes?.[0] ?? null,
+        item.dyes?.[1] ?? null,
+      ]
+      dyes[channel] = dye
+      return { ...current, [slot]: { ...item, dyes } }
+    })
+  }
+
   return (
     <div className="app-shell">
       <header className="site-header">
@@ -142,7 +155,11 @@ export function App() {
               <h2 id="shared-title">{sharedSet.name}</h2>
               <p>{CHARACTER_PRESETS.find(({ code }) => code === sharedSet.raceCode)?.label}</p>
             </div>
-            <ul>{sharedSet.items.map((item) => <li key={item.slot}>{item.name}</li>)}</ul>
+            <ul>{sharedSet.items.map((item) => (
+              <li key={item.slot}>
+                {item.name}{item.dyes?.some(Boolean) ? ` · ${item.dyes.map((dye) => dye?.name).filter(Boolean).join(' / ')}` : ''}
+              </li>
+            ))}</ul>
             <div className="shared-set-actions">
               <p className="shared-note">{source ? 'Apply the recipe to the connected preview.' : 'Connect your own assets below to render this set.'}</p>
               <button className="button secondary" type="button" onClick={() => applySharedSet(sharedSet)}>Apply recipe</button>
@@ -199,7 +216,7 @@ export function App() {
               </nav>
               <Suspense fallback={<div className="catalog-loading">Loading workspace…</div>}>
                 {workspaceTab === 'dressing' ? (
-                  <ArmorCatalog source={source} equipped={equipped} onEquip={equip} onRemove={unequip} />
+                  <ArmorCatalog source={source} equipped={equipped} onEquip={equip} onRemove={unequip} onDye={dyeEquipment} />
                 ) : (
                   <CustomizationPanel
                     raceCode={raceCode}

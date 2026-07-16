@@ -601,6 +601,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             imcPath: plan.asset.imcPath,
             slot: plan.slot,
             variant: plan.asset.variant,
+            stains: [plan.item.dyes?.[0]?.id ?? 0, plan.item.dyes?.[1]?.id ?? 0],
           })),
         ]
         setStatus(`Resolving ${materialRequests.length} material sets and textures…`)
@@ -826,6 +827,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               <span key={slot}>
                 {slot}: {item.name}
                 <small>{equipmentAssetPlan(item, raceCode).objectType} {item.modelSet.toString().padStart(4, '0')} v{item.modelVariant.toString().padStart(4, '0')}</small>
+                {item.dyes?.some(Boolean) && <small>{item.dyes.map((dye, index) => dye ? `Dye ${index + 1}: ${dye.name}` : null).filter(Boolean).join(' · ')}</small>}
               </span>
             ))}
             <em>Local mode resolves IMC parts, SKLB skinning, MTRL color tables, and TEX/PBR textures.</em>

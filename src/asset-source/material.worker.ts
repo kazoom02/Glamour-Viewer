@@ -13,6 +13,13 @@ import {
 import { materialCandidates } from './materialPath'
 import { materialTexturePriority, parseMtrl, type TextureRole } from './mtrl'
 import { createLocalAssetReader, type LocalAssetReader } from './sqpack'
+import {
+  applyStains,
+  DAWNTRAIL_STAIN_TEMPLATE_PATH,
+  LEGACY_STAIN_TEMPLATE_PATH,
+  parseStainingTemplate,
+  type StainingTemplate,
+} from './stm'
 import { decodeTex, type DecodedTexture } from './tex'
 import type { MaterialLoadRequest, MaterialLoadResult } from './materialTypes'
 import type { AssetSource } from './types'
@@ -27,6 +34,7 @@ interface Request {
 // retain an older, glossier material interpretation across deployments.
 const CACHE_VERSION = 2
 const memoryCache = new Map<string, DecodedTexture>()
+const stainingTemplateCache = new Map<string, Promise<StainingTemplate>>()
 
 function textureSummary(texture: DecodedTexture | undefined): string {
   if (!texture) return 'missing'
@@ -129,6 +137,21 @@ async function loadTexture(
   return texture
 }
 
+function loadStainingTemplate(
+  reader: LocalAssetReader,
+  sourceKey: string,
+  kind: StainingTemplate['kind'],
+): Promise<StainingTemplate> {
+  const path = kind === 'dawntrail' ? DAWNTRAIL_STAIN_TEMPLATE_PATH : LEGACY_STAIN_TEMPLATE_PATH
+  const key = `${sourceKey}:${kind}`
+  let pending = stainingTemplateCache.get(key)
+  if (!pending) {
+    pending = reader.read(path).then((bytes) => parseStainingTemplate(bytes, kind))
+    stainingTemplateCache.set(key, pending)
+  }
+  return pending
+}
+
 async function loadRequest(
   reader: LocalAssetReader,
   sourceKey: string,
@@ -163,6 +186,7 @@ async function loadRequest(
         `  shader: ${parsed.shaderPackage || '(empty)'}`,
         `  IMC: variant=${request.variant ?? 'n/a'} materialId=${materialId} attributeMask=${attributeMask ?? 'n/a'}`,
         `  color table: ${parsed.colorTable ? `${parsed.colorTable.kind} ${parsed.colorTable.rows.length} rows` : 'none'}`,
+        `  dyes: channel1=${request.stains?.[0] ?? 0} channel2=${request.stains?.[1] ?? 0} dyeRows=${parsed.dyeTable?.filter((row) => row.flags !== 0).length ?? 0}`,
         '  declared samplers:',
         ...parsed.textures.map((texture) => (
           `    ${texture.role} sampler=${samplerLabel(texture.samplerId)} priority=${materialTexturePriority(texture)} path=${texture.path}`
@@ -194,12 +218,26 @@ async function loadRequest(
           if (captureDiagnostics) materialDiagnostics.push(`  failed ${role}: ${textureReference.path} — ${message}`)
         }
       }
-      if (parsed.colorTable) {
+      let effectiveColorTable = parsed.colorTable
+      if (effectiveColorTable && parsed.dyeTable && request.stains?.some((stain) => stain > 0)) {
+        const stmPath = effectiveColorTable.kind === 'dawntrail' ? DAWNTRAIL_STAIN_TEMPLATE_PATH : LEGACY_STAIN_TEMPLATE_PATH
+        try {
+          const stainingTemplate = await loadStainingTemplate(reader, sourceKey, effectiveColorTable.kind)
+          const stained = applyStains(effectiveColorTable, parsed.dyeTable, stainingTemplate, request.stains)
+          effectiveColorTable = stained.table
+          if (captureDiagnostics) materialDiagnostics.push(`  STM: ${stmPath} appliedRows=${stained.appliedRows}`)
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          errors.push(`[stm] ${stmPath}: ${message}`)
+          if (captureDiagnostics) materialDiagnostics.push(`  failed STM: ${stmPath} — ${message}`)
+        }
+      }
+      if (effectiveColorTable) {
         if (usesCharacterColorTable(shader)) {
-          const baked = bakeCharacterMaterial(parsed.colorTable, decoded.textures, shader)
+          const baked = bakeCharacterMaterial(effectiveColorTable, decoded.textures, shader)
           if (baked) Object.assign(decoded.textures, baked)
         }
-        decoded.colorTableRows = parsed.colorTable.rows.length
+        decoded.colorTableRows = effectiveColorTable.rows.length
         decoded.dyeableRows = parsed.dyeTable?.filter((row) => row.flags !== 0).length ?? 0
       }
       if (shader === 'hair.shpk') {

@@ -1,5 +1,5 @@
 import { CHARACTER_PRESETS, type CharacterRaceCode } from '../asset-source/characterPlan'
-import { ARMOR_SLOTS, type ArmorItem, type EquipmentSlot, type EquippedArmor } from '../catalog/types'
+import { ARMOR_SLOTS, type ArmorItem, type EquipmentDye, type EquipmentSlot, type EquippedArmor } from '../catalog/types'
 
 export interface SharedSet {
   version: 1
@@ -28,6 +28,16 @@ function integer(value: unknown, minimum = 0): number | undefined {
   return Number.isSafeInteger(value) && (value as number) >= minimum ? value as number : undefined
 }
 
+function decodeDye(value: unknown): EquipmentDye | null | false {
+  if (value === null || value === undefined) return null
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<EquipmentDye>
+  const id = integer(candidate.id, 1)
+  const color = integer(candidate.color)
+  if (id === undefined || id > 254 || color === undefined || color > 0xffffff || typeof candidate.name !== 'string' || !candidate.name.trim()) return false
+  return { id, name: candidate.name.trim().slice(0, 100), color }
+}
+
 function decodeSharedItem(value: unknown): ArmorItem | null {
   if (!value || typeof value !== 'object') return null
   const candidate = value as Partial<ArmorItem>
@@ -41,6 +51,16 @@ function decodeSharedItem(value: unknown): ArmorItem | null {
     || integer(candidate.modelVariant) === undefined
   ) return null
 
+  const dyeCount = integer(candidate.dyeCount) ?? 0
+  let dyes: ArmorItem['dyes']
+  if (candidate.dyes !== undefined) {
+    if (!Array.isArray(candidate.dyes) || candidate.dyes.length > 2) return null
+    const first = decodeDye(candidate.dyes[0])
+    const second = decodeDye(candidate.dyes[1])
+    if (first === false || second === false) return null
+    dyes = [dyeCount > 0 ? first : null, dyeCount > 1 ? second : null]
+  }
+
   return {
     id: candidate.id!,
     name: candidate.name.trim().slice(0, 200),
@@ -50,9 +70,10 @@ function decodeSharedItem(value: unknown): ArmorItem | null {
     modelBase: integer(candidate.modelBase) ?? 0,
     modelVariant: candidate.modelVariant!,
     slot: candidate.slot as EquipmentSlot,
-    dyeCount: integer(candidate.dyeCount) ?? 0,
+    dyeCount,
     equipLevel: integer(candidate.equipLevel) ?? 0,
     jobs: typeof candidate.jobs === 'string' ? candidate.jobs.slice(0, 500) : 'All classes',
+    ...(dyes ? { dyes } : {}),
   }
 }
 

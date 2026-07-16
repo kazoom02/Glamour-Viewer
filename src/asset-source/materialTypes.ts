@@ -8,6 +8,8 @@ export interface MaterialLoadRequest {
   imcPath?: string
   slot?: EquipmentSlot
   variant?: number
+  /** In-game Stain row IDs for dye channels 1 and 2. */
+  stains?: [number, number]
 }
 
 export interface DecodedMaterial {

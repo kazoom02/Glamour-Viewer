@@ -55,6 +55,15 @@ export interface ArmorItem {
   dyeCount: number
   equipLevel: number
   jobs: string
+  /** Applied in-game stain metadata for dye channels 1 and 2. */
+  dyes?: [EquipmentDye | null, EquipmentDye | null]
+}
+
+export interface EquipmentDye {
+  id: number
+  name: string
+  /** XIVAPI Stain.Color packed as 0xRRGGBB; used only for picker swatches. */
+  color: number
 }
 
 export interface ArmorSearchPage {

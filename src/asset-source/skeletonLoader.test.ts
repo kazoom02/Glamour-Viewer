@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { HAIR_EST_PATH } from './est'
 import { isMissingLocalSkeletonError } from './skeletonLoader'
 
 describe('optional local skeleton errors', () => {
@@ -14,5 +15,12 @@ describe('optional local skeleton errors', () => {
   it('does not hide parsing and permission failures', () => {
     expect(isMissingLocalSkeletonError(new Error('Unsupported Havok skeleton layout.'), path)).toBe(false)
     expect(isMissingLocalSkeletonError(new Error('Read permission denied.'), path)).toBe(false)
+  })
+
+  it('recognizes the optional resident hair EST table when the SqPack reader cannot expose it', () => {
+    expect(isMissingLocalSkeletonError(
+      new Error(`The selected install does not contain ${HAIR_EST_PATH} in ffxiv or ex1–ex5.`),
+      HAIR_EST_PATH,
+    )).toBe(true)
   })
 })
