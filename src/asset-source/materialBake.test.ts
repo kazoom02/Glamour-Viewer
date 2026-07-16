@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   bakeCharacterMaterial,
   bakeHairMaterial,
+  bakeIrisMaterial,
   bakeTattooMaterial,
+  extractSkinColorMask,
   extractSkinLipMask,
   materialAlphaMode,
   usesCharacterColorTable,
@@ -98,6 +100,18 @@ describe('character colorset baking', () => {
     const result = bakeHairMaterial(texture([128, 128, 0, 64]), texture([0, 0, 0, 255]))!
     expect(Array.from(result.diffuse.rgba)).toEqual([184, 184, 184, 64])
     expect(Array.from(result.normal.rgba)).toEqual([128, 128, 255, 255])
+  })
+
+  it('keeps iris diffuse neutral for one runtime palette tint', () => {
+    const diffuse = texture([180, 140, 100, 255])
+    const result = bakeIrisMaterial(diffuse, texture([0, 0, 255, 255]))!
+    expect(Array.from(result.rgba)).toEqual([180, 140, 100, 255])
+    expect(result.rgba).not.toBe(diffuse.rgba)
+  })
+
+  it('extracts skin palette influence before cleaning the normal map', () => {
+    expect(Array.from(extractSkinColorMask(texture([128, 128, 73, 201]))!.rgba)).toEqual([73, 73, 73, 255])
+    expect(extractSkinColorMask({ ...texture([128, 128, 73, 201]), format: TEX_FORMAT.BC5 })).toBeUndefined()
   })
 
   it('builds face paint color and opacity from a CharacterTattoo normal texture', () => {

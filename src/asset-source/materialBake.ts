@@ -100,29 +100,28 @@ export function bakeHairMaterial(
   return { diffuse: output(normal.width, normal.height, rgba), normal: cleanedNormal(normal) }
 }
 
-/** Applies the iris tint encoded by the mask's blue channel. */
+/** Keeps the iris source neutral so the interactive renderer can apply its selected palette color once. */
 export function bakeIrisMaterial(
   diffuse: DecodedTexture | undefined,
-  mask: DecodedTexture | undefined,
+  _mask: DecodedTexture | undefined,
 ): DecodedTexture | undefined {
-  if (!diffuse || !mask) return undefined
-  const rgba = new Uint8Array(diffuse.rgba)
-  const eye = [21 / 255, 176 / 255, 172 / 255]
-  for (let y = 0; y < diffuse.height; y += 1) {
-    for (let x = 0; x < diffuse.width; x += 1) {
-      const target = (y * diffuse.width + x) * 4
-      const tint = sample(mask, x, y, diffuse.width, diffuse.height)[2] / 255
-      for (let channel = 0; channel < 3; channel += 1) {
-        const multiplier = 1 + (eye[channel]! - 1) * tint
-        rgba[target + channel] = Math.round(rgba[target + channel]! * multiplier)
-      }
-    }
-  }
-  return { ...diffuse, rgba }
+  return diffuse ? { ...diffuse, rgba: new Uint8Array(diffuse.rgba) } : undefined
 }
 
 export function bakeSkinNormal(normal: DecodedTexture | undefined): DecodedTexture | undefined {
   return normal ? cleanedNormal(normal) : undefined
+}
+
+/** Skin shaders use normal-map blue as the per-pixel palette-tint influence. */
+export function extractSkinColorMask(normal: DecodedTexture | undefined): DecodedTexture | undefined {
+  if (!normal || normal.format === TEX_FORMAT.BC5) return undefined
+  const rgba = new Uint8Array(normal.rgba.length)
+  for (let offset = 0; offset < rgba.length; offset += 4) {
+    const influence = normal.rgba[offset + 2]!
+    rgba[offset] = rgba[offset + 1] = rgba[offset + 2] = influence
+    rgba[offset + 3] = 255
+  }
+  return output(normal.width, normal.height, rgba)
 }
 
 /** Skin FACE mode uses the authored normal alpha channel as its lip mask. */

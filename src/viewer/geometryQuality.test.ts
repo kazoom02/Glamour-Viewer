@@ -35,4 +35,18 @@ describe('curvature-aware geometry refinement', () => {
     }
     expect(subdivideCurvedMesh(mesh)).toBe(mesh)
   })
+
+  it('uses 32-bit indices instead of dropping refinement for dense meshes', () => {
+    const triangleCount = 10_923
+    const mesh: DecodedModelMesh = {
+      positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+      normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
+      indices: new Uint16Array(triangleCount * 3).map((_, index) => index % 3),
+      materialIndex: 0,
+    }
+
+    const refined = subdivideCurvedMesh(mesh)
+    expect(refined.indices).toBeInstanceOf(Uint32Array)
+    expect(refined.indices).toHaveLength(triangleCount * 12)
+  })
 })

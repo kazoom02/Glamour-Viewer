@@ -9,6 +9,7 @@ import {
   bakeIrisMaterial,
   bakeSkinNormal,
   bakeTattooMaterial,
+  extractSkinColorMask,
   extractSkinLipMask,
   materialAlphaMode,
   usesCharacterColorTable,
@@ -325,8 +326,10 @@ async function loadRequest(
         const diffuse = bakeIrisMaterial(decoded.textures.diffuse, decoded.textures.mask)
         if (diffuse) decoded.textures.diffuse = diffuse
       } else if (shader === 'skin.shpk') {
+        const skinColorMask = extractSkinColorMask(decoded.textures.normal)
         const lipMask = extractSkinLipMask(decoded.textures.normal)
         const normal = bakeSkinNormal(decoded.textures.normal)
+        if (skinColorMask) decoded.textures.skinColorMask = skinColorMask
         if (lipMask) decoded.textures.lipMask = lipMask
         if (normal) decoded.textures.normal = normal
       } else if (shader === 'charactertattoo.shpk') {
@@ -344,6 +347,7 @@ async function loadRequest(
           `  final metalness: ${textureSummary(decoded.textures.metalness)}`,
           `  final specular color: ${textureSummary(decoded.textures.specularColor)}`,
           `  final specular intensity: ${textureSummary(decoded.textures.specularIntensity)}`,
+          `  final skin color mask: ${textureSummary(decoded.textures.skinColorMask)}`,
           `  final lip mask: ${textureSummary(decoded.textures.lipMask)}`,
         )
         diagnostics.push(materialDiagnostics.join('\n'))

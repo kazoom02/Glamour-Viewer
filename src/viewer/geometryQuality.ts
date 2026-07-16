@@ -102,14 +102,19 @@ export function subdivideCurvedMesh(mesh: DecodedModelMesh, strength = 0.72): De
   if (!mesh.normals || mesh.indices.length < 3 || mesh.indices.length % 3 !== 0) return mesh
   const triangleCount = mesh.indices.length / 3
   const vertexCount = triangleCount * BARYCENTRIC_VERTICES.length
-  if (vertexCount > 65_535) return mesh
+  // WebGL2 supports 32-bit element indices. Dense hair, tails, and ears can
+  // cross the old Uint16 ceiling after refinement and should not silently fall
+  // back to their visibly faceted source geometry.
+  if (vertexCount > 1_000_000) return mesh
   const positions = new Float32Array(vertexCount * 3)
   const normals = new Float32Array(vertexCount * 3)
   const uvs = mesh.uvs ? new Float32Array(vertexCount * 2) : undefined
   const uvs2 = mesh.uvs2 ? new Float32Array(vertexCount * 2) : undefined
   const skinIndices = mesh.skinIndices ? new Uint16Array(vertexCount * 4) : undefined
   const skinWeights = mesh.skinWeights ? new Float32Array(vertexCount * 4) : undefined
-  const indices = new Uint16Array(triangleCount * SUBDIVIDED_INDICES.length)
+  const indices = vertexCount > 65_535
+    ? new Uint32Array(triangleCount * SUBDIVIDED_INDICES.length)
+    : new Uint16Array(triangleCount * SUBDIVIDED_INDICES.length)
 
   for (let triangle = 0; triangle < triangleCount; triangle += 1) {
     const sourceVertices = [

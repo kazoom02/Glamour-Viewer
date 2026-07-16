@@ -13,7 +13,7 @@ export interface DecodedModelMesh {
   skinIndices?: Uint16Array
   skinWeights?: Float32Array
   bonePalette?: string[]
-  indices: Uint16Array
+  indices: Uint16Array | Uint32Array
   materialIndex: number
   attributes?: string[]
 }

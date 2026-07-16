@@ -258,18 +258,27 @@ function colorNumber(value: string, fallback = 0xffffff): number {
   return /^#[0-9a-f]{6}$/i.test(value) ? Number.parseInt(value.slice(1), 16) : fallback
 }
 
-function enableFaceCustomization(
+interface MaterialCustomizationOptions {
+  paletteMask?: DecodedMaterial['textures']['skinColorMask']
+  paletteColor?: string
+  lipMask?: DecodedMaterial['textures']['lipMask']
+  lipColor?: string
+  facePaintTexture?: MaterialLoadResult['facePaintTexture']
+  facePaintColor?: string
+}
+
+function enableMaterialCustomization(
   material: THREE.MeshPhysicalMaterial,
-  lipMask: DecodedMaterial['textures']['lipMask'],
-  lipColor: string,
-  facePaintTexture: MaterialLoadResult['facePaintTexture'],
-  facePaintColor: string,
+  options: MaterialCustomizationOptions,
   anisotropy: number,
 ): void {
-  const lipMap = lipMask ? textureFromDecoded(lipMask, false, anisotropy) : undefined
-  const facePaintMap = facePaintTexture ? textureFromDecoded(facePaintTexture.texture, false, anisotropy) : undefined
-  const lipTint = new THREE.Color(colorNumber(lipColor))
-  const facePaintTint = new THREE.Color(colorNumber(facePaintColor))
+  const paletteMap = options.paletteMask ? textureFromDecoded(options.paletteMask, false, anisotropy) : undefined
+  const lipMap = options.lipMask ? textureFromDecoded(options.lipMask, false, anisotropy) : undefined
+  const facePaintMap = options.facePaintTexture ? textureFromDecoded(options.facePaintTexture.texture, false, anisotropy) : undefined
+  const paletteTint = new THREE.Color(colorNumber(options.paletteColor ?? '#ffffff'))
+  const lipTint = new THREE.Color(colorNumber(options.lipColor ?? '#ffffff'))
+  const facePaintTint = new THREE.Color(colorNumber(options.facePaintColor ?? '#ffffff'))
+  if (paletteMap) material.userData.paletteMaskMap = paletteMap
   if (lipMap) material.userData.lipMaskMap = lipMap
   if (facePaintMap) material.userData.facePaintMap = facePaintMap
   material.onBeforeCompile = (shader) => {
@@ -277,6 +286,14 @@ function enableFaceCustomization(
     const vertexAssignments: string[] = []
     const fragmentDeclarations: string[] = []
     const fragmentEffects: string[] = []
+    if (paletteMap) {
+      shader.uniforms.paletteMaskMap = { value: paletteMap }
+      shader.uniforms.paletteTint = { value: paletteTint }
+      vertexDeclarations.push('varying vec2 vPaletteUv;')
+      vertexAssignments.push('vPaletteUv = uv;')
+      fragmentDeclarations.push('uniform sampler2D paletteMaskMap; uniform vec3 paletteTint; varying vec2 vPaletteUv;')
+      fragmentEffects.push('float paletteCoverage = texture2D(paletteMaskMap, vPaletteUv).r; diffuseColor.rgb *= mix(vec3(1.0), paletteTint, clamp(paletteCoverage, 0.0, 1.0));')
+    }
     if (lipMap) {
       shader.uniforms.lipMaskMap = { value: lipMap }
       shader.uniforms.lipColor = { value: lipTint }
@@ -307,7 +324,7 @@ function enableFaceCustomization(
         `#include <map_fragment>\n${fragmentEffects.join('\n')}`,
       )
   }
-  material.customProgramCacheKey = () => `ffxiv-face-customization-v2-${lipMap ? 'lip' : ''}-${facePaintMap ? 'paint' : ''}`
+  material.customProgramCacheKey = () => `ffxiv-material-customization-v3-${paletteMap ? 'palette' : ''}-${lipMap ? 'lip' : ''}-${facePaintMap ? 'paint' : ''}`
   material.needsUpdate = true
 }
 
@@ -397,23 +414,35 @@ function addDecodedModel(
       && !isFaceMaterial
       ? muscleNormalStrength(customization.muscleTone)
       : 1
+    const paletteMask = customization
+      ? isIris
+        ? mask
+        : shaderPackage === 'skin.shpk'
+          ? decodedMaterial?.textures.skinColorMask
+          : undefined
+      : undefined
+    const paletteColor = customization
+      ? isIris ? customization.eyeColor : customization.skinColor
+      : undefined
+    // Iris masks encode palette influence, not generic character PBR channels.
+    const usesGenericMaskPbr = !isIris
     const aoMap = ao
       ? textureFromDecoded(ao, false, anisotropy)
-      : mask
+      : mask && usesGenericMaskPbr
         ? textureFromChannel(mask, 2, 'rgb', anisotropy)
         : null
     const roughnessMap = roughness
       ? textureFromDecoded(roughness, false, anisotropy)
-      : mask
+      : mask && usesGenericMaskPbr
         ? textureFromDecoded(mask, false, anisotropy)
         : null
     const specularIntensityMap = specularIntensity
       ? textureFromDecoded(specularIntensity, false, anisotropy)
-      : mask
+      : mask && usesGenericMaskPbr
         ? textureFromChannel(mask, 0, 'alpha', anisotropy)
         : null
     const material = new THREE.MeshPhysicalMaterial({
-      color: diffuse ? materialTint : meshColor,
+      color: diffuse ? (paletteMask ? 0xffffff : materialTint) : meshColor,
       map: diffuse ? textureFromDecoded(diffuse, true, anisotropy) : null,
       normalMap: normal ? textureFromDecoded(normal, false, anisotropy) : null,
       aoMap,
@@ -447,15 +476,18 @@ function addDecodedModel(
     const activeFacePaint = facePaintTexture && customization?.facePaint && renderPart.uvs2
       ? facePaintTexture
       : undefined
-    if (customization && /_fac_[a-z]\.mtrl$/.test(materialPath) && (decodedMaterial?.textures.lipMask || activeFacePaint)) {
-      enableFaceCustomization(
-        material,
-        decodedMaterial?.textures.lipMask,
-        customization.lipColor,
-        activeFacePaint,
-        customization.facePaintColor,
-        anisotropy,
-      )
+    const lipMask = customization && /_fac_[a-z]\.mtrl$/.test(materialPath)
+      ? decodedMaterial?.textures.lipMask
+      : undefined
+    if (customization && (paletteMask || lipMask || activeFacePaint)) {
+      enableMaterialCustomization(material, {
+        paletteMask,
+        paletteColor,
+        lipMask,
+        lipColor: customization.lipColor,
+        facePaintTexture: activeFacePaint,
+        facePaintColor: customization.facePaintColor,
+      }, anisotropy)
     }
     const hasEmissivePixels = emissive && hasVisibleRgb(emissive)
     if (materialAnimationId > 0 && hasEmissivePixels) {
@@ -1016,7 +1048,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               rig,
               maxAnisotropy,
               customization,
-              plan.part === 'torso' || plan.part === 'face',
+              true,
               0,
               animatedMaterials,
               plan.part === 'face' ? materialResult?.facePaintTexture : undefined,
@@ -1030,8 +1062,8 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             failures.push(`${plan.part}: ${attempted || 'model not found'}`)
           }
         }
-        if (characterModels.some(({ plan }) => plan.part === 'torso' || plan.part === 'face')) {
-          diagnostics.push('character render refinement: torso+face curved subdivision level=1 triangles=4x corners=preserved skinWeights=interpolated')
+        if (characterModels.length) {
+          diagnostics.push('character render refinement: all organic parts curved subdivision level=1 triangles=4x corners=preserved skinWeights=interpolated uint32=dense-mesh-enabled')
         }
         for (const plan of equipmentPlans) {
           const result = plan.candidates.map((path) => byPath.get(path)).find((candidate) => candidate?.model)
@@ -1138,17 +1170,17 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             action.clampWhenFinished = false
             action.setEffectiveWeight(1)
             action.setEffectiveTimeScale(1)
-            // Apply frame zero immediately so the preview starts in the authored
-            // standing pose instead of snapping out of the bind-pose T stance.
+            // Apply frame zero immediately and keep the valid standing loop
+            // running; previously the action was paused as soon as it loaded,
+            // which made a successfully decoded animation look broken.
             action.play()
             activeIdleMixer.update(0)
-            action.paused = true
             diagnostics.push(bustRigDiagnostic(rig, 'after idle frame 0 (CPU-baked geometry)', bustScale))
             idleMixer.current = activeIdleMixer
             idleAction.current = action
             idleReady = true
             setIdleLabel(decodedAnimation.name || 'Idle')
-            setIdleState('ready')
+            setIdleState('playing')
             diagnostics.push(
               `idle animation: ${decodedAnimation.path} name=${decodedAnimation.name} blend=${decodedAnimation.blendHint} duration=${decodedAnimation.duration.toFixed(3)}s frames=${decodedAnimation.times.length} tracks=${decodedAnimation.tracks.length} rootTranslation=stabilized`,
             )
@@ -1279,6 +1311,8 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             new Set([item.specularColorMap, item.specularIntensityMap].filter(Boolean)).forEach((texture) => texture?.dispose())
             const facePaintMap = item.userData.facePaintMap
             if (facePaintMap instanceof THREE.Texture) facePaintMap.dispose()
+            const paletteMaskMap = item.userData.paletteMaskMap
+            if (paletteMaskMap instanceof THREE.Texture) paletteMaskMap.dispose()
             const lipMaskMap = item.userData.lipMaskMap
             if (lipMaskMap instanceof THREE.Texture) lipMaskMap.dispose()
           }

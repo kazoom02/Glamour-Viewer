@@ -34,6 +34,8 @@ export interface DecodedMaterial {
     emissive?: DecodedTexture
     specularColor?: DecodedTexture
     specularIntensity?: DecodedTexture
+    /** Skin shader tint influence copied from the authored normal blue channel. */
+    skinColorMask?: DecodedTexture
     /** Skin FACE mode: alpha copied from the authored normal map. */
     lipMask?: DecodedTexture
   }
