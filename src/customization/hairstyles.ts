@@ -35,8 +35,8 @@ const CUSTOMIZE_BLOCK_SIZE = 130
 
 export function charaMakeTypeRow(tribeId: number, gender: CharacterGender): number {
   const tribe = Math.min(16, Math.max(1, Math.trunc(tribeId)))
-  // CharaMakeType stores female first (Gender 0), then male (Gender 1).
-  return (tribe - 1) * 2 + (gender === 'male' ? 1 : 0)
+  // CharaMakeType stores male first (Gender 0), then female (Gender 1).
+  return (tribe - 1) * 2 + (gender === 'female' ? 1 : 0)
 }
 
 export function hairstyleMenuUrl(tribeId: number, gender: CharacterGender): URL {

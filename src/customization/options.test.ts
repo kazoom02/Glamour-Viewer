@@ -4,7 +4,7 @@ import { buildCustomizationCatalog, customizationMenuUrl, customizationRowsUrl }
 describe('visual customization catalog', () => {
   it('requests the race and gender CharaMake menu fields', () => {
     const url = customizationMenuUrl(7, 'female')
-    expect(url.pathname).toContain('/sheet/CharaMakeType/12')
+    expect(url.pathname).toContain('/sheet/CharaMakeType/13')
     expect(url.searchParams.get('fields')).toContain('SubMenuGraphic')
   })
 
