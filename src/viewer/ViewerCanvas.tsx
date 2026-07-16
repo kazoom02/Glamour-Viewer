@@ -1243,7 +1243,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       animatedMaterials.forEach(({ material, baseEmissiveIntensity, phase }) => {
         material.emissiveIntensity = baseEmissiveIntensity * (0.88 + Math.sin(elapsed * 2.4 + phase) * 0.12)
       })
-      avfxRuntimes.forEach((runtime) => runtime.update(delta))
+      avfxRuntimes.forEach((runtime) => runtime.update(delta, camera))
       controls.update()
       renderer.render(scene, camera)
       frame = requestAnimationFrame(render)

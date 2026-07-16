@@ -39,13 +39,27 @@ interface RuntimeParticle {
   inheritedScale: THREE.Vector3
   seed: number
   parentDefinition: number
+  trail?: TrailState
+}
+
+// A type-5 polyline particle is an authored ribbon that trails the moving spawn
+// point (an in-game "beam"/"streak"). We keep the recent local positions and
+// rebuild a camera-facing triangle strip through them each frame rather than
+// drawing a flat, static quad.
+interface TrailState {
+  geometry: THREE.BufferGeometry
+  position: THREE.BufferAttribute
+  uv: THREE.BufferAttribute
+  color: THREE.BufferAttribute
+  points: THREE.Vector3[]
+  capacity: number
 }
 
 export interface AvfxRuntime {
   readonly renderedParticles: number
   readonly decodedEmitters: number
   readonly decodedModels: number
-  update(deltaSeconds: number): void
+  update(deltaSeconds: number, camera?: THREE.Camera): void
   /** Local-space bounds of the live particle spawn points (group frame). */
   particleBounds(): THREE.Box3
   /** Local-space bounds of the live particle geometry, including mesh extent. */
@@ -54,6 +68,88 @@ export interface AvfxRuntime {
 }
 
 const MAX_PARTICLES = 768
+const TRAIL_POINTS = 24
+
+function createRibbonGeometry(capacity: number): TrailState {
+  const vertices = capacity * 2
+  const geometry = new THREE.BufferGeometry()
+  const position = new THREE.BufferAttribute(new Float32Array(vertices * 3), 3).setUsage(THREE.DynamicDrawUsage)
+  const uv = new THREE.BufferAttribute(new Float32Array(vertices * 2), 2).setUsage(THREE.DynamicDrawUsage)
+  const color = new THREE.BufferAttribute(new Float32Array(vertices * 4), 4).setUsage(THREE.DynamicDrawUsage)
+  const indices = new Uint16Array((capacity - 1) * 6)
+  for (let segment = 0; segment < capacity - 1; segment += 1) {
+    const corner = segment * 2
+    const base = segment * 6
+    indices[base] = corner
+    indices[base + 1] = corner + 1
+    indices[base + 2] = corner + 2
+    indices[base + 3] = corner + 1
+    indices[base + 4] = corner + 3
+    indices[base + 5] = corner + 2
+  }
+  geometry.setAttribute('position', position)
+  geometry.setAttribute('uv', uv)
+  geometry.setAttribute('avfxUv1', uv)
+  geometry.setAttribute('avfxUv2', uv)
+  geometry.setAttribute('avfxUv3', uv)
+  geometry.setAttribute('avfxColor', color)
+  geometry.setIndex(new THREE.BufferAttribute(indices, 1))
+  geometry.setDrawRange(0, 0)
+  return { geometry, position, uv, color, points: [], capacity }
+}
+
+const TRAIL_TANGENT = new THREE.Vector3()
+const TRAIL_TO_CAMERA = new THREE.Vector3()
+const TRAIL_SIDE = new THREE.Vector3()
+const TRAIL_VIEW_FALLBACK = new THREE.Vector3(0, 0, 1)
+
+/** Rebuilds a ribbon strip through the trail points, widened across the view. */
+function rebuildTrail(trail: TrailState, width: number, localCamera: THREE.Vector3 | undefined): void {
+  const points = trail.points
+  const count = points.length
+  if (count < 2) {
+    trail.geometry.setDrawRange(0, 0)
+    return
+  }
+  const position = trail.position.array as Float32Array
+  const uv = trail.uv.array as Float32Array
+  const color = trail.color.array as Float32Array
+  const half = Math.max(width, 0.0005) / 2
+  for (let index = 0; index < count; index += 1) {
+    const point = points[index]!
+    TRAIL_TANGENT.copy(points[Math.min(count - 1, index + 1)]!).sub(points[Math.max(0, index - 1)]!)
+    if (TRAIL_TANGENT.lengthSq() < 1e-12) TRAIL_TANGENT.set(0, 1, 0)
+    TRAIL_TANGENT.normalize()
+    if (localCamera) TRAIL_TO_CAMERA.copy(localCamera).sub(point)
+    else TRAIL_TO_CAMERA.copy(TRAIL_VIEW_FALLBACK)
+    TRAIL_SIDE.crossVectors(TRAIL_TANGENT, TRAIL_TO_CAMERA)
+    if (TRAIL_SIDE.lengthSq() < 1e-12) TRAIL_SIDE.crossVectors(TRAIL_TANGENT, TRAIL_VIEW_FALLBACK)
+    if (TRAIL_SIDE.lengthSq() < 1e-12) TRAIL_SIDE.set(1, 0, 0)
+    TRAIL_SIDE.normalize().multiplyScalar(half)
+    const along = index / (count - 1)
+    const left = index * 2
+    const right = left + 1
+    position[left * 3] = point.x + TRAIL_SIDE.x
+    position[left * 3 + 1] = point.y + TRAIL_SIDE.y
+    position[left * 3 + 2] = point.z + TRAIL_SIDE.z
+    position[right * 3] = point.x - TRAIL_SIDE.x
+    position[right * 3 + 1] = point.y - TRAIL_SIDE.y
+    position[right * 3 + 2] = point.z - TRAIL_SIDE.z
+    uv[left * 2] = along
+    uv[left * 2 + 1] = 0
+    uv[right * 2] = along
+    uv[right * 2 + 1] = 1
+    color[left * 4] = color[left * 4 + 1] = color[left * 4 + 2] = 1
+    color[right * 4] = color[right * 4 + 1] = color[right * 4 + 2] = 1
+    // Fade the older (tail) end so the beam tapers off instead of ending flat.
+    color[left * 4 + 3] = along
+    color[right * 4 + 3] = along
+  }
+  trail.position.needsUpdate = true
+  trail.uv.needsUpdate = true
+  trail.color.needsUpdate = true
+  trail.geometry.setDrawRange(0, (count - 1) * 6)
+}
 
 function seeded(seed: number): number {
   let value = seed | 0
@@ -478,20 +574,37 @@ export function createAvfxRuntime(
     const modelIndex = definition.modelIndices[Math.floor(seeded(instanceSeed + 7) * Math.max(definition.modelIndices.length, 1))]
     const authoredGeometry = modelIndex === undefined ? undefined : geometryCache[modelIndex]
     const { material, layers } = materialFor(definition)
-    let proceduralGeometry = proceduralGeometryCache.get(rule.target)
-    if (!authoredGeometry && !proceduralGeometry) {
-      proceduralGeometry = ensureShaderAttributes(definition.type === 12 ? discGeometry(definition) : spriteGeometry())
-      proceduralGeometryCache.set(rule.target, proceduralGeometry)
+    // Type 5 without an authored mesh is a polyline (beam/streak). Give it its
+    // own dynamic ribbon geometry, rebuilt from the spawn point's motion each
+    // frame, instead of the flat quad that made it read as a white slab.
+    const isPolyline = definition.type === 5 && !authoredGeometry
+    let trail: TrailState | undefined
+    let geometry: THREE.BufferGeometry
+    if (isPolyline) {
+      trail = createRibbonGeometry(TRAIL_POINTS)
+      geometry = trail.geometry
+      material.uniforms.uBillboard!.value = 0
+    } else {
+      let proceduralGeometry = proceduralGeometryCache.get(rule.target)
+      if (!authoredGeometry && !proceduralGeometry) {
+        proceduralGeometry = ensureShaderAttributes(definition.type === 12 ? discGeometry(definition) : spriteGeometry())
+        proceduralGeometryCache.set(rule.target, proceduralGeometry)
+      }
+      geometry = authoredGeometry ?? proceduralGeometry!
     }
-    const object = new THREE.Mesh(authoredGeometry ?? proceduralGeometry!, material)
+    const object = new THREE.Mesh(geometry, material)
     object.name = `avfx-particle-${rule.target}`
     object.renderOrder = 20 + definition.drawPriority
+    // The ribbon already lives in group space; its own bounds churn each frame,
+    // so skip frustum culling rather than recompute a bounding sphere per frame.
+    if (isPolyline) object.frustumCulled = false
     const local = parent.definition >= 0 && avfx.emitters[parent.definition]?.type === 5
       ? sampleEmitterPoint(avfx.emitters[parent.definition]!, instanceSeed)
       : new THREE.Vector3()
     local.multiply(parent.scale).applyEuler(parent.rotation)
     const position = rule.positionInfluence ? parent.position.clone().add(local) : local
-    object.position.copy(position)
+    if (trail) trail.points.push(position.clone())
+    else object.position.copy(position)
     group.add(object)
     const randomLife = definition.lifeRandom ? randomSigned(instanceSeed + 67) * definition.lifeRandom : 0
     particles.push({
@@ -507,6 +620,7 @@ export function createAvfxRuntime(
       inheritedScale: rule.scaleInfluence ? parent.scale.clone() : new THREE.Vector3(1, 1, 1),
       seed: instanceSeed,
       parentDefinition: parent.definition,
+      ...(trail ? { trail } : {}),
     })
     changeActiveChildren(parent.definition, 1)
     return true
@@ -532,6 +646,7 @@ export function createAvfxRuntime(
     for (const particle of particles.splice(0)) {
       group.remove(particle.object)
       particle.material.dispose()
+      particle.trail?.geometry.dispose()
     }
     emitters.length = 0
     activeChildrenByDefinition.fill(0)
@@ -571,8 +686,15 @@ export function createAvfxRuntime(
       }
       return box
     },
-    update(deltaSeconds: number) {
+    update(deltaSeconds: number, camera?: THREE.Camera) {
       const deltaFrames = Math.min(deltaSeconds, 0.1) * avfx.framesPerSecond
+      // Ribbon particles widen across the view, so resolve the camera position
+      // in this graph's local frame once per tick (identity fallback in warmup).
+      let localCamera: THREE.Vector3 | undefined
+      if (camera) {
+        group.updateWorldMatrix(true, false)
+        localCamera = group.worldToLocal(camera.getWorldPosition(new THREE.Vector3()))
+      }
       const previousGlobalFrame = globalFrame
       globalFrame += deltaFrames
       if (loopEnd > 0 && globalFrame >= loopEnd) {
@@ -627,6 +749,7 @@ export function createAvfxRuntime(
         if (particle.age >= particle.life) {
           group.remove(particle.object)
           particle.material.dispose()
+          particle.trail?.geometry.dispose()
           changeActiveChildren(particle.parentDefinition, -1)
           particles.splice(index, 1)
           continue
@@ -639,21 +762,33 @@ export function createAvfxRuntime(
         particle.velocity.y -= gravity * deltaFrames / avfx.framesPerSecond
         particle.velocity.multiplyScalar(Math.min(1, resistance ** (deltaFrames / avfx.framesPerSecond)))
         const authoredPosition = vectorAt(particle.definition.position, frame, 0, particle.seed)
-        particle.object.position.copy(particle.position).add(authoredPosition).addScaledVector(particle.velocity, particle.age / avfx.framesPerSecond)
-        const rotation = vectorAt(particle.definition.rotation, frame, 0, particle.seed)
-        const rotationVelocity = vectorAt(particle.definition.rotationVelocity, frame, 0, particle.seed + 83)
-        particle.object.rotation.set(
-          particle.rotation.x + rotation.x + rotationVelocity.x * frame,
-          particle.rotation.y + rotation.y + rotationVelocity.y * frame,
-          particle.rotation.z + rotation.z + rotationVelocity.z * frame,
-        )
+        const head = particle.position.clone().add(authoredPosition).addScaledVector(particle.velocity, particle.age / avfx.framesPerSecond)
         const authoredScale = vectorAt(particle.definition.scale, frame, 1, particle.seed)
-        // Disc and LightModel particles author their visible radius in Scale X.
-        // Their Y/Z curve channels control engine-specific light/disc behavior;
-        // applying them as mesh axes turns values such as Omega's Z=10 into
-        // twenty-metre wedges instead of a compact circular light model.
-        if (particle.definition.type === 12 || particle.definition.type === 13) authoredScale.setScalar(authoredScale.x)
-        particle.object.scale.copy(authoredScale).multiply(particle.inheritedScale)
+        if (particle.trail) {
+          // Advance the ribbon: append the new head, drop the oldest, rebuild the
+          // strip. Length comes from the motion history; width is the thin
+          // authored scale axis so long streaks stay slender instead of fanning.
+          particle.trail.points.push(head)
+          if (particle.trail.points.length > particle.trail.capacity) particle.trail.points.shift()
+          const width = Math.min(Math.abs(authoredScale.x), Math.abs(authoredScale.y))
+            * Math.min(particle.inheritedScale.x, particle.inheritedScale.y)
+          rebuildTrail(particle.trail, width, localCamera)
+        } else {
+          particle.object.position.copy(head)
+          const rotation = vectorAt(particle.definition.rotation, frame, 0, particle.seed)
+          const rotationVelocity = vectorAt(particle.definition.rotationVelocity, frame, 0, particle.seed + 83)
+          particle.object.rotation.set(
+            particle.rotation.x + rotation.x + rotationVelocity.x * frame,
+            particle.rotation.y + rotation.y + rotationVelocity.y * frame,
+            particle.rotation.z + rotation.z + rotationVelocity.z * frame,
+          )
+          // Disc and LightModel particles author their visible radius in Scale X.
+          // Their Y/Z curve channels control engine-specific light/disc behavior;
+          // applying them as mesh axes turns values such as Omega's Z=10 into
+          // twenty-metre wedges instead of a compact circular light model.
+          if (particle.definition.type === 12 || particle.definition.type === 13) authoredScale.setScalar(authoredScale.x)
+          particle.object.scale.copy(authoredScale).multiply(particle.inheritedScale)
+        }
         const color = colorAt(particle.definition.color, frame)
         const brightness = evaluateAvfxCurve(particle.definition.color.brightness, frame, 1)
         ;(particle.material.uniforms.uTint!.value as THREE.Color).copy(color)
