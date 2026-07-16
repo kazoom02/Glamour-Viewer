@@ -636,14 +636,32 @@ function fitCamera(camera: THREE.PerspectiveCamera, controls: OrbitControls, box
   const horizontalDistance = (Math.max(size.x, 0.4) / 2) / Math.tan(horizontalFov / 2)
   const distance = (Math.max(verticalDistance, horizontalDistance) + size.z / 2) * padding
   const viewDirection = new THREE.Vector3(0.1, 0.025, 1).normalize()
-  controls.target.copy(center)
-  camera.position.copy(center).addScaledVector(viewDirection, distance)
+  // Anchor the framing horizontally to the character's standing axis (world
+  // origin) rather than the bounding-box center. Asymmetric parts — long hair
+  // swept over one shoulder, an idle pose with one arm raised, a large weapon —
+  // pull the box center sideways and would otherwise slide the whole figure off
+  // to one edge of the panel. FFXIV bodies are authored symmetric about x=0 at
+  // the origin, so this keeps the wearer centered no matter what is equipped.
+  const framingCenter = new THREE.Vector3(0, center.y, 0)
+  controls.target.copy(framingCenter)
+  camera.position.copy(framingCenter).addScaledVector(viewDirection, distance)
   camera.near = Math.max(distance / 100, 0.01)
   camera.far = Math.max(distance + size.length() * 12, 50)
   camera.updateProjectionMatrix()
   controls.minDistance = Math.max(size.y * 0.12, 0.2)
   controls.maxDistance = Math.max(distance * 4, 12)
   controls.update()
+}
+
+function framingDiagnostic(box: THREE.Box3, camera: THREE.PerspectiveCamera, controls: OrbitControls, host: HTMLElement): string {
+  const center = box.getCenter(new THREE.Vector3())
+  const size = box.getSize(new THREE.Vector3())
+  const canvas = host.firstElementChild as HTMLCanvasElement | null
+  return [
+    `camera framing: boxCenter=${formatVector(center.toArray(), 3)} boxSize=${formatVector(size.toArray(), 3)}`,
+    `  target=${formatVector(controls.target.toArray(), 3)} cameraPos=${formatVector(camera.position.toArray(), 3)} aspect=${camera.aspect.toFixed(3)}`,
+    `  panelCss=${host.clientWidth}x${host.clientHeight} canvasCss=${canvas?.clientWidth ?? '?'}x${canvas?.clientHeight ?? '?'}`,
+  ].join('\n')
 }
 
 async function loadRemoteModel(source: Extract<AssetSource, { kind: 'remote' }>, path: string): Promise<THREE.Group> {
@@ -1134,10 +1152,12 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       if (characterParts || equippedItems) {
         const refit = () => {
           const bodyBox = characterFramingBox(characterGroup)
-          fitCamera(camera, controls, bodyBox.isEmpty() ? new THREE.Box3().setFromObject(characterGroup) : bodyBox)
+          const framed = bodyBox.isEmpty() ? new THREE.Box3().setFromObject(characterGroup) : bodyBox
+          fitCamera(camera, controls, framed)
+          return framed
         }
         resetView.current = refit
-        refit()
+        diagnostics.push(framingDiagnostic(refit(), camera, controls, host))
       }
       setStatus(characterParts
         ? `${raceCode} ${rig ? 'skinned' : 'bind-pose'} character · ${equippedItems}/${selected.length} equipped${source.kind === 'local' ? ` · idle ${idleReady ? 'ready' : 'unavailable'}` : ''} · drag to rotate`
