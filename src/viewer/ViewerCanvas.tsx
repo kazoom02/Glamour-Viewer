@@ -34,6 +34,7 @@ import {
 } from '../catalog/types'
 import type { CharacterCustomization } from '../customization/types'
 import { animationClipFromDecoded } from './idleAnimation'
+import { bustWeightSummary, isBustBoneName, muscleNormalStrength } from './bodyCustomization'
 
 interface ViewerCanvasProps {
   source: AssetSource
@@ -67,8 +68,6 @@ const PART_COLORS: Record<CharacterPart, number> = {
   tail: 0x4b3837,
   ears: 0x3d3031,
 }
-
-const BUST_BONES = new Set(['j_mune_l', 'j_mune_r'])
 
 function addFallbackMannequin(scene: THREE.Scene): THREE.Group {
   const group = new THREE.Group()
@@ -160,10 +159,23 @@ function addCharacterRig(target: THREE.Group, decoded: DecodedSkeleton, bustScal
   // Keep the inverse bind matrices from the authored neutral pose, then apply
   // the client RSP scale so j_mune-weighted vertices actually deform.
   bones.forEach((bone) => {
-    if (BUST_BONES.has(bone.name.toLowerCase())) bone.scale.multiply(new THREE.Vector3(...bustScale))
+    if (isBustBoneName(bone.name)) bone.scale.multiply(new THREE.Vector3(...bustScale))
   })
   target.updateMatrixWorld(true)
   return { skeleton, boneIndex: new Map(bones.map((bone, index) => [bone.name, index])) }
+}
+
+function bustRigDiagnostic(rig: CharacterRig | undefined, stage: string, requested: BustScale): string {
+  const bones = rig?.skeleton.bones.filter((bone) => isBustBoneName(bone.name)) ?? []
+  const values = bones.map((bone) => (
+    `${bone.name}@${rig!.boneIndex.get(bone.name) ?? '?'} scale=${bone.scale.toArray().map((value) => value.toFixed(4)).join(',')}`
+  ))
+  return `bust rig ${stage}: requestedScale=${requested.map((value) => value.toFixed(4)).join(',')} detectedBones=${bones.length}${values.length ? ` ${values.join(' | ')}` : ' none'}`
+}
+
+function bustModelDiagnostic(label: string, path: string, model: DecodedModel): string {
+  const summary = bustWeightSummary(model)
+  return `bust weights ${label}: path=${path} modelBones=${summary.modelBones.join(',') || 'none'} weightedVertices=${summary.weightedVertices} totalWeight=${summary.totalWeight.toFixed(4)} maxVertexWeight=${summary.maximumWeight.toFixed(4)}`
 }
 
 function colorNumber(value: string, fallback = 0xffffff): number {
@@ -245,6 +257,11 @@ function addDecodedModel(
           : shaderPackage.startsWith('character')
             ? 0.62
             : 0.5
+    const resolvedMuscleNormalStrength = customization
+      && shaderPackage === 'skin.shpk'
+      && !isFaceMaterial
+      ? muscleNormalStrength(customization.muscleTone)
+      : 1
     const aoMap = ao
       ? textureFromDecoded(ao, false, anisotropy)
       : mask
@@ -288,7 +305,7 @@ function addDecodedModel(
       polygonOffsetFactor: isIris ? -1 : 0,
       polygonOffsetUnits: isIris ? -1 : 0,
     })
-    if (normal) material.normalScale.set(1, 1)
+    if (normal) material.normalScale.set(resolvedMuscleNormalStrength, resolvedMuscleNormalStrength)
     const geometry = new THREE.BufferGeometry()
     geometry.setAttribute('position', new THREE.BufferAttribute(part.positions, 3))
     if (part.uvs) {
@@ -546,7 +563,9 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
 
     void (async () => {
       const failures: string[] = []
-      const diagnostics: string[] = []
+      const diagnostics: string[] = [
+        `customization sliders: race=${raceCode} tribe=${customization.tribeId} gender=${customization.gender} bustSize=${customization.bustSize} muscleTone=${customization.muscleTone} muscleNormalStrength=${muscleNormalStrength(customization.muscleTone).toFixed(4)}`,
+      ]
       let characterParts = 0
       let equippedItems = 0
       let rig: CharacterRig | undefined
@@ -603,6 +622,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             }
           }
           rig = addCharacterRig(characterGroup, combinedSkeleton, bustScale)
+          diagnostics.push(bustRigDiagnostic(rig, 'after CMP bind', bustScale))
           idleAnimationPromise = loadLocalIdleAnimation(source, idleAnimationCandidates(raceCode))
         } catch (reason) {
           failures.push(`base skeleton: ${reason instanceof Error ? reason.message : String(reason)}`)
@@ -626,6 +646,14 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           const result = plan.candidates.map((path) => byPath.get(path)).find((candidate) => candidate?.model)
           return result?.model ? [{ plan, result: result as Required<Pick<ModelLoadResult, 'path' | 'model'>> }] : []
         })
+        if (customization.gender === 'female') {
+          characterModels
+            .filter(({ plan }) => plan.part === 'torso')
+            .forEach(({ result }) => diagnostics.push(bustModelDiagnostic('character torso', result.path, result.model)))
+          equipmentModels
+            .filter(({ plan }) => plan.slot === 'body')
+            .forEach(({ plan, result }) => diagnostics.push(bustModelDiagnostic(plan.item.name, result.path, result.model)))
+        }
         const materialRequests: MaterialLoadRequest[] = [
           ...characterModels.map(({ result }) => ({
             modelPath: result.path,
@@ -702,6 +730,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               plan.slot,
               weapon ? undefined : rig,
               maxAnisotropy,
+              customization,
             )
             if (result.warning) failures.push(`${plan.item.name}: ${result.warning}`)
             if (materialResult?.errors.length) failures.push(...materialResult.errors.map((error) => `${plan.item.name} ${error}`))
@@ -729,6 +758,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             action.play()
             activeIdleMixer.update(0)
             action.paused = true
+            diagnostics.push(bustRigDiagnostic(rig, 'after idle frame 0', bustScale))
             idleMixer.current = activeIdleMixer
             idleAction.current = action
             idleReady = true
@@ -855,6 +885,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
     customization.tribeId,
     customization.gender,
     customization.bustSize,
+    customization.muscleTone,
     customization.skinColor,
     customization.hairColor,
     customization.eyeColor,
@@ -922,7 +953,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       )}
       {!error && debug && (
         <details className="viewer-debug">
-          <summary>Material and eye debug report</summary>
+          <summary>Material, body, and eye debug report</summary>
           <button
             className="viewer-copy-debug"
             type="button"
