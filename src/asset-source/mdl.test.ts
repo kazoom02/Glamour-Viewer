@@ -168,6 +168,52 @@ function attributedSubmeshMdl(): ArrayBuffer {
   return buffer
 }
 
+function shapedTriangleMdl(): ArrayBuffer {
+  const names = new TextEncoder().encode('shp_chk_a\0')
+  const modelHeaderOffset = 212 + names.length
+  const lodOffset = modelHeaderOffset + 56
+  const meshOffset = lodOffset + 180
+  const shapeOffset = meshOffset + 36
+  const shapeMeshOffset = shapeOffset + 16
+  const shapeValueOffset = shapeMeshOffset + 12
+  const vertexOffset = shapeValueOffset + 4
+  const indexOffset = vertexOffset + 48
+  const buffer = new ArrayBuffer(indexOffset + 6)
+  const view = new DataView(buffer)
+  view.setUint16(12, 1, true)
+  view.setUint32(16, vertexOffset, true)
+  view.setUint32(28, indexOffset, true)
+  view.setUint8(68, 0)
+  view.setUint8(69, 0)
+  view.setUint8(70, 2)
+  view.setUint8(71, 0)
+  view.setUint8(76, 0xff)
+  view.setUint32(208, names.length, true)
+  new Uint8Array(buffer, 212, names.length).set(names)
+  view.setUint16(modelHeaderOffset + 4, 1, true)
+  view.setUint16(modelHeaderOffset + 16, 1, true)
+  view.setUint16(modelHeaderOffset + 18, 1, true)
+  view.setUint16(modelHeaderOffset + 20, 1, true)
+  view.setUint16(lodOffset + 2, 1, true)
+  view.setUint16(meshOffset, 4, true)
+  view.setUint32(meshOffset + 4, 3, true)
+  view.setUint8(meshOffset + 32, 12)
+  view.setUint8(meshOffset + 35, 1)
+  view.setUint32(shapeOffset, 0, true)
+  view.setUint16(shapeOffset + 10, 1, true)
+  view.setUint32(shapeMeshOffset + 4, 1, true)
+  view.setUint16(shapeValueOffset, 0, true)
+  view.setUint16(shapeValueOffset + 2, 3, true)
+  ;[
+    0, 0, 0,
+    1, 0, 0,
+    0, 1, 0,
+    2, 0, 0,
+  ].forEach((value, index) => view.setFloat32(vertexOffset + index * 4, value, true))
+  ;[0, 1, 2].forEach((value, index) => view.setUint16(indexOffset + index * 2, value, true))
+  return buffer
+}
+
 describe('MDL geometry decoding', () => {
   it('extracts position and index buffers from a renderable LOD', () => {
     const model = decodeMdl(triangleMdl())
@@ -216,6 +262,16 @@ describe('MDL geometry decoding', () => {
     expect(model.meshes).toHaveLength(2)
     expect(model.meshes.map((mesh) => mesh.attributes)).toEqual([['atr_tv_a'], ['atr_tv_b']])
     expect(model.meshes.map((mesh) => Array.from(mesh.indices))).toEqual([[0, 1, 2], [0, 2, 1]])
+  })
+
+  it('applies native MDL face shapes by replacing authored index entries', () => {
+    const base = decodeMdl(shapedTriangleMdl())
+    const shaped = decodeMdl(shapedTriangleMdl(), ['shp_chk_a'])
+    expect(Array.from(base.meshes[0]!.indices)).toEqual([0, 1, 2])
+    expect(Array.from(shaped.meshes[0]!.indices)).toEqual([3, 1, 2])
+    expect(shaped.availableShapes).toEqual(['shp_chk_a'])
+    expect(shaped.activeShapes).toEqual(['shp_chk_a'])
+    expect(shaped.shapeReplacements).toBe(1)
   })
 
   it('ignores SqPack alignment padding after a raw-deflate block', async () => {

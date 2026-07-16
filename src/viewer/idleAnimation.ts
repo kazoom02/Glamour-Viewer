@@ -1,7 +1,9 @@
 import * as THREE from 'three'
 import type { DecodedAnimation } from '../asset-source/animationLoader'
 
-const ROOT_TRANSLATION_BONES = new Set(['n_root', 'n_hara', 'n_throw'])
+// Only the scene root carries locomotion drift. n_hara is the animated hips;
+// freezing it removes the authored breathing and weight-shift of standing idle.
+const ROOT_TRANSLATION_BONES = new Set(['n_root'])
 const BUST_BONES = new Set(['j_mune_l', 'j_mune_r'])
 
 function stableRootTranslations(values: Float32Array): Float32Array {

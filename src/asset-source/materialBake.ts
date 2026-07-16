@@ -53,9 +53,10 @@ function cleanedNormal(texture: DecodedTexture): DecodedTexture {
   return { ...texture, rgba }
 }
 
-export function materialAlphaMode(shaderPackage: string, materialReference: string): MaterialAlphaMode {
+export function materialAlphaMode(shaderPackage: string, materialReference: string, shaderFlags = 0): MaterialAlphaMode {
   const shader = shaderPackage.toLowerCase()
   const face = /mt_c\d{4}f\d{4}/i.test(materialReference)
+  if ((shaderFlags & 0x10) !== 0) return 'blend'
   if (shader === 'characterglass.shpk' || shader === 'charactertattoo.shpk') return 'blend'
   if (shader === 'hair.shpk') return face ? 'blend' : 'mask'
   if (shader === 'skin.shpk') return face ? 'mask' : 'opaque'
@@ -122,6 +123,18 @@ export function bakeIrisMaterial(
 
 export function bakeSkinNormal(normal: DecodedTexture | undefined): DecodedTexture | undefined {
   return normal ? cleanedNormal(normal) : undefined
+}
+
+/** Skin FACE mode uses the authored normal alpha channel as its lip mask. */
+export function extractSkinLipMask(normal: DecodedTexture | undefined): DecodedTexture | undefined {
+  if (!normal) return undefined
+  const rgba = new Uint8Array(normal.rgba.length)
+  for (let offset = 0; offset < rgba.length; offset += 4) {
+    const coverage = normal.rgba[offset + 3]!
+    rgba[offset] = rgba[offset + 1] = rgba[offset + 2] = coverage
+    rgba[offset + 3] = 255
+  }
+  return output(normal.width, normal.height, rgba)
 }
 
 /**

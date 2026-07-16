@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 
 import { equipmentVfxPath, readImcEntry } from './imc'
+import { decodeAvfx } from './avfx'
 import { EQUIPMENT_PARAMETER_PATH, headEquipmentVisibility } from './eqp'
 import {
   bakeCharacterMaterial,
@@ -8,6 +9,7 @@ import {
   bakeIrisMaterial,
   bakeSkinNormal,
   bakeTattooMaterial,
+  extractSkinLipMask,
   materialAlphaMode,
   usesCharacterColorTable,
 } from './materialBake'
@@ -175,6 +177,10 @@ async function loadRequest(
   let attributeMask: number | undefined
   let vfxId: number | undefined
   let materialAnimationId: number | undefined
+  let resolvedVfxPath: string | undefined
+  let vfxTextures: MaterialLoadResult['vfxTextures']
+  let decodedVfx: MaterialLoadResult['vfx']
+  let facePaintTexture: MaterialLoadResult['facePaintTexture']
   let headHairHidden: boolean | undefined
   let headScalpHidden: boolean | undefined
   if (request.imcPath && request.slot && request.variant !== undefined) {
@@ -209,6 +215,38 @@ async function loadRequest(
     }
   }
 
+  if (vfxId) {
+    resolvedVfxPath = equipmentVfxPath(request.modelPath, vfxId)
+    if (resolvedVfxPath) {
+      try {
+        const avfx = await reader.read(resolvedVfxPath)
+        decodedVfx = decodeAvfx(avfx)
+        const references = decodedVfx.textures
+        vfxTextures = []
+        for (const path of references) {
+          try {
+            vfxTextures.push({ path, texture: await loadTexture(reader, sourceKey, path) })
+          } catch (error) {
+            diagnostics.push(`AVFX texture unavailable: ${path} — ${error instanceof Error ? error.message : String(error)}`)
+          }
+        }
+        diagnostics.push(`equipment AVFX: path=${resolvedVfxPath} bytes=${avfx.byteLength} emitters=${decodedVfx.emitters.length} particles=${decodedVfx.particles.length} models=${decodedVfx.models.length} textures=${references.length} decodedTextures=${vfxTextures.length} unsupportedParticleTypes=${decodedVfx.unsupportedParticleTypes.join(',') || 'none'}`)
+      } catch (error) {
+        diagnostics.push(`equipment AVFX unavailable: ${resolvedVfxPath} — ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+  }
+
+  if (request.facePaintId && request.facePaintId > 0) {
+    const path = `chara/common/texture/decal_face/_decal_${request.facePaintId}.tex`
+    try {
+      facePaintTexture = { path, texture: await loadTexture(reader, sourceKey, path) }
+      diagnostics.push(`face paint: id=${request.facePaintId} path=${path} size=${facePaintTexture.texture.width}x${facePaintTexture.texture.height}`)
+    } catch (error) {
+      errors.push(`[face-paint] ${path}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
   for (const materialReference of request.materialPaths) {
     try {
       const materialFile = await readFirst(reader, materialCandidates(request, materialReference, materialId))
@@ -221,6 +259,7 @@ async function loadRequest(
         `  model: ${request.modelPath}`,
         `  resolved MTRL: ${materialFile.path}`,
         `  shader: ${parsed.shaderPackage || '(empty)'}`,
+        `  shader flags: 0x${parsed.shaderFlags.toString(16).padStart(8, '0')} translucent=${parsed.translucent} renderBackfaces=${parsed.renderBackfaces}`,
         `  IMC: variant=${request.variant ?? 'n/a'} materialId=${materialId} attributeMask=${attributeMask ?? 'n/a'} vfxId=${vfxId ?? 'n/a'} materialAnimationId=${materialAnimationId ?? 'n/a'}`,
         `  color table: ${parsed.colorTable ? `${parsed.colorTable.kind} ${parsed.colorTable.rows.length} rows` : 'none'}`,
         `  dyes: channel1=${request.stains?.[0] ?? 0} channel2=${request.stains?.[1] ?? 0} dyeRows=${parsed.dyeTable?.filter((row) => row.flags !== 0).length ?? 0}`,
@@ -232,7 +271,9 @@ async function loadRequest(
       const decoded = {
         path: materialFile.path,
         shaderPackage: parsed.shaderPackage,
-        alphaMode: materialAlphaMode(parsed.shaderPackage, materialReference),
+        alphaMode: materialAlphaMode(parsed.shaderPackage, materialReference, parsed.shaderFlags),
+        renderBackfaces: parsed.renderBackfaces,
+        shaderFlags: parsed.shaderFlags,
         textures: {},
       } as MaterialLoadResult['materials'][string]
       const textureReferences = [...parsed.textures]
@@ -284,7 +325,9 @@ async function loadRequest(
         const diffuse = bakeIrisMaterial(decoded.textures.diffuse, decoded.textures.mask)
         if (diffuse) decoded.textures.diffuse = diffuse
       } else if (shader === 'skin.shpk') {
+        const lipMask = extractSkinLipMask(decoded.textures.normal)
         const normal = bakeSkinNormal(decoded.textures.normal)
+        if (lipMask) decoded.textures.lipMask = lipMask
         if (normal) decoded.textures.normal = normal
       } else if (shader === 'charactertattoo.shpk') {
         const baked = bakeTattooMaterial(decoded.textures.normal)
@@ -301,6 +344,7 @@ async function loadRequest(
           `  final metalness: ${textureSummary(decoded.textures.metalness)}`,
           `  final specular color: ${textureSummary(decoded.textures.specularColor)}`,
           `  final specular intensity: ${textureSummary(decoded.textures.specularIntensity)}`,
+          `  final lip mask: ${textureSummary(decoded.textures.lipMask)}`,
         )
         diagnostics.push(materialDiagnostics.join('\n'))
       }
@@ -317,7 +361,10 @@ async function loadRequest(
     attributeMask,
     ...(vfxId !== undefined ? { vfxId } : {}),
     ...(materialAnimationId !== undefined ? { materialAnimationId } : {}),
-    ...(vfxId ? { vfxPath: equipmentVfxPath(request.modelPath, vfxId) } : {}),
+    ...(resolvedVfxPath ? { vfxPath: resolvedVfxPath } : {}),
+    ...(vfxTextures?.length ? { vfxTextures } : {}),
+    ...(decodedVfx ? { vfx: decodedVfx } : {}),
+    ...(facePaintTexture ? { facePaintTexture } : {}),
     ...(headHairHidden !== undefined ? { headHairHidden } : {}),
     ...(headScalpHidden !== undefined ? { headScalpHidden } : {}),
   }

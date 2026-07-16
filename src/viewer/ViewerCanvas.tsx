@@ -16,7 +16,12 @@ import {
 import { loadLocalIdleAnimation, type DecodedAnimation } from '../asset-source/animationLoader'
 import { HUMAN_CMP_PATH, loadLocalBustScale, type BustScale } from '../asset-source/cmp'
 import { equipmentAssetPlan } from '../asset-source/equipmentPlan'
-import { loadLocalMaterials, type DecodedMaterial, type MaterialLoadRequest } from '../asset-source/materialLoader'
+import {
+  loadLocalMaterials,
+  type DecodedMaterial,
+  type MaterialLoadRequest,
+  type MaterialLoadResult,
+} from '../asset-source/materialLoader'
 import { loadLocalModels, type ModelLoadResult } from '../asset-source/modelLoader'
 import type { DecodedModel } from '../asset-source/mdl'
 import {
@@ -34,7 +39,9 @@ import {
   type WeaponPlacement,
 } from '../catalog/types'
 import type { CharacterCustomization } from '../customization/types'
+import { activeFaceShapes, faceFeatureMask, faceFeatureVisible } from '../customization/faceShapes'
 import { animationClipFromDecoded } from './idleAnimation'
+import { createAvfxRuntime, type AvfxRuntime } from './avfxRuntime'
 import { subdivideCurvedMesh } from './geometryQuality'
 import {
   applyBustDeformation,
@@ -250,6 +257,59 @@ function colorNumber(value: string, fallback = 0xffffff): number {
   return /^#[0-9a-f]{6}$/i.test(value) ? Number.parseInt(value.slice(1), 16) : fallback
 }
 
+function enableFaceCustomization(
+  material: THREE.MeshPhysicalMaterial,
+  lipMask: DecodedMaterial['textures']['lipMask'],
+  lipColor: string,
+  facePaintTexture: MaterialLoadResult['facePaintTexture'],
+  facePaintColor: string,
+  anisotropy: number,
+): void {
+  const lipMap = lipMask ? textureFromDecoded(lipMask, false, anisotropy) : undefined
+  const facePaintMap = facePaintTexture ? textureFromDecoded(facePaintTexture.texture, false, anisotropy) : undefined
+  const lipTint = new THREE.Color(colorNumber(lipColor))
+  const facePaintTint = new THREE.Color(colorNumber(facePaintColor))
+  if (lipMap) material.userData.lipMaskMap = lipMap
+  if (facePaintMap) material.userData.facePaintMap = facePaintMap
+  material.onBeforeCompile = (shader) => {
+    const vertexDeclarations: string[] = []
+    const vertexAssignments: string[] = []
+    const fragmentDeclarations: string[] = []
+    const fragmentEffects: string[] = []
+    if (lipMap) {
+      shader.uniforms.lipMaskMap = { value: lipMap }
+      shader.uniforms.lipColor = { value: lipTint }
+      vertexDeclarations.push('varying vec2 vFaceBaseUv;')
+      vertexAssignments.push('vFaceBaseUv = uv;')
+      fragmentDeclarations.push('uniform sampler2D lipMaskMap; uniform vec3 lipColor; varying vec2 vFaceBaseUv;')
+      fragmentEffects.push('float lipCoverage = texture2D(lipMaskMap, vFaceBaseUv).r; diffuseColor.rgb = mix(diffuseColor.rgb, lipColor, clamp(lipCoverage, 0.0, 1.0));')
+    }
+    if (facePaintMap) {
+      shader.uniforms.facePaintMap = { value: facePaintMap }
+      shader.uniforms.facePaintColor = { value: facePaintTint }
+      vertexDeclarations.push('attribute vec2 facePaintUv; varying vec2 vFacePaintUv;')
+      vertexAssignments.push('vFacePaintUv = facePaintUv;')
+      fragmentDeclarations.push('uniform sampler2D facePaintMap; uniform vec3 facePaintColor; varying vec2 vFacePaintUv;')
+      fragmentEffects.push('float facePaintCoverage = texture2D(facePaintMap, vFacePaintUv).r; diffuseColor.rgb = mix(diffuseColor.rgb, facePaintColor, clamp(facePaintCoverage, 0.0, 1.0));')
+    }
+    shader.vertexShader = shader.vertexShader.replace(
+      'void main() {',
+      `${vertexDeclarations.join(' ')} void main() { ${vertexAssignments.join(' ')}`,
+    )
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        'void main() {',
+        `${fragmentDeclarations.join(' ')} void main() {`,
+      )
+      .replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>\n${fragmentEffects.join('\n')}`,
+      )
+  }
+  material.customProgramCacheKey = () => `ffxiv-face-customization-v2-${lipMap ? 'lip' : ''}-${facePaintMap ? 'paint' : ''}`
+  material.needsUpdate = true
+}
+
 function addDecodedModel(
   target: THREE.Object3D,
   model: DecodedModel,
@@ -264,9 +324,11 @@ function addDecodedModel(
   refineCurvature = false,
   materialAnimationId = 0,
   animatedMaterials: AnimatedMaterial[] = [],
+  facePaintTexture?: MaterialLoadResult['facePaintTexture'],
 ): number {
   for (const [index, part] of model.meshes.entries()) {
     if (slot && attributeMask !== undefined && !isVisibleEquipmentPart(part.attributes, slot, attributeMask)) continue
+    if (label === 'character-face' && customization && !faceFeatureVisible(part.attributes, faceFeatureMask(customization))) continue
     const renderPart = refineCurvature ? subdivideCurvedMesh(part) : part
     const materialPath = model.materialPaths[part.materialIndex]?.toLowerCase() ?? ''
     const decodedMaterial = decodedMaterials[materialPath.replaceAll('\\', '/')]
@@ -372,13 +434,28 @@ function addDecodedModel(
       alphaTest: diffuse && alphaMode === 'mask' ? (shaderPackage === 'hair.shpk' ? 0.34 : 0.46) : 0,
       transparent: alphaMode === 'blend',
       depthWrite: alphaMode !== 'blend',
-      side: alphaMode !== 'opaque' || shaderPackage === 'hair.shpk' ? THREE.DoubleSide : THREE.FrontSide,
+      side: decodedMaterial?.renderBackfaces ?? (alphaMode !== 'opaque' || shaderPackage === 'hair.shpk')
+        ? THREE.DoubleSide
+        : THREE.FrontSide,
       dithering: true,
       flatShading: false,
       polygonOffset: isIris,
       polygonOffsetFactor: isIris ? -1 : 0,
       polygonOffsetUnits: isIris ? -1 : 0,
     })
+    const activeFacePaint = facePaintTexture && customization?.facePaint && renderPart.uvs2
+      ? facePaintTexture
+      : undefined
+    if (customization && /_fac_[a-z]\.mtrl$/.test(materialPath) && (decodedMaterial?.textures.lipMask || activeFacePaint)) {
+      enableFaceCustomization(
+        material,
+        decodedMaterial?.textures.lipMask,
+        customization.lipColor,
+        activeFacePaint,
+        customization.facePaintColor,
+        anisotropy,
+      )
+    }
     const hasEmissivePixels = emissive && hasVisibleRgb(emissive)
     if (materialAnimationId > 0 && hasEmissivePixels) {
       material.emissiveIntensity = 1
@@ -395,7 +472,15 @@ function addDecodedModel(
       geometry.setAttribute('uv', new THREE.BufferAttribute(renderPart.uvs, 2))
       geometry.setAttribute('uv1', new THREE.BufferAttribute(renderPart.uvs, 2))
     }
-    if (renderPart.uvs2) geometry.setAttribute('uv2', new THREE.BufferAttribute(renderPart.uvs2, 2))
+    if (renderPart.uvs2) {
+      const secondaryUvs = new THREE.BufferAttribute(renderPart.uvs2, 2)
+      geometry.setAttribute('uv2', secondaryUvs)
+      if (activeFacePaint && /_fac_[a-z]\.mtrl$/.test(materialPath)) {
+        // A dedicated attribute keeps the custom face-paint shader independent
+        // from Three's built-in texture-channel defines.
+        geometry.setAttribute('facePaintUv', secondaryUvs)
+      }
+    }
     let skinIndices = renderPart.skinIndices
     if (skinIndices && rig) {
       skinIndices = new Uint16Array(skinIndices).map((globalIndex) => (
@@ -587,7 +672,7 @@ function modelMaterialDiagnostics(
   const deformation = model.deformation
   const summary = `${label}: LOD${model.lod ?? '?'}${deformation
     ? ` · PBD c${deformation.sourceRaceCode.toString().padStart(4, '0')}→c${deformation.targetRaceCode.toString().padStart(4, '0')} steps=${deformation.steps} matrixBones=${deformation.matrixBones} vertices=${deformation.vertices} normals=${deformation.normals}`
-    : ' · native race geometry'}`
+    : ' · native race geometry'}${model.availableShapes?.length ? ` · shapes=${model.activeShapes?.join(',') || 'base'} replacements=${model.shapeReplacements ?? 0}/${model.availableShapes.length} available` : ''}`
   const meshes = model.meshes.flatMap((mesh, index) => {
     const reference = model.materialPaths[mesh.materialIndex]?.replaceAll('\\', '/').toLowerCase() ?? '(missing)'
     const material = materialResult?.materials[reference]
@@ -597,7 +682,7 @@ function modelMaterialDiagnostics(
     if (!equipment && !face && !torso && !iris) return []
     return [
       `${label} mesh ${index}: materialIndex=${mesh.materialIndex} reference=${reference}`,
-      `  shader=${material?.shaderPackage ?? 'unresolved'} vertices=${mesh.positions.length / 3} triangles=${mesh.indices.length / 3}`,
+      `  shader=${material?.shaderPackage ?? 'unresolved'} flags=${material ? `0x${material.shaderFlags.toString(16).padStart(8, '0')}` : 'n/a'} alpha=${material?.alphaMode ?? 'n/a'} backfaces=${material?.renderBackfaces ?? 'n/a'} vertices=${mesh.positions.length / 3} triangles=${mesh.indices.length / 3}`,
       `  uv0=${uvSummary(mesh.uvs)} uv1=${uvSummary(mesh.uvs2)}`,
       `  skin=${mesh.skinIndices && mesh.skinWeights ? 'yes' : 'no'} attributes=${mesh.attributes?.join(',') || 'none'}`,
     ].join('\n')
@@ -698,6 +783,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
     scene.add(characterGroup)
     let activeIdleMixer: THREE.AnimationMixer | undefined
     const animatedMaterials: AnimatedMaterial[] = []
+    const avfxRuntimes: AvfxRuntime[] = []
     idleAction.current = null
     idleMixer.current = null
     setIdleLabel('Idle')
@@ -804,10 +890,16 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           ...characterPlans.flatMap(characterModelCandidates),
           ...equipmentPlans.flatMap((plan) => plan.candidates),
         ])]
+        const selectedFaceShapes = activeFaceShapes(customization)
+        const faceShapeSelections = Object.fromEntries(
+          characterPlans
+            .filter((plan) => plan.part === 'face')
+            .flatMap((plan) => characterModelCandidates(plan).map((path) => [path, selectedFaceShapes])),
+        )
         const byPath = resultMap(await loadLocalModels(source, paths, decodedSkeleton ? {
           targetRaceCode: raceCode,
           skeleton: decodedSkeleton,
-        } : undefined))
+        } : undefined, faceShapeSelections))
         if (disposed) return
 
         const characterModels = characterPlans.flatMap((plan) => {
@@ -837,9 +929,10 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           diagnostics.push(bustRigDiagnostic(activeRig, 'after CPU bake (neutral for animation)', bustScale))
         }
         const materialRequests: MaterialLoadRequest[] = [
-          ...characterModels.map(({ result }) => ({
+          ...characterModels.map(({ plan, result }) => ({
             modelPath: result.path,
             materialPaths: result.model.materialPaths,
+            ...(plan.part === 'face' ? { facePaintId: customization.facePaint } : {}),
           })),
           ...equipmentModels.map(({ plan, result }) => ({
             modelPath: result.path,
@@ -847,7 +940,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             imcPath: plan.asset.imcPath,
             slot: plan.slot,
             variant: plan.asset.variant,
-            stains: [plan.item.dyes?.[0]?.id ?? 0, plan.item.dyes?.[1]?.id ?? 0],
+            stains: [plan.item.dyes?.[0]?.id ?? 0, plan.item.dyes?.[1]?.id ?? 0] as [number, number],
             equipmentSetId: plan.item.modelSet,
           })),
         ]
@@ -860,6 +953,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
         }
         if (disposed) return
         const materialsByModel = new Map(materialResults.map((result) => [result.modelPath, result]))
+        diagnostics.push(`face customization: requestedShapes=${selectedFaceShapes.join(',') || 'base'} featureMask=0x${faceFeatureMask(customization).toString(16).padStart(2, '0')}`)
         diagnostics.push(...materialResults.flatMap((result) => result.diagnostics))
         const headEquipmentModel = equipmentModels.find(({ plan }) => plan.slot === 'head')
         const headMaterialResult = headEquipmentModel
@@ -890,6 +984,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               plan.part === 'torso' || plan.part === 'face',
               0,
               animatedMaterials,
+              plan.part === 'face' ? materialResult?.facePaintTexture : undefined,
             )
             if (result.warning) failures.push(`${plan.part}: ${result.warning}`)
             if (materialResult?.errors.length) failures.push(...materialResult.errors.map((error) => `${plan.part} ${error}`))
@@ -927,12 +1022,16 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               materialResult?.materialAnimationId ?? 0,
               animatedMaterials,
             )
+            const vfxRuntime = materialResult?.vfx && materialResult.vfxTextures?.length
+              ? createAvfxRuntime(attachment.target, materialResult.vfx, materialResult.vfxTextures, maxAnisotropy)
+              : undefined
+            if (vfxRuntime) avfxRuntimes.push(vfxRuntime)
             if (weapon) diagnostics.push(`weapon attachment ${plan.item.name}: slot=${plan.slot} ${attachment.diagnostic}`)
             if (materialResult?.materialAnimationId) {
               diagnostics.push(`equipment material animation ${plan.item.name}: IMC id=${materialResult.materialAnimationId} authoredTrackDecoded=false approximateEmissivePulseMaterials=${animatedMaterials.length - animatedMaterialCount}`)
             }
             if (materialResult?.vfxId) {
-              diagnostics.push(`equipment AVFX ${plan.item.name}: IMC id=${materialResult.vfxId} path=${materialResult.vfxPath ?? 'unresolved'} renderer=metadata-only`)
+              diagnostics.push(`equipment AVFX ${plan.item.name}: IMC id=${materialResult.vfxId} path=${materialResult.vfxPath ?? 'unresolved'} renderer=authored-graph emitters=${vfxRuntime?.decodedEmitters ?? 0} embeddedModels=${vfxRuntime?.decodedModels ?? 0} curves=true uvAnimation=true`)
             }
             if (result.warning) failures.push(`${plan.item.name}: ${result.warning}`)
             if (materialResult?.errors.length) failures.push(...materialResult.errors.map((error) => `${plan.item.name} ${error}`))
@@ -1055,6 +1154,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       animatedMaterials.forEach(({ material, baseEmissiveIntensity, phase }) => {
         material.emissiveIntensity = baseEmissiveIntensity * (0.88 + Math.sin(elapsed * 2.4 + phase) * 0.12)
       })
+      avfxRuntimes.forEach((runtime) => runtime.update(delta))
       controls.update()
       renderer.render(scene, camera)
       frame = requestAnimationFrame(render)
@@ -1067,12 +1167,18 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       cancelAnimationFrame(frame)
       observer.disconnect()
       controls.dispose()
+      avfxRuntimes.forEach((runtime) => runtime.dispose())
       activeIdleMixer?.stopAllAction()
       if (idleMixer.current === activeIdleMixer) {
         idleMixer.current = null
         idleAction.current = null
       }
       scene.traverse((object) => {
+        if (object instanceof THREE.Sprite) {
+          object.material.map?.dispose()
+          object.material.dispose()
+          return
+        }
         if (!(object instanceof THREE.Mesh)) return
         object.geometry.dispose()
         const materials = Array.isArray(object.material) ? object.material : [object.material]
@@ -1082,6 +1188,10 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           }
           if (item instanceof THREE.MeshPhysicalMaterial) {
             new Set([item.specularColorMap, item.specularIntensityMap].filter(Boolean)).forEach((texture) => texture?.dispose())
+            const facePaintMap = item.userData.facePaintMap
+            if (facePaintMap instanceof THREE.Texture) facePaintMap.dispose()
+            const lipMaskMap = item.userData.lipMaskMap
+            if (lipMaskMap instanceof THREE.Texture) lipMaskMap.dispose()
           }
           item.dispose()
         })
@@ -1102,6 +1212,15 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
     customization.skinColor,
     customization.hairColor,
     customization.eyeColor,
+    customization.jaw,
+    customization.eyeShape,
+    customization.irisSize,
+    customization.eyebrows,
+    customization.nose,
+    customization.mouth,
+    customization.lipColor,
+    customization.facialFeatures,
+    customization.tattoos,
     customization.tattooColor,
     customization.facePaint,
     customization.facePaintColor,

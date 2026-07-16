@@ -12,10 +12,11 @@ interface Request {
   source: Extract<AssetSource, { kind: 'local' }>
   paths: string[]
   deformation?: ModelDeformationRequest
+  shapeSelections?: Record<string, string[]>
 }
 
 self.onmessage = async (event: MessageEvent<Request>) => {
-  const { id, source, paths, deformation } = event.data
+  const { id, source, paths, deformation, shapeSelections } = event.data
   try {
     const reader = createLocalModelReader(source)
     const targetRaceCode = deformation ? Number(deformation.targetRaceCode.slice(1)) : undefined
@@ -40,7 +41,7 @@ self.onmessage = async (event: MessageEvent<Request>) => {
       try {
         const payload = await reader.read(path)
         try {
-          const model = await decodeSqpackModel(payload)
+          const model = await decodeSqpackModel(payload, shapeSelections?.[path] ?? [])
           let warning: string | undefined
           const sourceRaceCode = modelRaceCode(path)
           if (deformation && targetRaceCode && sourceRaceCode && sourceRaceCode !== targetRaceCode) {

@@ -12,10 +12,18 @@ export interface MaterialTextureReference {
 export interface ParsedMaterial {
   version: number
   shaderPackage: string
+  shaderFlags: number
+  renderBackfaces: boolean
+  translucent: boolean
   textures: MaterialTextureReference[]
   colorTable?: MaterialColorTable
   dyeTable?: MaterialDyeRow[]
 }
+
+export const MTRL_SHADER_FLAGS = {
+  hideBackfaces: 0x01,
+  enableTranslucency: 0x10,
+} as const
 
 export interface MaterialColorRow {
   diffuse: [number, number, number]
@@ -205,6 +213,7 @@ export function parseMtrl(bytes: ArrayBuffer): ParsedMaterial {
   const shaderKeyCount = view.getUint16(cursor + 2, true)
   const constantCount = view.getUint16(cursor + 4, true)
   const samplerCount = view.getUint16(cursor + 6, true)
+  const shaderFlags = view.getUint32(cursor + 8, true)
   cursor += 12 + shaderKeyCount * 8 + constantCount * 8
   assertRange(cursor + samplerCount * 12 + shaderValueListSize <= bytes.byteLength, 'The MTRL sampler table is truncated.')
   for (let index = 0; index < samplerCount; index += 1) {
@@ -219,6 +228,9 @@ export function parseMtrl(bytes: ArrayBuffer): ParsedMaterial {
   return {
     version,
     shaderPackage,
+    shaderFlags,
+    renderBackfaces: (shaderFlags & MTRL_SHADER_FLAGS.hideBackfaces) === 0,
+    translucent: (shaderFlags & MTRL_SHADER_FLAGS.enableTranslucency) !== 0,
     textures,
     ...(colorTable ? { colorTable } : {}),
     ...(dyeTable ? { dyeTable } : {}),

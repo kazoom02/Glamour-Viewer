@@ -25,6 +25,11 @@ export interface DecodedModel {
   bounds: { min: [number, number, number]; max: [number, number, number] }
   /** LOD 0 is the highest-detail geometry authored by the game. */
   lod?: number
+  /** Native MDL shape keys found in this model. */
+  availableShapes?: string[]
+  /** Native shape keys requested and successfully applied by index replacement. */
+  activeShapes?: string[]
+  shapeReplacements?: number
   deformation?: {
     sourceRaceCode: number
     targetRaceCode: number
@@ -65,6 +70,23 @@ interface SubmeshDescriptor {
 interface LodDescriptor {
   meshIndex: number
   meshCount: number
+}
+
+interface ShapeDescriptor {
+  name: string
+  meshStart: [number, number, number]
+  meshCount: [number, number, number]
+}
+
+interface ShapeMeshDescriptor {
+  meshIndexOffset: number
+  valueCount: number
+  valueOffset: number
+}
+
+interface ShapeValueDescriptor {
+  baseIndexIndex: number
+  replacingVertexIndex: number
 }
 
 function assertDecode(condition: unknown, message: string): asserts condition {
@@ -267,7 +289,7 @@ export function selectSkinInfluences(indices: number[], weights: number[]): { in
   }
 }
 
-export function decodeMdl(mdlBuffer: ArrayBuffer): DecodedModel {
+export function decodeMdl(mdlBuffer: ArrayBuffer, requestedShapes: readonly string[] = []): DecodedModel {
   assertDecode(mdlBuffer.byteLength >= MODEL_FILE_HEADER_SIZE, 'The reconstructed MDL header is truncated.')
   const view = new DataView(mdlBuffer)
   const vertexDeclarationCount = view.getUint16(12, true)
@@ -309,6 +331,9 @@ export function decodeMdl(mdlBuffer: ArrayBuffer): DecodedModel {
   const materialCount = view.getUint16(modelHeader + 10, true)
   const boneCount = view.getUint16(modelHeader + 12, true)
   const boneTableCount = view.getUint16(modelHeader + 14, true)
+  const shapeCount = view.getUint16(modelHeader + 16, true)
+  const shapeMeshCount = view.getUint16(modelHeader + 18, true)
+  const shapeValueCount = view.getUint16(modelHeader + 20, true)
   const flags2 = view.getUint8(modelHeader + 27)
   const elementIdCount = view.getUint16(modelHeader + 24, true)
   const terrainShadowMeshCount = view.getUint8(modelHeader + 26)
@@ -391,10 +416,44 @@ export function decodeMdl(mdlBuffer: ArrayBuffer): DecodedModel {
     }
   }
 
+  assertDecode(cursor + shapeCount * 16 <= view.byteLength, 'The MDL shape table is truncated.')
+  const shapes: ShapeDescriptor[] = Array.from({ length: shapeCount }, (_, index) => {
+    const offset = cursor + index * 16
+    return {
+      name: readString(view, mdlBuffer, stringTableOffset, stringTableEnd, view.getUint32(offset, true)),
+      meshStart: [view.getUint16(offset + 4, true), view.getUint16(offset + 6, true), view.getUint16(offset + 8, true)],
+      meshCount: [view.getUint16(offset + 10, true), view.getUint16(offset + 12, true), view.getUint16(offset + 14, true)],
+    }
+  })
+  cursor += shapeCount * 16
+  assertDecode(cursor + shapeMeshCount * 12 <= view.byteLength, 'The MDL shape-mesh table is truncated.')
+  const shapeMeshes: ShapeMeshDescriptor[] = Array.from({ length: shapeMeshCount }, (_, index) => {
+    const offset = cursor + index * 12
+    return {
+      meshIndexOffset: view.getUint32(offset, true),
+      valueCount: view.getUint32(offset + 4, true),
+      valueOffset: view.getUint32(offset + 8, true),
+    }
+  })
+  cursor += shapeMeshCount * 12
+  assertDecode(cursor + shapeValueCount * 4 <= view.byteLength, 'The MDL shape-value table is truncated.')
+  const shapeValues: ShapeValueDescriptor[] = Array.from({ length: shapeValueCount }, (_, index) => {
+    const offset = cursor + index * 4
+    return {
+      baseIndexIndex: view.getUint16(offset, true),
+      replacingVertexIndex: view.getUint16(offset + 2, true),
+    }
+  })
+  cursor += shapeValueCount * 4
+
   const lod = lods.findIndex((candidate, index) => candidate.meshCount > 0 && vertexOffsets[index]! > 0 && indexOffsets[index]! > 0)
   assertDecode(lod >= 0, 'The MDL contains no renderable level of detail.')
   const lodDescriptor = lods[lod]!
   const decoded: DecodedModelMesh[] = []
+  const requested = new Set(requestedShapes.map((name) => name.toLowerCase()))
+  const selectedShapes = shapes.filter((shape) => requested.has(shape.name.toLowerCase()))
+  const appliedShapeNames = new Set<string>()
+  let shapeReplacementCount = 0
   const bounds = { min: [Infinity, Infinity, Infinity] as [number, number, number], max: [-Infinity, -Infinity, -Infinity] as [number, number, number] }
 
   for (let localIndex = 0; localIndex < lodDescriptor.meshCount; localIndex += 1) {
@@ -466,6 +525,21 @@ export function decodeMdl(mdlBuffer: ArrayBuffer): DecodedModel {
     assertDecode(indexStart + mesh.indexCount * 2 <= view.byteLength, 'The MDL mesh index range is truncated.')
     const indices = new Uint16Array(mesh.indexCount)
     for (let index = 0; index < mesh.indexCount; index += 1) indices[index] = view.getUint16(indexStart + index * 2, true)
+    for (const shape of selectedShapes) {
+      const start = shape.meshStart[lod]!
+      const count = shape.meshCount[lod]!
+      for (let shapeMeshIndex = start; shapeMeshIndex < start + count; shapeMeshIndex += 1) {
+        const shapeMesh = shapeMeshes[shapeMeshIndex]
+        if (!shapeMesh || shapeMesh.meshIndexOffset !== mesh.startIndex) continue
+        for (let valueIndex = shapeMesh.valueOffset; valueIndex < shapeMesh.valueOffset + shapeMesh.valueCount; valueIndex += 1) {
+          const value = shapeValues[valueIndex]
+          if (!value || value.baseIndexIndex >= indices.length || value.replacingVertexIndex >= mesh.vertexCount) continue
+          indices[value.baseIndexIndex] = value.replacingVertexIndex
+          shapeReplacementCount += 1
+          appliedShapeNames.add(shape.name)
+        }
+      }
+    }
     const ranges = mesh.submeshCount > 0
       ? submeshes.slice(mesh.submeshIndex, mesh.submeshIndex + mesh.submeshCount).map((submesh) => ({
           start: submesh.indexOffset - mesh.startIndex,
@@ -486,9 +560,18 @@ export function decodeMdl(mdlBuffer: ArrayBuffer): DecodedModel {
   }
 
   assertDecode(decoded.length > 0, 'The MDL contains no decodable meshes.')
-  return { meshes: decoded, materialPaths, boneNames, bounds, lod }
+  return {
+    meshes: decoded,
+    materialPaths,
+    boneNames,
+    bounds,
+    lod,
+    availableShapes: shapes.map((shape) => shape.name),
+    activeShapes: [...appliedShapeNames],
+    shapeReplacements: shapeReplacementCount,
+  }
 }
 
-export async function decodeSqpackModel(payload: ArrayBuffer): Promise<DecodedModel> {
-  return decodeMdl(await reconstructMdl(payload))
+export async function decodeSqpackModel(payload: ArrayBuffer, requestedShapes: readonly string[] = []): Promise<DecodedModel> {
+  return decodeMdl(await reconstructMdl(payload), requestedShapes)
 }

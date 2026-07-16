@@ -17,12 +17,16 @@ describe('MTRL parser', () => {
     view.setUint16(18, 9, true)
     bytes.set(strings, stringStart)
     view.setUint16(shaderStart + 6, 1, true)
+    view.setUint32(shaderStart + 8, 0x10, true)
     view.setUint32(shaderStart + 12, 0x115306be, true)
     bytes[shaderStart + 20] = 0
 
     expect(parseMtrl(bytes.buffer)).toEqual({
       version: 0x01030000,
       shaderPackage: 'character.shpk',
+      shaderFlags: 0x10,
+      renderBackfaces: true,
+      translucent: true,
       textures: [{ path: 'chara/test_d.tex', flags: 9, samplerId: 0x115306be, role: 'diffuse' }],
     })
   })

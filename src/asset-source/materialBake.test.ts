@@ -3,6 +3,7 @@ import {
   bakeCharacterMaterial,
   bakeHairMaterial,
   bakeTattooMaterial,
+  extractSkinLipMask,
   materialAlphaMode,
   usesCharacterColorTable,
 } from './materialBake'
@@ -105,11 +106,17 @@ describe('character colorset baking', () => {
     expect(Array.from(result.normal.rgba)).toEqual([128, 128, 255, 255])
   })
 
+  it('preserves the skin normal alpha channel as a grayscale lip mask', () => {
+    const result = extractSkinLipMask(texture([120, 130, 90, 173]))!
+    expect(Array.from(result.rgba)).toEqual([173, 173, 173, 255])
+  })
+
   it('uses face-aware alpha modes for skin and hair overlays', () => {
     const face = '/mt_c0101f0001_etc_a.mtrl'
     expect(materialAlphaMode('hair.shpk', face)).toBe('blend')
     expect(materialAlphaMode('skin.shpk', face)).toBe('mask')
     expect(materialAlphaMode('skin.shpk', '/mt_c0101b0001_a.mtrl')).toBe('opaque')
+    expect(materialAlphaMode('character.shpk', '/mt_w2101b0062_a.mtrl', 0x10)).toBe('blend')
   })
 
   it('does not apply the gear colorset baker to iris materials', () => {

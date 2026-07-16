@@ -26,6 +26,7 @@ export function loadLocalModels(
   source: Extract<AssetSource, { kind: 'local' }>,
   paths: string[],
   deformation?: ModelDeformationRequest,
+  shapeSelections?: Record<string, string[]>,
 ): Promise<ModelLoadResult[]> {
   const worker = new Worker(new URL('./model.worker.ts', import.meta.url), { type: 'module' })
   const id = ++requestId
@@ -40,7 +41,7 @@ export function loadLocalModels(
       worker.terminate()
       reject(new Error(event.message || 'The FFXIV model worker failed.'))
     }
-    worker.postMessage({ id, source, paths, deformation })
+    worker.postMessage({ id, source, paths, deformation, shapeSelections })
   })
 }
 

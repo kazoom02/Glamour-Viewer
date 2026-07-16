@@ -1,6 +1,7 @@
 import type { EquipmentSlot } from '../catalog/types'
 import type { DecodedTexture } from './tex'
 import type { MaterialAlphaMode } from './materialBake'
+import type { DecodedAvfx } from './avfx'
 
 export interface MaterialLoadRequest {
   modelPath: string
@@ -11,12 +12,16 @@ export interface MaterialLoadRequest {
   /** In-game Stain row IDs for dye channels 1 and 2. */
   stains?: [number, number]
   equipmentSetId?: number
+  /** CharaMake face-paint FeatureID; zero disables the decal. */
+  facePaintId?: number
 }
 
 export interface DecodedMaterial {
   path: string
   shaderPackage: string
   alphaMode: MaterialAlphaMode
+  renderBackfaces: boolean
+  shaderFlags: number
   textures: {
     diffuse?: DecodedTexture
     normal?: DecodedTexture
@@ -29,6 +34,8 @@ export interface DecodedMaterial {
     emissive?: DecodedTexture
     specularColor?: DecodedTexture
     specularIntensity?: DecodedTexture
+    /** Skin FACE mode: alpha copied from the authored normal map. */
+    lipMask?: DecodedTexture
   }
   colorTableRows?: number
   dyeableRows?: number
@@ -46,6 +53,12 @@ export interface MaterialLoadResult {
   materialAnimationId?: number
   /** Resolved game path for the selected equipment AVFX, when known. */
   vfxPath?: string
+  /** Decoded textures in the AVFX texture-table order. */
+  vfxTextures?: Array<{ path: string; texture: DecodedTexture }>
+  /** Authored AVFX scheduler, emitters, particles, curves, and embedded meshes. */
+  vfx?: DecodedAvfx
+  /** Local face decal decoded from chara/common/texture/decal_face. */
+  facePaintTexture?: { path: string; texture: DecodedTexture }
   headHairHidden?: boolean
   headScalpHidden?: boolean
 }

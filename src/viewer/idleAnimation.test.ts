@@ -22,12 +22,20 @@ function animation(blendHint: DecodedAnimation['blendHint'] = 'normal'): Decoded
 describe('idle animation clip', () => {
   it('keeps the character root planted while retaining rotation motion', () => {
     const root = new THREE.Bone()
-    root.name = 'n_hara'
+    root.name = 'n_root'
     const clip = animationClipFromDecoded(animation(), new THREE.Skeleton([root]))
     const position = clip.tracks.find((track) => track.name.endsWith('.position'))!
     const rotation = clip.tracks.find((track) => track.name.endsWith('.quaternion'))!
     expect(Array.from(position.values).every((value, index) => value === [0, 1, 0][index % 3])).toBe(true)
     expect(rotation.values.length).toBeGreaterThan(4)
+  })
+
+  it('retains authored hip translation for breathing and weight shift', () => {
+    const hips = new THREE.Bone()
+    hips.name = 'n_hara'
+    const clip = animationClipFromDecoded(animation(), new THREE.Skeleton([hips]))
+    const position = clip.tracks.find((track) => track.name.endsWith('.position'))!
+    expect(Array.from(position.values)).toEqual(Array.from(animation().tracks[0]!.translations))
   })
 
   it('refuses additive clips instead of applying deltas as absolute transforms', () => {
