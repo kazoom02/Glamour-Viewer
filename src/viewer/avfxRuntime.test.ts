@@ -46,7 +46,7 @@ describe('AVFX runtime', () => {
       lifeRandom: 0,
       loopStart: 0,
       loopEnd: 0,
-      drawMode: 2,
+      drawMode: 1,
       drawPriority: 0,
       depthTest: true,
       depthWrite: false,
@@ -75,6 +75,11 @@ describe('AVFX runtime', () => {
     const runtime = createAvfxRuntime(target, avfx, [], 1)
     runtime.update(1 / 60)
     expect(runtime.renderedParticles).toBe(1)
+    const multiplyParticle = target.getObjectByName('avfx-particle-0') as THREE.Mesh
+    const multiplyMaterial = multiplyParticle.material as THREE.ShaderMaterial
+    expect(multiplyMaterial.blending).toBe(THREE.MultiplyBlending)
+    expect(multiplyMaterial.premultipliedAlpha).toBe(true)
+    expect(multiplyMaterial.fragmentShader).toContain('#include <premultiplied_alpha_fragment>')
     runtime.update(2 / 60)
     expect(runtime.renderedParticles).toBe(0)
     runtime.dispose()

@@ -436,6 +436,7 @@ const AVFX_FRAGMENT_SHADER = /* glsl */`
     if (result.a <= 0.002) discard;
     gl_FragColor = result;
     #include <colorspace_fragment>
+    #include <premultiplied_alpha_fragment>
   }
 `
 
@@ -553,12 +554,14 @@ export function createAvfxRuntime(
       uniforms[`uUvTransform${index}`] = { value: new THREE.Vector4(1, 1, 0, 0) }
       uniforms[`uUvRotation${index}`] = { value: 0 }
     }
+    const blendMode = blending(definition.drawMode)
     const material = new THREE.ShaderMaterial({
       uniforms,
       vertexShader: AVFX_VERTEX_SHADER,
       fragmentShader: AVFX_FRAGMENT_SHADER,
       transparent: true,
-      blending: blending(definition.drawMode),
+      blending: blendMode,
+      premultipliedAlpha: blendMode === THREE.MultiplyBlending || blendMode === THREE.SubtractiveBlending,
       depthTest: definition.depthTest,
       depthWrite: definition.depthWrite,
       toneMapped: false,
