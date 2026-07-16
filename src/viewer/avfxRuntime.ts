@@ -23,8 +23,7 @@ interface RuntimeEmitter {
   nextParticle: number[]
   nextEmitter: number[]
   seed: number
-  activeChildren: number
-  parent?: RuntimeEmitter
+  parentDefinition?: number
 }
 
 interface RuntimeParticle {
@@ -39,7 +38,7 @@ interface RuntimeParticle {
   rotation: THREE.Euler
   inheritedScale: THREE.Vector3
   seed: number
-  parent: RuntimeEmitter
+  parentDefinition: number
 }
 
 export interface AvfxRuntime {
@@ -368,6 +367,10 @@ export function createAvfxRuntime(
   const proceduralGeometryCache = new Map<number, THREE.BufferGeometry>()
   const emitters: RuntimeEmitter[] = []
   const particles: RuntimeParticle[] = []
+  const activeChildrenByDefinition = new Uint32Array(avfx.emitters.length)
+  const changeActiveChildren = (definition: number, amount: number) => {
+    activeChildrenByDefinition[definition] = Math.max(0, (activeChildrenByDefinition[definition] ?? 0) + amount)
+  }
   let seed = 0x4f6d6567
   let globalFrame = 0
   const startedTimelineItems = new Set<number>()
@@ -407,7 +410,7 @@ export function createAvfxRuntime(
     definition: number,
     position = new THREE.Vector3(),
     parentSeed = seed++,
-    parent?: RuntimeEmitter,
+    parentDefinition?: number,
   ): boolean => {
     const source = avfx.emitters[definition]
     if (!source) return false
@@ -421,10 +424,9 @@ export function createAvfxRuntime(
       nextParticle: source.particleRules.map((rule) => rule.createTime),
       nextEmitter: source.emitterRules.map((rule) => rule.createTime),
       seed: parentSeed,
-      activeChildren: 0,
-      ...(parent ? { parent } : {}),
+      ...(parentDefinition !== undefined ? { parentDefinition } : {}),
     })
-    if (parent) parent.activeChildren++
+    if (parentDefinition !== undefined) changeActiveChildren(parentDefinition, 1)
     return true
   }
 
@@ -500,9 +502,9 @@ export function createAvfxRuntime(
       rotation: rule.rotationInfluence ? parent.rotation.clone() : new THREE.Euler(),
       inheritedScale: rule.scaleInfluence ? parent.scale.clone() : new THREE.Vector3(1, 1, 1),
       seed: instanceSeed,
-      parent,
+      parentDefinition: parent.definition,
     })
-    parent.activeChildren++
+    changeActiveChildren(parent.definition, 1)
     return true
   }
 
@@ -511,13 +513,13 @@ export function createAvfxRuntime(
     const randomCount = curveRandom(source?.createCountRandom, parent.age, parent.seed + 107)
     const count = Math.max(1, Math.round(evaluateAvfxCurve(source?.createCount, parent.age, 1) + randomCount)) * Math.max(1, rule.createCount)
     for (let index = 0; index < count; index++) {
-      if (source?.childLimit && parent.activeChildren >= source.childLimit) break
+      if (source?.childLimit && (activeChildrenByDefinition[parent.definition] ?? 0) >= source.childLimit) break
       const instanceSeed = seed++
       if (seeded(instanceSeed + 101) * 100 > rule.probability) continue
       if (emitterRule) {
         const local = source?.type === 5 ? sampleEmitterPoint(source, instanceSeed) : new THREE.Vector3()
         local.multiply(parent.scale).applyEuler(parent.rotation)
-        addEmitter(rule.target, parent.position.clone().add(local), instanceSeed, parent)
+        addEmitter(rule.target, parent.position.clone().add(local), instanceSeed, parent.definition)
       } else addParticle(rule, parent, instanceSeed)
     }
   }
@@ -528,6 +530,7 @@ export function createAvfxRuntime(
       particle.material.dispose()
     }
     emitters.length = 0
+    activeChildrenByDefinition.fill(0)
     startedTimelineItems.clear()
   }
 
@@ -589,7 +592,9 @@ export function createAvfxRuntime(
           }
         })
         if (emitter.age > definition.life) {
-          if (emitter.parent) emitter.parent.activeChildren = Math.max(0, emitter.parent.activeChildren - 1)
+          if (emitter.parentDefinition !== undefined) {
+            changeActiveChildren(emitter.parentDefinition, -1)
+          }
           emitters.splice(emitterIndex, 1)
         }
       }
@@ -599,7 +604,7 @@ export function createAvfxRuntime(
         if (particle.age >= particle.life) {
           group.remove(particle.object)
           particle.material.dispose()
-          particle.parent.activeChildren = Math.max(0, particle.parent.activeChildren - 1)
+          changeActiveChildren(particle.parentDefinition, -1)
           particles.splice(index, 1)
           continue
         }
@@ -619,7 +624,13 @@ export function createAvfxRuntime(
           particle.rotation.y + rotation.y + rotationVelocity.y * frame,
           particle.rotation.z + rotation.z + rotationVelocity.z * frame,
         )
-        particle.object.scale.copy(vectorAt(particle.definition.scale, frame, 1, particle.seed)).multiply(particle.inheritedScale)
+        const authoredScale = vectorAt(particle.definition.scale, frame, 1, particle.seed)
+        // Disc and LightModel particles author their visible radius in Scale X.
+        // Their Y/Z curve channels control engine-specific light/disc behavior;
+        // applying them as mesh axes turns values such as Omega's Z=10 into
+        // twenty-metre wedges instead of a compact circular light model.
+        if (particle.definition.type === 12 || particle.definition.type === 13) authoredScale.setScalar(authoredScale.x)
+        particle.object.scale.copy(authoredScale).multiply(particle.inheritedScale)
         const color = colorAt(particle.definition.color, frame)
         const brightness = evaluateAvfxCurve(particle.definition.color.brightness, frame, 1)
         ;(particle.material.uniforms.uTint!.value as THREE.Color).copy(color)

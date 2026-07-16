@@ -84,12 +84,17 @@ describe('AVFX runtime', () => {
     emitter.life = 4
     emitter.createInterval = constant(1)
     particle.life = 10
+    particle.type = 13
+    particle.scale = { x: constant(0.25), y: constant(0.5), z: constant(10) }
+    avfx.rootEmitterIndices = [0, 0]
     const limitedTarget = new THREE.Group()
     const limitedRuntime = createAvfxRuntime(limitedTarget, avfx, [], 1)
     limitedRuntime.update(1 / 60)
     limitedRuntime.update(1 / 60)
     limitedRuntime.update(1 / 60)
     expect(limitedRuntime.renderedParticles).toBe(1)
+    const rendered = limitedTarget.getObjectByName('avfx-particle-0')
+    expect(rendered?.scale.toArray()).toEqual([0.25, 0.25, 0.25])
     limitedRuntime.dispose()
   })
 })
