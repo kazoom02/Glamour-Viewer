@@ -609,8 +609,24 @@ function equipmentTarget(
     : handWeaponTarget(character, rig, slot)
 }
 
-function fitCamera(camera: THREE.PerspectiveCamera, controls: OrbitControls, object: THREE.Object3D, padding = 1.36) {
-  const box = new THREE.Box3().setFromObject(object)
+// Builds the framing box from the wearer's body and worn armor, deliberately
+// excluding hand/back weapon reach and the volatile AVFX particle cloud. This
+// keeps the character centered in the preview panel when a large weapon or an
+// expanding effect would otherwise drag the combined bounding box off to one
+// side.
+function characterFramingBox(root: THREE.Object3D): THREE.Box3 {
+  root.updateMatrixWorld(true)
+  const box = new THREE.Box3()
+  root.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) return
+    if (/^equipment-(mainHand|offHand)/.test(object.name)) return
+    if (object.name.startsWith('avfx-particle')) return
+    box.expandByObject(object)
+  })
+  return box
+}
+
+function fitCamera(camera: THREE.PerspectiveCamera, controls: OrbitControls, box: THREE.Box3, padding = 1.36) {
   if (box.isEmpty()) return
   const center = box.getCenter(new THREE.Vector3())
   const size = box.getSize(new THREE.Vector3())
@@ -1022,8 +1038,12 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               materialResult?.materialAnimationId ?? 0,
               animatedMaterials,
             )
-            const vfxRuntime = materialResult?.vfx && materialResult.vfxTextures?.length
-              ? createAvfxRuntime(attachment.target, materialResult.vfx, materialResult.vfxTextures, maxAnisotropy)
+            // Activate whenever the AVFX resolved, not only when it ships
+            // separate ATEX textures: many weapon/relic effects draw embedded
+            // model geometry with baked vertex colors and no texture layers.
+            const vfxDrawsGeometry = materialResult?.vfx?.models.some((model) => model.positions.length && model.indices.length)
+            const vfxRuntime = materialResult?.vfx && (materialResult.vfxTextures?.length || vfxDrawsGeometry)
+              ? createAvfxRuntime(attachment.target, materialResult.vfx, materialResult.vfxTextures ?? [], maxAnisotropy)
               : undefined
             if (vfxRuntime) avfxRuntimes.push(vfxRuntime)
             if (weapon) diagnostics.push(`weapon attachment ${plan.item.name}: slot=${plan.slot} ${attachment.diagnostic}`)
@@ -1112,7 +1132,10 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       if (disposed) return
       fallback.visible = characterParts === 0
       if (characterParts || equippedItems) {
-        const refit = () => fitCamera(camera, controls, characterGroup)
+        const refit = () => {
+          const bodyBox = characterFramingBox(characterGroup)
+          fitCamera(camera, controls, bodyBox.isEmpty() ? new THREE.Box3().setFromObject(characterGroup) : bodyBox)
+        }
         resetView.current = refit
         refit()
       }
