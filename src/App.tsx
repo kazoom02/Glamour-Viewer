@@ -24,6 +24,7 @@ import { CHARACTER_PRESETS, type CharacterRaceCode } from './asset-source/charac
 import { customizationForRaceCode, type CharacterCustomization } from './customization/types'
 
 const ViewerCanvas = lazy(() => import('./viewer/ViewerCanvas'))
+const DefaultCharacterPreview = lazy(() => import('./viewer/DefaultCharacterPreview'))
 const ArmorCatalog = lazy(() => import('./components/ArmorCatalog'))
 const CustomizationPanel = lazy(() => import('./components/CustomizationPanel'))
 
@@ -158,12 +159,10 @@ export function App() {
             </div>
           </div>
           {!source && (
-            <div className="hero-visual" aria-hidden="true">
-              <div className="silhouette">
-                <div className="silhouette-head" />
-                <div className="silhouette-body" />
-                <p>Renderer loads after you connect a source</p>
-              </div>
+            <div className="hero-visual">
+              <Suspense fallback={<div className="viewer-loading">Loading default character…</div>}>
+                <DefaultCharacterPreview />
+              </Suspense>
             </div>
           )}
         </section>
@@ -296,3 +295,4 @@ export function App() {
     </div>
   )
 }
+
