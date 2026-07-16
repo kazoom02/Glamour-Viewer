@@ -35,4 +35,14 @@ describe('idle animation clip', () => {
     root.name = 'n_hara'
     expect(() => animationClipFromDecoded(animation('additive'), new THREE.Skeleton([root]))).toThrow('additive')
   })
+
+  it('preserves CMP bust scaling in animation scale tracks', () => {
+    const breast = new THREE.Bone()
+    breast.name = 'j_mune_l'
+    const clip = animationClipFromDecoded(animation(), new THREE.Skeleton([breast]), [1.2, 1.3, 1.4])
+    const scale = clip.tracks.find((track) => track.name === 'j_mune_l.scale')
+    expect(Array.from(scale!.values.slice(0, 3))).toEqual([
+      expect.closeTo(1.2), expect.closeTo(1.3), expect.closeTo(1.4),
+    ])
+  })
 })

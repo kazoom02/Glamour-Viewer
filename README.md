@@ -31,6 +31,8 @@ For local installs, the browser also reads the equipment IMC row selected by XIV
 
 Head equipment also reads the local `equipmentparameter.eqp` flags to suppress hairstyles when the game marks a helmet as hiding hair. The Head slot offers an Auto/Show/Hide override for unusual pieces or incomplete installs.
 
+Female bust customization reads the selected clan's three-axis minimum and maximum RSP values from local `chara/xls/charamake/human.cmp`, then applies the interpolated scale to the vanilla `j_mune` skin weights. The same scale is retained while the idle animation is running.
+
 The browser parses `chara/xls/boneDeformer/human.pbd` and applies its sequential, skin-weighted race matrices whenever a body or equipment model falls back to an ancestor race. This keeps shared Midlander geometry aligned with race-specific skeletons such as Elezen. Equipment can be dyed per supported channel from the complete XIVAPI `Stain` catalog: the material worker reads the MTRL template/channel flags and applies the selected stain through `stainingtemplate.stm` or Dawntrail's `stainingtemplate_gud.stm`, including diffuse, specular, emissive, roughness, metalness, and legacy specular controls. PAP animation sampling, EQDP selection, and detailed equipment body-hiding metadata are still required for full in-game parity.
 
 ## Self-hosted cache CORS

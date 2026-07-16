@@ -34,6 +34,7 @@ export interface CharacterCustomization {
   tribeId: number
   gender: CharacterGender
   muscleTone: number
+  bustSize: number
   face: number
   skinColor: string
   hairstyle: number
@@ -57,6 +58,7 @@ export const DEFAULT_CUSTOMIZATION: CharacterCustomization = {
   tribeId: 1,
   gender: 'female',
   muscleTone: 50,
+  bustSize: 50,
   face: 1,
   skinColor: '#ffffff',
   hairstyle: 1,

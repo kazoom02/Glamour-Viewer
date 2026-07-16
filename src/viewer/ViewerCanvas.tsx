@@ -14,6 +14,7 @@ import {
   type CharacterRaceCode,
 } from '../asset-source/characterPlan'
 import { loadLocalIdleAnimation, type DecodedAnimation } from '../asset-source/animationLoader'
+import { HUMAN_CMP_PATH, loadLocalBustScale, type BustScale } from '../asset-source/cmp'
 import { equipmentAssetPlan } from '../asset-source/equipmentPlan'
 import { loadLocalMaterials, type DecodedMaterial, type MaterialLoadRequest } from '../asset-source/materialLoader'
 import { loadLocalModels, type ModelLoadResult } from '../asset-source/modelLoader'
@@ -66,6 +67,8 @@ const PART_COLORS: Record<CharacterPart, number> = {
   tail: 0x4b3837,
   ears: 0x3d3031,
 }
+
+const BUST_BONES = new Set(['j_mune_l', 'j_mune_r'])
 
 function addFallbackMannequin(scene: THREE.Scene): THREE.Group {
   const group = new THREE.Group()
@@ -136,7 +139,7 @@ interface CharacterRig {
 
 type IdleAnimationState = 'loading' | 'ready' | 'playing' | 'paused' | 'unavailable'
 
-function addCharacterRig(target: THREE.Group, decoded: DecodedSkeleton): CharacterRig {
+function addCharacterRig(target: THREE.Group, decoded: DecodedSkeleton, bustScale: BustScale = [1, 1, 1]): CharacterRig {
   const bones = decoded.bones.map((source) => {
     const bone = new THREE.Bone()
     bone.name = source.name
@@ -154,6 +157,12 @@ function addCharacterRig(target: THREE.Group, decoded: DecodedSkeleton): Charact
   target.updateMatrixWorld(true)
   const skeleton = new THREE.Skeleton(bones)
   skeleton.calculateInverses()
+  // Keep the inverse bind matrices from the authored neutral pose, then apply
+  // the client RSP scale so j_mune-weighted vertices actually deform.
+  bones.forEach((bone) => {
+    if (BUST_BONES.has(bone.name.toLowerCase())) bone.scale.multiply(new THREE.Vector3(...bustScale))
+  })
+  target.updateMatrixWorld(true)
   return { skeleton, boneIndex: new Map(bones.map((bone, index) => [bone.name, index])) }
 }
 
@@ -227,6 +236,15 @@ function addDecodedModel(
         : shaderPackage === 'iris.shpk'
           ? 0.52
           : 0.28
+    const mappedSpecularIntensity = shaderPackage === 'skin.shpk'
+      ? 0.3
+      : shaderPackage === 'hair.shpk'
+        ? 0.35
+        : shaderPackage === 'iris.shpk'
+          ? 0.7
+          : shaderPackage.startsWith('character')
+            ? 0.62
+            : 0.5
     const aoMap = ao
       ? textureFromDecoded(ao, false, anisotropy)
       : mask
@@ -258,7 +276,7 @@ function addDecodedModel(
       emissive: emissive ? 0xffffff : 0x000000,
       specularColorMap: specularColor ? textureFromDecoded(specularColor, true, anisotropy) : null,
       specularIntensityMap,
-      specularIntensity: specularIntensityMap ? 1 : fallbackSpecularIntensity,
+      specularIntensity: specularIntensityMap ? mappedSpecularIntensity : fallbackSpecularIntensity,
       ior: 1.5,
       clearcoat: 0,
       sheen: 0,
@@ -478,7 +496,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 3))
     renderer.outputColorSpace = THREE.SRGBColorSpace
     renderer.toneMapping = THREE.NeutralToneMapping
-    renderer.toneMappingExposure = 1
+    renderer.toneMappingExposure = 0.9
     const maxAnisotropy = renderer.capabilities.getMaxAnisotropy()
     host.appendChild(renderer.domElement)
 
@@ -497,12 +515,17 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
     setIdleLabel('Idle')
     setIdleState(source.kind === 'local' ? 'loading' : 'unavailable')
 
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x20242c, 1.35))
-    const key = new THREE.DirectionalLight(0xffffff, 2.4)
-    key.position.set(3, 5, 4)
+    // A restrained neutral studio rig keeps colors readable without the hard,
+    // glossy streaks produced by the previous 2.4-strength directional key.
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x282b31, 0.9))
+    const key = new THREE.DirectionalLight(0xffffff, 1.2)
+    key.position.set(4, 5, 6)
     scene.add(key)
-    const rim = new THREE.DirectionalLight(0xffffff, 0.65)
-    rim.position.set(-4, 2, -3)
+    const fill = new THREE.DirectionalLight(0xffffff, 0.38)
+    fill.position.set(-4, 3, 5)
+    scene.add(fill)
+    const rim = new THREE.DirectionalLight(0xffffff, 0.18)
+    rim.position.set(-4, 4, -4)
     scene.add(rim)
 
     const allCharacterPlans = characterModelPlan(raceCode, { faceId: customization.face, hairId: customization.hairstyle })
@@ -528,6 +551,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       let equippedItems = 0
       let rig: CharacterRig | undefined
       let decodedSkeleton: DecodedSkeleton | undefined
+      let bustScale: BustScale = [1, 1, 1]
       let idleAnimationPromise: Promise<DecodedAnimation> | undefined
       let idleReady = false
       if (source.kind === 'local') {
@@ -568,7 +592,17 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             }
           }
           decodedSkeleton = combinedSkeleton
-          rig = addCharacterRig(characterGroup, combinedSkeleton)
+          if (customization.gender === 'female') {
+            try {
+              bustScale = await loadLocalBustScale(source, customization.tribeId, customization.bustSize)
+              diagnostics.push(
+                `bust RSP: ${HUMAN_CMP_PATH} tribe=${customization.tribeId} value=${customization.bustSize} scale=${bustScale.map((value) => value.toFixed(4)).join(',')}`,
+              )
+            } catch (reason) {
+              diagnostics.push(`bust RSP unavailable: ${reason instanceof Error ? reason.message : String(reason)}`)
+            }
+          }
+          rig = addCharacterRig(characterGroup, combinedSkeleton, bustScale)
           idleAnimationPromise = loadLocalIdleAnimation(source, idleAnimationCandidates(raceCode))
         } catch (reason) {
           failures.push(`base skeleton: ${reason instanceof Error ? reason.message : String(reason)}`)
@@ -683,7 +717,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             setStatus(`Preparing ${raceCode} idle animation…`)
             const decodedAnimation = await idleAnimationPromise
             if (disposed) return
-            const clip = animationClipFromDecoded(decodedAnimation, rig.skeleton)
+            const clip = animationClipFromDecoded(decodedAnimation, rig.skeleton, bustScale)
             activeIdleMixer = new THREE.AnimationMixer(characterGroup)
             const action = activeIdleMixer.clipAction(clip)
             action.setLoop(THREE.LoopRepeat, Infinity)
@@ -818,6 +852,9 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
     raceCode,
     customization.face,
     customization.hairstyle,
+    customization.tribeId,
+    customization.gender,
+    customization.bustSize,
     customization.skinColor,
     customization.hairColor,
     customization.eyeColor,

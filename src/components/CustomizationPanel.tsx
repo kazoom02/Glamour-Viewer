@@ -112,6 +112,19 @@ export default function CustomizationPanel({ raceCode, customization, onChange, 
           />
           <output>{customization.muscleTone}</output>
         </label>
+        {customization.gender === 'female' && (
+          <label className="customization-field range-field">
+            <span>Bust Size</span>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={customization.bustSize}
+              onChange={(event) => update('bustSize', Number(event.target.value))}
+            />
+            <output>{customization.bustSize}</output>
+          </label>
+        )}
         {numberField('Face', 'face', 4)}
         {colorField('Skin Color', 'skinColor')}
         <HairstylePicker
@@ -147,7 +160,7 @@ export default function CustomizationPanel({ raceCode, customization, onChange, 
       </div>
 
       <p className="customization-note">
-        Race, gender, face model, hairstyle, skin, hair, eye, tattoo, and paint colors update the preview. Detailed jaw, eye, nose, and mouth geometry is retained in the appearance profile while face morph decoding is completed.
+        Race, gender, bust size, face model, hairstyle, skin, hair, eye, tattoo, and paint colors update the preview. Detailed jaw, eye, nose, and mouth geometry is retained in the appearance profile while face morph decoding is completed.
       </p>
     </section>
   )
