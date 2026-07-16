@@ -405,15 +405,21 @@ function addDecodedModel(
         : shaderPackage === 'iris.shpk'
           ? 0.52
           : 0.28
+    // Solid gear shaders (armor, weapons) are FFXIV's colored-specular "metal".
+    // Three's dielectric reflectance is far weaker, so lift these two toward a
+    // glossy response; face overlays (tattoo/occlusion) keep the subtle value.
+    const isGearShader = shaderPackage === 'character.shpk' || shaderPackage === 'characterlegacy.shpk'
     const mappedSpecularIntensity = shaderPackage === 'skin.shpk'
       ? 0.25
       : shaderPackage === 'hair.shpk'
         ? 0.28
         : shaderPackage === 'iris.shpk'
           ? 0.72
-          : shaderPackage.startsWith('character')
-            ? 0.38
-            : 0.32
+          : isGearShader
+            ? 0.9
+            : shaderPackage.startsWith('character')
+              ? 0.38
+              : 0.32
     const resolvedMuscleNormalStrength = customization
       && shaderPackage === 'skin.shpk'
       && !isFaceMaterial
@@ -463,7 +469,9 @@ function addDecodedModel(
       specularColorMap: specularColor ? textureFromDecoded(specularColor, true, anisotropy) : null,
       specularIntensityMap,
       specularIntensity: specularIntensityMap ? mappedSpecularIntensity : fallbackSpecularIntensity,
-      ior: 1.45,
+      // Higher IOR raises dielectric reflectance so colored-specular gear reads
+      // as polished metal (~11% vs ~3%); skin and cloth-weight shaders stay soft.
+      ior: isGearShader ? 2.0 : 1.45,
       clearcoat: 0,
       sheen: 0,
       alphaTest: diffuse && alphaMode === 'mask' ? (shaderPackage === 'hair.shpk' ? 0.34 : 0.46) : 0,
