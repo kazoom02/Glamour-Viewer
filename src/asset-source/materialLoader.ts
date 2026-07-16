@@ -43,4 +43,4 @@ export function loadLocalMaterials(
 }
 
 export type { DecodedMaterial, MaterialLoadRequest, MaterialLoadResult } from './materialTypes'
-
+export type { DecodedMaterialAnimation, DecodedMaterialAnimationTrack } from './materialAnimation'

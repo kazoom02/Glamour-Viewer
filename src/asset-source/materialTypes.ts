@@ -2,6 +2,7 @@ import type { EquipmentSlot } from '../catalog/types'
 import type { DecodedTexture } from './tex'
 import type { MaterialAlphaMode } from './materialBake'
 import type { DecodedAvfx } from './avfx'
+import type { DecodedMaterialAnimation } from './materialAnimation'
 
 export interface MaterialLoadRequest {
   modelPath: string
@@ -53,6 +54,10 @@ export interface MaterialLoadResult {
   vfxId?: number
   /** Equipment material animation selected by the active IMC row. */
   materialAnimationId?: number
+  /** Resolved game path for the selected weapon material animation. */
+  materialAnimationPath?: string
+  /** Authored material-skeleton RGB keyframes sampled from material.pap. */
+  materialAnimation?: DecodedMaterialAnimation
   /** Resolved game path for the selected equipment AVFX, when known. */
   vfxPath?: string
   /** Decoded textures in the AVFX texture-table order. */

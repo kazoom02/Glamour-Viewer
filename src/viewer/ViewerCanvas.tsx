@@ -19,10 +19,13 @@ import { HUMAN_CMP_PATH, loadLocalBustScale, type BustScale } from '../asset-sou
 import { equipmentAssetPlan } from '../asset-source/equipmentPlan'
 import {
   loadLocalMaterials,
+  type DecodedMaterialAnimation,
+  type DecodedMaterialAnimationTrack,
   type DecodedMaterial,
   type MaterialLoadRequest,
   type MaterialLoadResult,
 } from '../asset-source/materialLoader'
+import { materialAnimationTrack, sampleMaterialAnimationTrack } from '../asset-source/materialAnimation'
 import { loadLocalModels, type ModelLoadResult } from '../asset-source/modelLoader'
 import type { DecodedModel } from '../asset-source/mdl'
 import {
@@ -156,8 +159,9 @@ type IdleAnimationState = 'loading' | 'ready' | 'playing' | 'paused' | 'unavaila
 
 interface AnimatedMaterial {
   material: THREE.MeshPhysicalMaterial
-  baseEmissiveIntensity: number
-  phase: number
+  animation: DecodedMaterialAnimation
+  track: DecodedMaterialAnimationTrack
+  color: [number, number, number]
 }
 
 function hasVisibleRgb(texture: NonNullable<DecodedMaterial['textures']['emissive']>): boolean {
@@ -340,7 +344,7 @@ function addDecodedModel(
   anisotropy = 1,
   customization?: CharacterCustomization,
   refineCurvature = false,
-  materialAnimationId = 0,
+  materialAnimation?: DecodedMaterialAnimation,
   animatedMaterials: AnimatedMaterial[] = [],
   facePaintTexture?: MaterialLoadResult['facePaintTexture'],
 ): number {
@@ -490,12 +494,14 @@ function addDecodedModel(
       }, anisotropy)
     }
     const hasEmissivePixels = emissive && hasVisibleRgb(emissive)
-    if (materialAnimationId > 0 && hasEmissivePixels) {
+    const animationTrack = materialAnimation && materialAnimationTrack(materialAnimation, part.materialIndex)
+    if (animationTrack && hasEmissivePixels) {
       material.emissiveIntensity = 1
       animatedMaterials.push({
         material,
-        baseEmissiveIntensity: material.emissiveIntensity,
-        phase: (index * 1.618 + materialAnimationId * 0.73) % (Math.PI * 2),
+        animation: materialAnimation,
+        track: animationTrack,
+        color: [0, 0, 0],
       })
     }
     if (normal) material.normalScale.set(resolvedMuscleNormalStrength, resolvedMuscleNormalStrength)
@@ -1049,7 +1055,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               maxAnisotropy,
               customization,
               true,
-              0,
+              undefined,
               animatedMaterials,
               plan.part === 'face' ? materialResult?.facePaintTexture : undefined,
             )
@@ -1098,7 +1104,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               maxAnisotropy,
               customization,
               false,
-              materialResult?.materialAnimationId ?? 0,
+              materialResult?.materialAnimation,
               animatedMaterials,
             )
             // Activate whenever the AVFX resolved, not only when it ships
@@ -1144,10 +1150,10 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             }
             if (weapon) diagnostics.push(`weapon attachment ${plan.item.name}: slot=${plan.slot} raceScale=${weaponScale.toFixed(2)} ${attachment.diagnostic}`)
             if (materialResult?.materialAnimationId) {
-              diagnostics.push(`equipment material animation ${plan.item.name}: IMC id=${materialResult.materialAnimationId} authoredTrackDecoded=false approximateEmissivePulseMaterials=${animatedMaterials.length - animatedMaterialCount}`)
+              diagnostics.push(`equipment material animation ${plan.item.name}: IMC id=${materialResult.materialAnimationId} path=${materialResult.materialAnimationPath ?? 'unresolved'} authoredTrackDecoded=${Boolean(materialResult.materialAnimation)} animatedMaterials=${animatedMaterials.length - animatedMaterialCount}`)
             }
             if (materialResult?.vfxId) {
-              diagnostics.push(`equipment AVFX ${plan.item.name}: IMC id=${materialResult.vfxId} path=${materialResult.vfxPath ?? 'unresolved'} renderer=authored-graph emitters=${vfxRuntime?.decodedEmitters ?? 0} embeddedModels=${vfxRuntime?.decodedModels ?? 0} curves=true uvAnimation=true`)
+              diagnostics.push(`equipment AVFX ${plan.item.name}: IMC id=${materialResult.vfxId} path=${materialResult.vfxPath ?? 'unresolved'} renderer=authored-graph emitters=${vfxRuntime?.decodedEmitters ?? 0} embeddedModels=${vfxRuntime?.decodedModels ?? 0} curves=true uvAnimation=true textureSequences=true texturePalette=true`)
             }
             if (result.warning) failures.push(`${plan.item.name}: ${result.warning}`)
             if (materialResult?.errors.length) failures.push(...materialResult.errors.map((error) => `${plan.item.name} ${error}`))
@@ -1170,17 +1176,16 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             action.clampWhenFinished = false
             action.setEffectiveWeight(1)
             action.setEffectiveTimeScale(1)
-            // Apply frame zero immediately and keep the valid standing loop
-            // running; previously the action was paused as soon as it loaded,
-            // which made a successfully decoded animation look broken.
+            // Apply the authored first frame, but wait for an explicit Start.
             action.play()
             activeIdleMixer.update(0)
+            action.paused = true
             diagnostics.push(bustRigDiagnostic(rig, 'after idle frame 0 (CPU-baked geometry)', bustScale))
             idleMixer.current = activeIdleMixer
             idleAction.current = action
             idleReady = true
             setIdleLabel(decodedAnimation.name || 'Idle')
-            setIdleState('playing')
+            setIdleState('ready')
             diagnostics.push(
               `idle animation: ${decodedAnimation.path} name=${decodedAnimation.name} blend=${decodedAnimation.blendHint} duration=${decodedAnimation.duration.toFixed(3)}s frames=${decodedAnimation.times.length} tracks=${decodedAnimation.tracks.length} rootTranslation=stabilized`,
             )
@@ -1272,8 +1277,13 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       const delta = Math.min(clock.getDelta(), 0.1)
       elapsed += delta
       activeIdleMixer?.update(delta)
-      animatedMaterials.forEach(({ material, baseEmissiveIntensity, phase }) => {
-        material.emissiveIntensity = baseEmissiveIntensity * (0.88 + Math.sin(elapsed * 2.4 + phase) * 0.12)
+      animatedMaterials.forEach(({ material, animation, track, color }) => {
+        sampleMaterialAnimationTrack(animation, track, elapsed, color)
+        material.emissive.setRGB(
+          Math.max(0, color[0]),
+          Math.max(0, color[1]),
+          Math.max(0, color[2]),
+        )
       })
       avfxRuntimes.forEach((runtime) => runtime.update(delta, camera))
       controls.update()

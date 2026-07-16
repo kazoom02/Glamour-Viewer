@@ -1,7 +1,8 @@
 /// <reference lib="webworker" />
 
-import { equipmentVfxPath, readImcEntry } from './imc'
+import { equipmentMaterialAnimationPath, equipmentVfxPath, readImcEntry } from './imc'
 import { decodeAvfx } from './avfx'
+import { decodeMaterialAnimation, MATERIAL_ANIMATION_SKELETON_PATH } from './materialAnimation'
 import { EQUIPMENT_PARAMETER_PATH, headEquipmentVisibility } from './eqp'
 import {
   bakeCharacterMaterial,
@@ -178,6 +179,8 @@ async function loadRequest(
   let attributeMask: number | undefined
   let vfxId: number | undefined
   let materialAnimationId: number | undefined
+  let resolvedMaterialAnimationPath: string | undefined
+  let decodedMaterialAnimation: MaterialLoadResult['materialAnimation']
   let resolvedVfxPath: string | undefined
   let vfxTextures: MaterialLoadResult['vfxTextures']
   let decodedVfx: MaterialLoadResult['vfx']
@@ -231,10 +234,34 @@ async function loadRequest(
             diagnostics.push(`AVFX texture unavailable: ${path} — ${error instanceof Error ? error.message : String(error)}`)
           }
         }
-        diagnostics.push(`equipment AVFX: path=${resolvedVfxPath} bytes=${avfx.byteLength} emitters=${decodedVfx.emitters.length} particles=${decodedVfx.particles.length} models=${decodedVfx.models.length} textures=${references.length} decodedTextures=${vfxTextures.length} unsupportedParticleTypes=${decodedVfx.unsupportedParticleTypes.join(',') || 'none'}`)
+        const animatedTextureLayers = decodedVfx.particles.flatMap((particle) => particle.colorTextures).filter((binding) => binding.textureIndices.length > 1).length
+        const paletteLayers = decodedVfx.particles.filter((particle) => particle.paletteTexture?.enabled).length
+        const normalLayers = decodedVfx.particles.filter((particle) => particle.normalTexture?.enabled).length
+        const distortionLayers = decodedVfx.particles.filter((particle) => particle.distortionTexture?.enabled).length
+        diagnostics.push(`equipment AVFX: path=${resolvedVfxPath} bytes=${avfx.byteLength} emitters=${decodedVfx.emitters.length} particles=${decodedVfx.particles.length} models=${decodedVfx.models.length} textures=${references.length} decodedTextures=${vfxTextures.length} animatedTextureLayers=${animatedTextureLayers} paletteLayers=${paletteLayers} normalLayers=${normalLayers} distortionLayers=${distortionLayers} unsupportedParticleTypes=${decodedVfx.unsupportedParticleTypes.join(',') || 'none'}`)
       } catch (error) {
         diagnostics.push(`equipment AVFX unavailable: ${resolvedVfxPath} — ${error instanceof Error ? error.message : String(error)}`)
       }
+    }
+  }
+
+  if (materialAnimationId) {
+    resolvedMaterialAnimationPath = equipmentMaterialAnimationPath(request.modelPath, materialAnimationId)
+    if (resolvedMaterialAnimationPath) {
+      try {
+        const [pap, skeleton] = await Promise.all([
+          reader.read(resolvedMaterialAnimationPath),
+          reader.read(MATERIAL_ANIMATION_SKELETON_PATH),
+        ])
+        decodedMaterialAnimation = decodeMaterialAnimation(pap, skeleton, resolvedMaterialAnimationPath)
+        diagnostics.push(
+          `equipment material animation: path=${resolvedMaterialAnimationPath} name=${decodedMaterialAnimation.name} duration=${decodedMaterialAnimation.duration.toFixed(3)}s frames=${decodedMaterialAnimation.times.length} tracks=${decodedMaterialAnimation.tracks.map((track) => track.name).join(',')}`,
+        )
+      } catch (error) {
+        diagnostics.push(`equipment material animation unavailable: ${resolvedMaterialAnimationPath} â€” ${error instanceof Error ? error.message : String(error)}`)
+      }
+    } else {
+      diagnostics.push(`equipment material animation IMC id=${materialAnimationId} has no supported path for ${request.modelPath}`)
     }
   }
 
@@ -365,6 +392,8 @@ async function loadRequest(
     attributeMask,
     ...(vfxId !== undefined ? { vfxId } : {}),
     ...(materialAnimationId !== undefined ? { materialAnimationId } : {}),
+    ...(resolvedMaterialAnimationPath ? { materialAnimationPath: resolvedMaterialAnimationPath } : {}),
+    ...(decodedMaterialAnimation ? { materialAnimation: decodedMaterialAnimation } : {}),
     ...(resolvedVfxPath ? { vfxPath: resolvedVfxPath } : {}),
     ...(vfxTextures?.length ? { vfxTextures } : {}),
     ...(decodedVfx ? { vfx: decodedVfx } : {}),

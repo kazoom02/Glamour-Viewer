@@ -37,6 +37,14 @@ export function equipmentVfxPath(modelPath: string, vfxId: number): string | und
   return undefined
 }
 
+/** Resolves the authored material-color PAP selected by a weapon IMC row. */
+export function equipmentMaterialAnimationPath(modelPath: string, animationId: number): string | undefined {
+  if (!Number.isInteger(animationId) || animationId <= 0) return undefined
+  const weapon = /^chara\/weapon\/(w\d{4})\/obj\/body\/b\d{4}\//i.exec(modelPath)
+  if (!weapon) return undefined
+  return `chara/weapon/${weapon[1]!.toLowerCase()}/animation/s${animationId.toString().padStart(4, '0')}/body/material.pap`
+}
+
 /** Reads an equipment IMC row. Variants include row zero, matching the game's Variant id. */
 export function readImcEntry(bytes: ArrayBuffer, slot: EquipmentSlot, variant: number): ImcEntry {
   if (bytes.byteLength < 4) throw new Error('The IMC preamble is truncated.')

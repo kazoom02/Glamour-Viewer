@@ -119,12 +119,23 @@ export interface AvfxTextureBinding {
   enabled: boolean
   colorToAlpha: boolean
   textureIndices: number[]
+  textureIndex?: AvfxCurve
+  textureIndexRandom?: AvfxCurve
   uvSet: number
   filter: number
   borderU: number
   borderV: number
   colorMode: number
   alphaMode: number
+}
+
+export interface AvfxPaletteBinding {
+  enabled: boolean
+  textureIndex: number
+  filter: number
+  border: number
+  offset?: AvfxCurve
+  offsetRandom?: AvfxCurve
 }
 
 export interface AvfxUvSet {
@@ -177,6 +188,7 @@ export interface AvfxParticleDefinition {
   color: AvfxColorCurve
   uvSets: AvfxUvSet[]
   colorTextures: AvfxTextureBinding[]
+  paletteTexture?: AvfxPaletteBinding
   normalTexture?: AvfxTextureBinding
   distortionTexture?: AvfxTextureBinding
   modelIndices: number[]
@@ -359,12 +371,26 @@ function textureBinding(node: AvfxNode | undefined): AvfxTextureBinding | undefi
     enabled: nodeBool(node, 'bEna'),
     colorToAlpha: nodeBool(node, 'bC2A'),
     textureIndices,
+    textureIndex: curveFrom(lastChild(node, 'TxN')),
+    textureIndexRandom: curveFrom(lastChild(node, 'TxNR')),
     uvSet: nodeInt(node, 'UvSN'),
     filter: nodeInt(node, 'TFT', 1),
     borderU: nodeInt(node, 'TBUT', 1),
     borderV: nodeInt(node, 'TBVT', 1),
     colorMode: nodeInt(node, 'TCCT'),
     alphaMode: nodeInt(node, 'TCAT'),
+  }
+}
+
+function paletteBinding(node: AvfxNode | undefined): AvfxPaletteBinding | undefined {
+  if (!node) return undefined
+  return {
+    enabled: nodeBool(node, 'bEna'),
+    textureIndex: nodeInt(node, 'TxNo', -1),
+    filter: nodeInt(node, 'TFT', 1),
+    border: nodeInt(node, 'TBT', 1),
+    offset: curveFrom(lastChild(node, 'POff')),
+    offsetRandom: curveFrom(lastChild(node, 'POfR')),
   }
 }
 
@@ -451,6 +477,7 @@ function decodeParticle(node: AvfxNode): AvfxParticleDefinition {
     color: colorCurve(lastChild(node, 'Col')),
     uvSets: avfxChildren(node, 'UvSt').map(uvSet),
     colorTextures: textures,
+    paletteTexture: paletteBinding(lastChild(node, 'TP')),
     normalTexture: textureBinding(lastChild(node, 'TN')),
     distortionTexture: textureBinding(lastChild(node, 'TD')),
     modelIndices: [...indexList(dataNode, 'MdNo'), ...indexList(dataNode, 'MNO')],

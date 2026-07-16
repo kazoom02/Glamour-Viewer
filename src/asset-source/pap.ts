@@ -505,7 +505,7 @@ export function decodePap(bytes: ArrayBuffer, path = '', sampleRate = 30): Decod
   return {
     name: info.name,
     path,
-    blendHint: blendHint === 1 ? 'additive' : 'normal',
+    blendHint: blendHint === 0 ? 'normal' : 'additive',
     duration: animation.duration,
     times,
     tracks,

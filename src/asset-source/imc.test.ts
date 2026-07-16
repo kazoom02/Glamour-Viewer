@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { equipmentVfxPath, readImcEntry } from './imc'
+import { equipmentMaterialAnimationPath, equipmentVfxPath, readImcEntry } from './imc'
 
 describe('IMC parser', () => {
   it('selects the requested equipment slot and variant', () => {
@@ -51,5 +51,12 @@ describe('IMC parser', () => {
     expect(equipmentVfxPath('chara/weapon/w0456/obj/body/b0001/model/w0456b0001.mdl', 12))
       .toBe('chara/weapon/w0456/obj/body/b0001/vfx/eff/vw0012.avfx')
     expect(equipmentVfxPath('chara/accessory/a0001/model/c0101a0001_ear.mdl', 3)).toBeUndefined()
+  })
+
+  it('resolves the weapon material PAP selected by the IMC animation id', () => {
+    expect(equipmentMaterialAnimationPath('chara/weapon/w0456/obj/body/b0001/model/w0456b0001.mdl', 12))
+      .toBe('chara/weapon/w0456/animation/s0012/body/material.pap')
+    expect(equipmentMaterialAnimationPath('chara/equipment/e0123/model/c0101e0123_top.mdl', 12)).toBeUndefined()
+    expect(equipmentMaterialAnimationPath('chara/weapon/w0456/obj/body/b0001/model/w0456b0001.mdl', 0)).toBeUndefined()
   })
 })

@@ -5,6 +5,7 @@ import type {
   AvfxEmitterDefinition,
   AvfxModelGeometry,
   AvfxParticleDefinition,
+  AvfxPaletteBinding,
   AvfxSpawnRule,
   AvfxTextureBinding,
   AvfxVectorCurve,
@@ -31,6 +32,7 @@ interface RuntimeParticle {
   object: THREE.Object3D
   material: THREE.ShaderMaterial
   textureLayers: AvfxTextureBinding[]
+  paletteLayer?: AvfxPaletteBinding
   age: number
   life: number
   position: THREE.Vector3
@@ -376,6 +378,9 @@ const AVFX_FRAGMENT_SHADER = /* glsl */`
   uniform float uUvRotation1;
   uniform float uUvRotation2;
   uniform float uUvRotation3;
+  uniform sampler2D uPaletteTexture;
+  uniform float uPaletteEnabled;
+  uniform float uPaletteOffset;
 
   vec2 uvSet(int index) {
     if (index == 1) return vAvfxUv1;
@@ -431,6 +436,12 @@ const AVFX_FRAGMENT_SHADER = /* glsl */`
       vec4 layer = prepareLayer(texture2D(uTexture3, transformUv(uvSet(uUvSet3), uUvTransform3, uUvRotation3)), uColorToAlpha3);
       result = hasTexture > 0.5 ? combineLayer(result, layer, uColorMode3, uAlphaMode3) : layer;
     }
+    if (uPaletteEnabled > 0.5) {
+      float paletteValue = clamp(max(result.r, max(result.g, result.b)), 0.0, 1.0);
+      vec4 palette = texture2D(uPaletteTexture, vec2(paletteValue, uPaletteOffset));
+      result.rgb = palette.rgb;
+      result.a *= palette.a;
+    }
     result.rgb *= uTint * uBrightness * vAvfxColor.rgb;
     result.a *= uOpacity * vAvfxColor.a;
     if (result.a <= 0.002) discard;
@@ -478,22 +489,25 @@ export function createAvfxRuntime(
   const mainTimeline = avfx.timelines.find((timeline) => timeline.items.some((item) => item.emitter >= 0))
   const loopEnd = mainTimeline?.loopEnd && mainTimeline.loopEnd > 0 ? mainTimeline.loopEnd : 0
 
-  const textureFor = (binding: AvfxTextureBinding): THREE.Texture | undefined => {
-    const index = binding.textureIndices[0]
-    if (index === undefined) return undefined
-    const key = `${index}:${binding.filter}:${binding.borderU}:${binding.borderV}`
+  const textureForIndex = (index: number, filter: number, borderU: number, borderV: number): THREE.Texture | undefined => {
+    if (index < 0) return undefined
+    const key = `${index}:${filter}:${borderU}:${borderV}`
     const cached = textureCache.get(key)
     if (cached) return cached
     const path = avfx.textures[index]
     const source = path ? textureSources.get(path) : undefined
     if (!source) return undefined
     const map = decodedTexture(source, anisotropy)
-    map.wrapS = wrapping(binding.borderU)
-    map.wrapT = wrapping(binding.borderV)
-    map.magFilter = binding.filter === 0 ? THREE.NearestFilter : THREE.LinearFilter
+    map.wrapS = wrapping(borderU)
+    map.wrapT = wrapping(borderV)
+    map.magFilter = filter === 0 ? THREE.NearestFilter : THREE.LinearFilter
     textureCache.set(key, map)
     return map
   }
+
+  const textureFor = (binding: AvfxTextureBinding, index = binding.textureIndices[0]): THREE.Texture | undefined => (
+    index === undefined ? undefined : textureForIndex(index, binding.filter, binding.borderU, binding.borderV)
+  )
 
   const sampleEmitterPoint = (definition: AvfxEmitterDefinition, instanceSeed: number): THREE.Vector3 => {
     const modelIndex = definition.modelIndices[Math.floor(seeded(instanceSeed) * Math.max(definition.modelIndices.length, 1))]
@@ -537,11 +551,20 @@ export function createAvfxRuntime(
       .map((binding) => ({ binding, map: textureFor(binding) }))
       .filter((layer): layer is { binding: AvfxTextureBinding; map: THREE.Texture } => Boolean(layer.map))
       .slice(0, 4)
+    const palette = definition.paletteTexture?.enabled && definition.paletteTexture.textureIndex >= 0
+      ? definition.paletteTexture
+      : undefined
+    const paletteMap = palette
+      ? textureForIndex(palette.textureIndex, palette.filter, palette.border, palette.border)
+      : undefined
     const uniforms: Record<string, THREE.IUniform> = {
       uTint: { value: new THREE.Color(1, 1, 1) },
       uBrightness: { value: 1 },
       uOpacity: { value: 1 },
       uBillboard: { value: definition.type === 1 ? 1 : 0 },
+      uPaletteTexture: { value: paletteMap ?? fallbackTexture },
+      uPaletteEnabled: { value: paletteMap ? 1 : 0 },
+      uPaletteOffset: { value: 0 },
     }
     for (let index = 0; index < 4; index++) {
       const layer = layers[index]
@@ -568,7 +591,7 @@ export function createAvfxRuntime(
       side: THREE.DoubleSide,
     })
     configureBlendState(material, definition.drawMode)
-    return { material, layers: layers.map((layer) => layer.binding) }
+    return { material, layers: layers.map((layer) => layer.binding), palette: paletteMap ? palette : undefined }
   }
 
   const addParticle = (rule: AvfxSpawnRule, parent: RuntimeEmitter, instanceSeed: number): boolean => {
@@ -576,7 +599,7 @@ export function createAvfxRuntime(
     if (!definition || particles.length >= MAX_PARTICLES) return false
     const modelIndex = definition.modelIndices[Math.floor(seeded(instanceSeed + 7) * Math.max(definition.modelIndices.length, 1))]
     const authoredGeometry = modelIndex === undefined ? undefined : geometryCache[modelIndex]
-    const { material, layers } = materialFor(definition)
+    const { material, layers, palette } = materialFor(definition)
     // Type 5 without an authored mesh is a polyline (beam/streak). Give it its
     // own dynamic ribbon geometry, rebuilt from the spawn point's motion each
     // frame, instead of the flat quad that made it read as a white slab.
@@ -615,6 +638,7 @@ export function createAvfxRuntime(
       object,
       material,
       textureLayers: layers,
+      ...(palette ? { paletteLayer: palette } : {}),
       age: rule.startFrame,
       life: rule.overrideLife ?? Math.max(1, definition.life + randomLife),
       position,
@@ -802,6 +826,12 @@ export function createAvfxRuntime(
           1,
         )
         particle.textureLayers.forEach((binding, layerIndex) => {
+          if (binding.textureIndices.length > 1) {
+            const selector = evaluateAvfxCurve(binding.textureIndex, frame)
+              + curveRandom(binding.textureIndexRandom, frame, particle.seed + 211 + layerIndex)
+            const sequenceIndex = Math.max(0, Math.min(binding.textureIndices.length - 1, Math.floor(selector)))
+            particle.material.uniforms[`uTexture${layerIndex}`]!.value = textureFor(binding, binding.textureIndices[sequenceIndex]) ?? fallbackTexture
+          }
           const uv = particle.definition.uvSets[binding.uvSet]
           if (!uv) return
           const scale = vectorAt(uv.scale, frame, 1, particle.seed)
@@ -809,6 +839,11 @@ export function createAvfxRuntime(
           ;(particle.material.uniforms[`uUvTransform${layerIndex}`]!.value as THREE.Vector4).set(scale.x, scale.y, scroll.x, scroll.y)
           particle.material.uniforms[`uUvRotation${layerIndex}`]!.value = evaluateAvfxCurve(uv.rotation, frame)
         })
+        if (particle.paletteLayer) {
+          const offset = evaluateAvfxCurve(particle.paletteLayer.offset, frame)
+            + curveRandom(particle.paletteLayer.offsetRandom, frame, particle.seed + 257)
+          particle.material.uniforms.uPaletteOffset!.value = offset
+        }
       }
     },
     dispose() {
