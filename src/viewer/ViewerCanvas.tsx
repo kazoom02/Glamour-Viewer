@@ -523,8 +523,17 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
     const scene = new THREE.Scene()
     const camera = new THREE.PerspectiveCamera(38, 1, 0.01, 100)
     camera.position.set(0.2, 1.05, 4)
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' })
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 3))
+    const renderPixelRatio = Math.min(Math.max(window.devicePixelRatio, 2), 3)
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: true,
+      powerPreference: 'high-performance',
+      precision: 'highp',
+    })
+    // Supersample even on standard-DPI monitors. This improves silhouettes,
+    // fine hair cards, and texture inspection without inventing geometry that
+    // is not present in the game's highest-detail LOD0 model.
+    renderer.setPixelRatio(renderPixelRatio)
     renderer.outputColorSpace = THREE.SRGBColorSpace
     renderer.toneMapping = THREE.NeutralToneMapping
     renderer.toneMappingExposure = 0.9
@@ -578,6 +587,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
     void (async () => {
       const failures: string[] = []
       const diagnostics: string[] = [
+        `render quality: authoredGeometry=LOD0 pixelRatio=${renderPixelRatio.toFixed(2)} precision=highp antialias=MSAA textureAnisotropy=${maxAnisotropy}`,
         `customization sliders: race=${raceCode} tribe=${customization.tribeId} gender=${customization.gender} bustSize=${customization.bustSize} muscleTone=${customization.muscleTone} muscleNormalStrength=${muscleNormalStrength(customization.muscleTone).toFixed(4)}`,
       ]
       let characterParts = 0
