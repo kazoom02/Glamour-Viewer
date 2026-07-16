@@ -58,28 +58,31 @@ describe('character colorset baking', () => {
 
     expect(Array.from(result.diffuse.rgba.slice(0, 3))).toEqual([255, 255, 255])
     expect(Array.from(result.ao.rgba.slice(0, 3))).toEqual([0, 0, 0])
-    expect(Array.from(result.roughness.rgba.slice(0, 3))).toEqual([255, 255, 255])
+    // Mask green 255 is full gloss, so the surface is smooth (floored), not rough.
+    expect(Array.from(result.roughness.rgba.slice(0, 3))).toEqual([64, 64, 64])
     expect(result.specularIntensity.rgba[3]).toBe(16)
   })
 
-  it('uses modern mask roughness directly instead of multiplying it down', () => {
+  it('reads the mask green channel as gloss, so glossy metal stays reflective', () => {
     const rows = Array.from({ length: 32 }, () => ({
       diffuse: [1, 1, 1] as [number, number, number],
       specular: [0, 0, 0] as [number, number, number],
       specularMask: 1,
       emissive: [0, 0, 0] as [number, number, number],
-      roughness: 0.5,
+      roughness: 1,
       metalness: 0,
     }))
+    // A polished weapon: rough colorset row but a near-white gloss mask. The
+    // gloss map wins, so the surface is smooth (floored) instead of matte black.
     const result = bakeCharacterMaterial({ kind: 'dawntrail', rows }, {
       index: texture([0, 255, 0, 255]),
-      mask: texture([255, 128, 255, 255]),
+      mask: texture([255, 242, 255, 255]),
     }, 'character.shpk')!
 
-    expect(Array.from(result.roughness.rgba.slice(0, 3))).toEqual([128, 128, 128])
+    expect(result.roughness.rgba[0]).toBe(64)
   })
 
-  it('keeps very smooth character rows above the wet-looking roughness range', () => {
+  it('keeps a matte gloss mask rough', () => {
     const rows = Array.from({ length: 32 }, () => ({
       diffuse: [1, 1, 1] as [number, number, number],
       specular: [1, 1, 1] as [number, number, number],
@@ -88,12 +91,14 @@ describe('character colorset baking', () => {
       roughness: 0.05,
       metalness: 0,
     }))
+    // Low gloss (green 16) is a matte surface, so it stays rough even though the
+    // colorset row is smooth: the per-pixel gloss map is the authored detail.
     const result = bakeCharacterMaterial({ kind: 'dawntrail', rows }, {
       index: texture([0, 255, 0, 255]),
       mask: texture([255, 16, 255, 255]),
     }, 'character.shpk')!
 
-    expect(result.roughness.rgba[0]).toBe(92)
+    expect(result.roughness.rgba[0]).toBe(239)
   })
 
   it('builds facial-hair color and opacity from normal and mask channels', () => {

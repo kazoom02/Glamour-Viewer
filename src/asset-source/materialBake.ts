@@ -221,17 +221,17 @@ export function bakeCharacterMaterial(
       }
       diffuse[target + 3] = clampByte((base[3] / 255) * opacity)
       const rowRoughness = mix(a.roughness, b.roughness)
-      // Character masks use red for specular power, green for roughness and blue
-      // for ambient occlusion. Preserve the rougher of the texture and colorset
-      // values: multiplying them makes both values artificially smoother in
-      // Three's different lighting model.
+      // The character mask's green channel is GLOSS (smoothness), not roughness:
+      // polished metal is near-white, matte cloth is dark. Reading it directly as
+      // roughness inverted every surface — shiny weapons (green ~0.95) baked to
+      // 0.95 roughness and rendered as flat matte black. Convert gloss to
+      // roughness and trust that per-pixel map when present (it is the authored
+      // detail); fall back to the colorset row otherwise. The floor keeps metals
+      // from becoming a perfect mirror under Three's sharper microfacet response.
       const textureRoughness = textures.mask
-        ? mask[1] / 255
+        ? 1 - mask[1] / 255
         : rowRoughness
-      // Three's microfacet response is noticeably sharper than the authored
-      // character shader. A small floor prevents cloth/leather from becoming
-      // wet-looking while still leaving polished colorset rows visibly shiny.
-      const pbrRoughness = Math.max(0.36, rowRoughness, textureRoughness)
+      const pbrRoughness = Math.max(0.25, textureRoughness)
       const rough = clampByte(pbrRoughness)
       const occlusion = textures.mask ? mask[2] : 255
       const rowSpecularMask = legacyShader ? mix(a.specularMask, b.specularMask) : 1
