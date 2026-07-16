@@ -46,6 +46,8 @@ export interface AvfxRuntime {
   readonly decodedEmitters: number
   readonly decodedModels: number
   update(deltaSeconds: number): void
+  /** Local-space bounds of the live particle spawn points (group frame). */
+  particleBounds(): THREE.Box3
   dispose(): void
 }
 
@@ -548,6 +550,11 @@ export function createAvfxRuntime(
     get renderedParticles() { return particles.length },
     get decodedEmitters() { return avfx.emitters.length },
     get decodedModels() { return avfx.models.length },
+    particleBounds() {
+      const box = new THREE.Box3()
+      for (const particle of particles) box.expandByPoint(particle.object.position)
+      return box
+    },
     update(deltaSeconds: number) {
       const deltaFrames = Math.min(deltaSeconds, 0.1) * avfx.framesPerSecond
       const previousGlobalFrame = globalFrame

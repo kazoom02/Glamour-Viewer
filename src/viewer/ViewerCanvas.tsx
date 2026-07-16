@@ -1063,7 +1063,27 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             const vfxRuntime = materialResult?.vfx && (materialResult.vfxTextures?.length || vfxDrawsGeometry)
               ? createAvfxRuntime(attachment.target, materialResult.vfx, materialResult.vfxTextures ?? [], maxAnisotropy)
               : undefined
-            if (vfxRuntime) avfxRuntimes.push(vfxRuntime)
+            if (vfxRuntime) {
+              avfxRuntimes.push(vfxRuntime)
+              // The AVFX cannot be executed offline, so warm the graph a few
+              // frames and record where particles actually land relative to the
+              // weapon geometry they should decorate. A cloud clustered near the
+              // origin while the weapon bounds sit far from it means the effect
+              // is bound to a weapon sub-point (binder) we do not yet resolve;
+              // a matching cloud means the offset is elsewhere (scale/per-type).
+              for (let step = 0; step < 24; step += 1) vfxRuntime.update(1 / 60)
+              const cloud = vfxRuntime.particleBounds()
+              const bounds = result.model.bounds
+              const attachScale = attachment.target.getWorldScale(new THREE.Vector3())
+              const timelines = materialResult?.vfx?.timelines ?? []
+              diagnostics.push([
+                `equipment AVFX placement ${plan.item.name}:`,
+                `  weaponModelBounds(local) min=${formatVector(bounds.min, 3)} max=${formatVector(bounds.max, 3)}`,
+                `  particleCloud(local) count=${vfxRuntime.renderedParticles} empty=${cloud.isEmpty()} min=${formatVector(cloud.min.toArray(), 3)} max=${formatVector(cloud.max.toArray(), 3)}`,
+                `  attach=${attachment.target.name || attachment.target.type} worldScale=${formatVector(attachScale.toArray(), 4)} rootEmitters=${materialResult?.vfx?.rootEmitterIndices.join(',') || 'none'}`,
+                `  timeline binders=${timelines.flatMap((line) => line.items.map((item) => item.binder)).join(',') || 'none'} effectors=${timelines.flatMap((line) => line.items.map((item) => item.effector)).join(',') || 'none'}`,
+              ].join('\n'))
+            }
             if (weapon) diagnostics.push(`weapon attachment ${plan.item.name}: slot=${plan.slot} ${attachment.diagnostic}`)
             if (materialResult?.materialAnimationId) {
               diagnostics.push(`equipment material animation ${plan.item.name}: IMC id=${materialResult.materialAnimationId} authoredTrackDecoded=false approximateEmissivePulseMaterials=${animatedMaterials.length - animatedMaterialCount}`)
