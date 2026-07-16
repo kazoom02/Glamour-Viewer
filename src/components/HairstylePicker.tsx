@@ -16,6 +16,7 @@ export default function HairstylePicker({ tribeId, gender, value, onChange }: Pr
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
   const selected = styles.find((style) => style.hairId === value)
+  const selectedLabel = selected ? `Style ${selected.customizeId}` : `Model ${value}`
 
   useEffect(() => {
     const controller = new AbortController()
@@ -50,8 +51,8 @@ export default function HairstylePicker({ tribeId, gender, value, onChange }: Pr
         <span>Hairstyle</span>
         <button type="button" className="hairstyle-current" onClick={() => setOpen(true)} disabled={loading}>
           {selected?.iconPath && <img src={xivapiIconUrl(selected.iconPath)} alt="" />}
-          <b>{loading ? 'Loading…' : `Style ${value}`}</b>
-          <small>Choose</small>
+          <b>{loading ? 'Loading…' : selectedLabel}</b>
+          <small>{selected ? `Model h${selected.hairId.toString().padStart(4, '0')}` : 'Choose'}</small>
         </button>
         {error && <small className="hairstyle-error" title={error}>Catalog unavailable</small>}
       </div>
@@ -65,7 +66,7 @@ export default function HairstylePicker({ tribeId, gender, value, onChange }: Pr
               <div>
                 <p className="eyebrow">Race-valid styles</p>
                 <h2 id="hair-picker-title">Choose a hairstyle</h2>
-                <p>{styles.length} styles from the selected character’s in-game creation menu.</p>
+                <p>{styles.length} compatible default and unlockable styles from current game data.</p>
               </div>
               <button type="button" className="catalog-picker-close" onClick={() => setOpen(false)} aria-label="Close hairstyle picker">×</button>
             </header>
@@ -80,11 +81,11 @@ export default function HairstylePicker({ tribeId, gender, value, onChange }: Pr
                     key={style.customizeId}
                     onClick={() => { onChange(style.hairId); setOpen(false) }}
                     aria-pressed={style.hairId === value}
-                    title={`Hairstyle ${style.hairId}${style.purchasable ? ' (unlockable)' : ''}`}
+                    title={`Style ${style.customizeId} · model h${style.hairId.toString().padStart(4, '0')}${style.purchasable ? ' · unlockable' : ''}`}
                   >
                     {style.iconPath ? <img src={xivapiIconUrl(style.iconPath)} alt="" loading="lazy" /> : <span>?</span>}
-                    <b>Style {style.hairId}</b>
-                    {style.purchasable && <small>Unlockable</small>}
+                    <b>Style {style.customizeId}</b>
+                    <small>Model {style.hairId}{style.purchasable ? ' · Unlockable' : ''}</small>
                   </button>
                 ))}
               </div>
