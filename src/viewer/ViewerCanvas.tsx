@@ -444,7 +444,7 @@ function modelMaterialDiagnostics(
 ): string[] {
   const deformation = model.deformation
   const summary = `${label}: LOD${model.lod ?? '?'}${deformation
-    ? ` · PBD c${deformation.sourceRaceCode.toString().padStart(4, '0')}→c${deformation.targetRaceCode.toString().padStart(4, '0')} steps=${deformation.steps} matrixBones=${deformation.matrixBones} vertices=${deformation.vertices}`
+    ? ` · PBD c${deformation.sourceRaceCode.toString().padStart(4, '0')}→c${deformation.targetRaceCode.toString().padStart(4, '0')} steps=${deformation.steps} matrixBones=${deformation.matrixBones} vertices=${deformation.vertices} normals=${deformation.normals}`
     : ' · native race geometry'}`
   const meshes = model.meshes.flatMap((mesh, index) => {
     const reference = model.materialPaths[mesh.materialIndex]?.replaceAll('\\', '/').toLowerCase() ?? '(missing)'

@@ -135,6 +135,37 @@ function applyMatrix(matrix: DeformMatrix, x: number, y: number, z: number): [nu
   ]
 }
 
+function inverseTranspose3x3(matrix: DeformMatrix): DeformMatrix {
+  const [a, b, c, , d, e, f, , g, h, i] = matrix
+  const determinant = a! * (e! * i! - f! * h!)
+    - b! * (d! * i! - f! * g!)
+    + c! * (d! * h! - e! * g!)
+  if (Math.abs(determinant) < 1e-8) return IDENTITY
+  const inverseDeterminant = 1 / determinant
+  return Float32Array.from([
+    (e! * i! - f! * h!) * inverseDeterminant,
+    (f! * g! - d! * i!) * inverseDeterminant,
+    (d! * h! - e! * g!) * inverseDeterminant,
+    0,
+    (c! * h! - b! * i!) * inverseDeterminant,
+    (a! * i! - c! * g!) * inverseDeterminant,
+    (b! * g! - a! * h!) * inverseDeterminant,
+    0,
+    (b! * f! - c! * e!) * inverseDeterminant,
+    (c! * d! - a! * f!) * inverseDeterminant,
+    (a! * e! - b! * d!) * inverseDeterminant,
+    0,
+  ])
+}
+
+function applyDirection(matrix: DeformMatrix, x: number, y: number, z: number): [number, number, number] {
+  return [
+    x * matrix[0]! + y * matrix[1]! + z * matrix[2]!,
+    x * matrix[4]! + y * matrix[5]! + z * matrix[6]!,
+    x * matrix[8]! + y * matrix[9]! + z * matrix[10]!,
+  ]
+}
+
 function deformationForBone(
   deformer: PbdDeformer,
   boneName: string,
@@ -152,15 +183,16 @@ function deformationForBone(
   return IDENTITY
 }
 
-function deformMeshPositions(
+function deformMeshGeometry(
   mesh: DecodedModelMesh,
   boneNames: string[],
   chain: PbdDeformer[],
   skeleton: DecodedSkeleton,
   skeletonIndex: Map<string, number>,
-): number {
-  if (!mesh.skinIndices || !mesh.skinWeights) return 0
+): { vertices: number; normals: number } {
+  if (!mesh.skinIndices || !mesh.skinWeights) return { vertices: 0, normals: 0 }
   const resolved = chain.map(() => new Map<number, DeformMatrix>())
+  const resolvedNormals = chain.map(() => new Map<number, DeformMatrix>())
   const vertexCount = mesh.positions.length / 3
   for (let vertex = 0; vertex < vertexCount; vertex += 1) {
     const positionOffset = vertex * 3
@@ -168,11 +200,17 @@ function deformMeshPositions(
     let x = mesh.positions[positionOffset]!
     let y = mesh.positions[positionOffset + 1]!
     let z = mesh.positions[positionOffset + 2]!
+    let normalX = mesh.normals?.[positionOffset] ?? 0
+    let normalY = mesh.normals?.[positionOffset + 1] ?? 0
+    let normalZ = mesh.normals?.[positionOffset + 2] ?? 0
     for (let step = 0; step < chain.length; step += 1) {
       const deformer = chain[step]!
       let nextX = 0
       let nextY = 0
       let nextZ = 0
+      let nextNormalX = 0
+      let nextNormalY = 0
+      let nextNormalZ = 0
       let totalWeight = 0
       for (let influence = 0; influence < 4; influence += 1) {
         const weight = mesh.skinWeights[skinOffset + influence] ?? 0
@@ -187,6 +225,17 @@ function deformMeshPositions(
         nextX += transformed[0] * weight
         nextY += transformed[1] * weight
         nextZ += transformed[2] * weight
+        if (mesh.normals) {
+          let normalMatrix = resolvedNormals[step]!.get(boneIndex)
+          if (!normalMatrix) {
+            normalMatrix = inverseTranspose3x3(matrix)
+            resolvedNormals[step]!.set(boneIndex, normalMatrix)
+          }
+          const transformedNormal = applyDirection(normalMatrix, normalX, normalY, normalZ)
+          nextNormalX += transformedNormal[0] * weight
+          nextNormalY += transformedNormal[1] * weight
+          nextNormalZ += transformedNormal[2] * weight
+        }
         totalWeight += weight
       }
       if (totalWeight > 0) {
@@ -194,17 +243,33 @@ function deformMeshPositions(
           nextX += x * (1 - totalWeight)
           nextY += y * (1 - totalWeight)
           nextZ += z * (1 - totalWeight)
+          nextNormalX += normalX * (1 - totalWeight)
+          nextNormalY += normalY * (1 - totalWeight)
+          nextNormalZ += normalZ * (1 - totalWeight)
         }
         x = nextX
         y = nextY
         z = nextZ
+        if (mesh.normals) {
+          const length = Math.hypot(nextNormalX, nextNormalY, nextNormalZ)
+          if (length > 1e-8) {
+            normalX = nextNormalX / length
+            normalY = nextNormalY / length
+            normalZ = nextNormalZ / length
+          }
+        }
       }
     }
     mesh.positions[positionOffset] = x
     mesh.positions[positionOffset + 1] = y
     mesh.positions[positionOffset + 2] = z
+    if (mesh.normals) {
+      mesh.normals[positionOffset] = normalX
+      mesh.normals[positionOffset + 1] = normalY
+      mesh.normals[positionOffset + 2] = normalZ
+    }
   }
-  return vertexCount
+  return { vertices: vertexCount, normals: mesh.normals ? vertexCount : 0 }
 }
 
 /** Applies the game's sequential, skin-weighted racial deformation to shared fallback geometry. */
@@ -220,11 +285,14 @@ export function deformModel(
   const skeletonIndex = new Map(skeleton.bones.map((bone, index) => [bone.name, index]))
   const uniquePositions = new Set<ArrayBufferLike>()
   let vertices = 0
+  let normals = 0
   const bounds = { min: [Infinity, Infinity, Infinity] as [number, number, number], max: [-Infinity, -Infinity, -Infinity] as [number, number, number] }
   for (const mesh of model.meshes) {
     if (uniquePositions.has(mesh.positions.buffer)) continue
     uniquePositions.add(mesh.positions.buffer)
-    vertices += deformMeshPositions(mesh, model.boneNames, chain, skeleton, skeletonIndex)
+    const deformed = deformMeshGeometry(mesh, model.boneNames, chain, skeleton, skeletonIndex)
+    vertices += deformed.vertices
+    normals += deformed.normals
     for (let offset = 0; offset < mesh.positions.length; offset += 3) {
       for (let axis = 0; axis < 3; axis += 1) {
         const value = mesh.positions[offset + axis]!
@@ -240,5 +308,6 @@ export function deformModel(
     steps: chain.length,
     matrixBones: new Set(chain.flatMap((deformer) => [...deformer.matrices.keys()])).size,
     vertices,
+    normals,
   }
 }

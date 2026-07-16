@@ -3,7 +3,11 @@ import type { DecodedModel } from './mdl'
 import { decodePbd, deformModel, deformationChain, modelRaceCode } from './pbd'
 import type { DecodedSkeleton } from './sklb'
 
-function testPbd(): ArrayBuffer {
+function testPbd(matrix = [
+  1, 0, 0, 0,
+  0, 1, 0, 2,
+  0, 0, 1, 0,
+]): ArrayBuffer {
   const rootRace = 101
   const targetRace = 501
   const entryCount = 2
@@ -32,11 +36,6 @@ function testPbd(): ArrayBuffer {
   view.setInt32(treeEnd, 1, true)
   const stringOffset = 4 + 2 + 2 + 48
   view.setUint16(treeEnd + 4, stringOffset, true)
-  const matrix = [
-    1, 0, 0, 0,
-    0, 1, 0, 2,
-    0, 0, 1, 0,
-  ]
   matrix.forEach((value, index) => view.setFloat32(treeEnd + 8 + index * 4, value, true))
   new Uint8Array(buffer, treeEnd + stringOffset, name.length).set(name)
   return buffer
@@ -80,7 +79,38 @@ describe('human.pbd racial deformation', () => {
 
     expect(Array.from(positions)).toEqual([1, 3, 1])
     expect(model.bounds).toEqual({ min: [1, 3, 1], max: [1, 3, 1] })
-    expect(model.deformation).toEqual({ sourceRaceCode: 101, targetRaceCode: 501, steps: 1, matrixBones: 1, vertices: 1 })
+    expect(model.deformation).toEqual({ sourceRaceCode: 101, targetRaceCode: 501, steps: 1, matrixBones: 1, vertices: 1, normals: 0 })
+  })
+
+  it('uses inverse-transpose matrices for normals under non-uniform racial scaling', () => {
+    const positions = new Float32Array([1, 1, 0])
+    const normals = new Float32Array([Math.SQRT1_2, Math.SQRT1_2, 0])
+    const model: DecodedModel = {
+      boneNames: ['j_root'],
+      materialPaths: [],
+      bounds: { min: [1, 1, 0], max: [1, 1, 0] },
+      meshes: [{
+        positions,
+        normals,
+        skinIndices: new Uint16Array([0, 0, 0, 0]),
+        skinWeights: new Float32Array([1, 0, 0, 0]),
+        indices: new Uint16Array([0]),
+        materialIndex: 0,
+      }],
+    }
+    const scale = [
+      2, 0, 0, 0,
+      0, 1, 0, 0,
+      0, 0, 0.5, 0,
+    ]
+
+    deformModel(model, decodePbd(testPbd(scale)), skeleton, 101, 501)
+
+    expect(Array.from(positions)).toEqual([2, 1, 0])
+    expect(normals[0]).toBeCloseTo(1 / Math.sqrt(5))
+    expect(normals[1]).toBeCloseTo(2 / Math.sqrt(5))
+    expect(normals[2]).toBeCloseTo(0)
+    expect(model.deformation?.normals).toBe(1)
   })
 
   it('extracts the authored race code from character and equipment model paths', () => {

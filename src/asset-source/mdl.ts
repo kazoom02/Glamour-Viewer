@@ -31,6 +31,7 @@ export interface DecodedModel {
     steps: number
     matrixBones: number
     vertices: number
+    normals: number
   }
 }
 
