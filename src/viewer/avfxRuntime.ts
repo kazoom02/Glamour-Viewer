@@ -48,6 +48,8 @@ export interface AvfxRuntime {
   update(deltaSeconds: number): void
   /** Local-space bounds of the live particle spawn points (group frame). */
   particleBounds(): THREE.Box3
+  /** Local-space bounds of the live particle geometry, including mesh extent. */
+  renderedBounds(): THREE.Box3
   dispose(): void
 }
 
@@ -553,6 +555,20 @@ export function createAvfxRuntime(
     particleBounds() {
       const box = new THREE.Box3()
       for (const particle of particles) box.expandByPoint(particle.object.position)
+      return box
+    },
+    renderedBounds() {
+      const box = new THREE.Box3()
+      const slot = new THREE.Box3()
+      for (const particle of particles) {
+        if (!(particle.object instanceof THREE.Mesh)) continue
+        const geometry = particle.object.geometry
+        if (!geometry.boundingBox) geometry.computeBoundingBox()
+        if (!geometry.boundingBox) continue
+        particle.object.updateMatrix()
+        slot.copy(geometry.boundingBox).applyMatrix4(particle.object.matrix)
+        box.union(slot)
+      }
       return box
     },
     update(deltaSeconds: number) {

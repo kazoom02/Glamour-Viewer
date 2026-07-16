@@ -1073,14 +1073,27 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               // a matching cloud means the offset is elsewhere (scale/per-type).
               for (let step = 0; step < 24; step += 1) vfxRuntime.update(1 / 60)
               const cloud = vfxRuntime.particleBounds()
+              const drawn = vfxRuntime.renderedBounds()
               const bounds = result.model.bounds
               const attachScale = attachment.target.getWorldScale(new THREE.Vector3())
-              const timelines = materialResult?.vfx?.timelines ?? []
+              const vfx = materialResult?.vfx
+              const timelines = vfx?.timelines ?? []
+              const axes = (curve: { x?: unknown; y?: unknown; z?: unknown }) => `${curve.x ? 'X' : ''}${curve.y ? 'Y' : ''}${curve.z ? 'Z' : ''}` || '0'
+              const emitterSummary = (vfx?.emitters ?? [])
+                .map((emitter, index) => `e${index}:t${emitter.type}/m${emitter.modelIndices.length}/pos${axes(emitter.position)}`)
+                .join(' ')
+              const particleHistogram = new Map<number, number>()
+              for (const particle of vfx?.particles ?? []) particleHistogram.set(particle.type, (particleHistogram.get(particle.type) ?? 0) + 1)
+              const particleSummary = [...particleHistogram.entries()].map(([type, count]) => `t${type}×${count}`).join(' ')
+              const modelParticles = (vfx?.particles ?? []).filter((particle) => particle.modelIndices.length).length
               diagnostics.push([
                 `equipment AVFX placement ${plan.item.name}:`,
                 `  weaponModelBounds(local) min=${formatVector(bounds.min, 3)} max=${formatVector(bounds.max, 3)}`,
-                `  particleCloud(local) count=${vfxRuntime.renderedParticles} empty=${cloud.isEmpty()} min=${formatVector(cloud.min.toArray(), 3)} max=${formatVector(cloud.max.toArray(), 3)}`,
-                `  attach=${attachment.target.name || attachment.target.type} worldScale=${formatVector(attachScale.toArray(), 4)} rootEmitters=${materialResult?.vfx?.rootEmitterIndices.join(',') || 'none'}`,
+                `  particleSpawn(local) count=${vfxRuntime.renderedParticles} min=${formatVector(cloud.min.toArray(), 3)} max=${formatVector(cloud.max.toArray(), 3)}`,
+                `  particleDrawn(local) empty=${drawn.isEmpty()} min=${formatVector(drawn.min.toArray(), 3)} max=${formatVector(drawn.max.toArray(), 3)}`,
+                `  attach=${attachment.target.name || attachment.target.type} worldScale=${formatVector(attachScale.toArray(), 4)} rootEmitters=${vfx?.rootEmitterIndices.join(',') || 'none'}`,
+                `  emitters ${emitterSummary || 'none'}`,
+                `  particles ${particleSummary || 'none'} withModelGeometry=${modelParticles}/${vfx?.particles.length ?? 0}`,
                 `  timeline binders=${timelines.flatMap((line) => line.items.map((item) => item.binder)).join(',') || 'none'} effectors=${timelines.flatMap((line) => line.items.map((item) => item.effector)).join(',') || 'none'}`,
               ].join('\n'))
             }
