@@ -98,6 +98,8 @@ h2 { margin: 0; font-size: clamp(28px, 3.2vw, 42px); line-height: 1.1; letter-sp
 .anim-picker-debug { color: var(--muted); font-size: 9px; }
 .anim-picker-debug summary { cursor: pointer; }
 .anim-picker-debug code { display: block; margin-top: 4px; word-break: break-all; white-space: normal; color: #b9b4a8; }
+.anim-picker-download { margin-top: 6px; min-height: 24px; padding: 0 8px; border: 1px solid #4a4d54; border-radius: 4px; background: #24262b; color: #ede8de; cursor: pointer; font-size: 10px; }
+.anim-picker-download:hover { border-color: #8b7550; background: #302a21; }
 .anim-picker-cats { display: flex; flex-wrap: wrap; gap: 4px; }
 .anim-picker-cats button { padding: 2px 6px; border: 1px solid #43464d; border-radius: 4px; background: #212227; color: #cfcabf; cursor: pointer; font-size: 9px; }
 .anim-picker-cats button:hover { border-color: #8b7550; }

@@ -18,13 +18,15 @@ interface AnimationPickerProps {
   /** One-line binding diagnostic from the parent (name/index, bound tracks). */
   debug?: string
   onSelect: (entry: CatalogAnimation) => void
+  /** When set, offers a button to download the active animation's raw .pap. */
+  onDownloadSource?: () => void
 }
 
 // Rendering every match would put hundreds of buttons in the DOM; the list is
 // capped and the count invites the user to narrow with the class filter/search.
 const MAX_ROWS = 250
 
-export default function AnimationPicker({ activeId, activeLabel, busy, notice, debug, onSelect }: AnimationPickerProps) {
+export default function AnimationPicker({ activeId, activeLabel, busy, notice, debug, onSelect, onDownloadSource }: AnimationPickerProps) {
   const [catalog, setCatalog] = useState<CatalogAnimation[]>()
   const [loadError, setLoadError] = useState<string>()
   const [category, setCategory] = useState<AnimationCategory>('idle')
@@ -150,10 +152,15 @@ export default function AnimationPicker({ activeId, activeLabel, busy, notice, d
         </>
       )}
 
-      {!collapsed && debug && (
+      {!collapsed && (debug || onDownloadSource) && (
         <details className="anim-picker-debug">
           <summary>Animation debug</summary>
-          <code>{debug}</code>
+          {debug && <code>{debug}</code>}
+          {onDownloadSource && (
+            <button type="button" className="anim-picker-download" onClick={onDownloadSource}>
+              ⤓ Download raw .pap
+            </button>
+          )}
         </details>
       )}
     </div>

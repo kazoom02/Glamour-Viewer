@@ -17,6 +17,7 @@ import {
 } from '../asset-source/characterPlan'
 import { loadLocalAnimation, loadLocalIdleAnimation, type DecodedAnimation } from '../asset-source/animationLoader'
 import { catalogAnimationCandidates, type CatalogAnimation } from '../asset-source/animationCatalog'
+import { createLocalAssetReader } from '../asset-source/sqpack'
 import { HUMAN_CMP_PATH, loadLocalBustScale, type BustScale } from '../asset-source/cmp'
 import { equipmentAssetPlan } from '../asset-source/equipmentPlan'
 import {
@@ -813,6 +814,8 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
   // bone name — the reliable path that bypasses in-browser PAP spline decoding.
   const playExternalMotion = useRef<((data: ArrayBuffer, label: string) => Promise<void>) | null>(null)
   const motionInput = useRef<HTMLInputElement>(null)
+  // Last catalog animation the user played, for the raw-.pap download affordance.
+  const lastCatalogEntry = useRef<CatalogAnimation | null>(null)
   const previewItems = EQUIPMENT_SLOTS.flatMap((slot) => equipped[slot] ? [[slot, equipped[slot]!] as const] : [])
   const [status, setStatus] = useState('Loading character…')
   const [error, setError] = useState<string>()
@@ -831,14 +834,48 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
     setAnimNotice(undefined)
     try {
       await play(entry)
+      lastCatalogEntry.current = entry
       setActiveAnimId(entry.id)
     } catch (reason) {
+      lastCatalogEntry.current = entry
       const detail = reason instanceof Error ? reason.message : String(reason)
       setAnimNotice(/additive/i.test(detail)
         ? `“${entry.label}” is an additive overlay clip and can’t play as a standalone pose yet.`
         : `Could not play “${entry.label}”: ${detail}`)
     } finally {
       setAnimBusy(false)
+    }
+  }
+
+  // Downloads the exact raw .pap the viewer resolves for the last-played catalog
+  // animation, so a broken clip can be shared for decoder debugging. Reads from the
+  // already-connected local install — no external extraction tool needed.
+  const onDownloadSource = async () => {
+    const entry = lastCatalogEntry.current
+    if (!entry || source.kind !== 'local') return
+    setAnimNotice(undefined)
+    try {
+      const reader = createLocalAssetReader(source)
+      let bytes: ArrayBuffer | undefined
+      let used = ''
+      const errors: string[] = []
+      for (const path of catalogAnimationCandidates(entry, raceCode)) {
+        try { bytes = await reader.read(path); used = path; break } catch (reason) {
+          errors.push(`${path}: ${reason instanceof Error ? reason.message : String(reason)}`)
+        }
+      }
+      if (!bytes) throw new Error(errors.join(' / ') || 'not found')
+      const url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }))
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `${entry.id}.pap`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+      setAnimNotice(`Saved ${entry.id}.pap (${(bytes.byteLength / 1024).toFixed(1)} KB) from ${used}.`)
+    } catch (reason) {
+      setAnimNotice(`Could not read the raw .pap: ${reason instanceof Error ? reason.message : String(reason)}`)
     }
   }
 
@@ -1606,6 +1643,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           notice={animNotice}
           debug={animDiag}
           onSelect={onSelectAnimation}
+          onDownloadSource={activeAnimId ? onDownloadSource : undefined}
         />
       )}
       <p className="viewer-status" aria-live="polite">{status}</p>
