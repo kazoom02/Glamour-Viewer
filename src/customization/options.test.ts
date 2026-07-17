@@ -29,6 +29,10 @@ describe('visual customization catalog', () => {
       { row_id: 2402, fields: { FeatureID: 1, Icon: { path_hr1: 'paint-1.tex' } } },
     ])
     expect(catalog.options.jaw.map(({ value }) => value)).toEqual([0, 1])
+    // Facial-feature menus have no real per-option icon (their CharaMakeCustomize
+    // icons are unrelated hairstyle portraits), so they render as numbered options.
+    expect(catalog.options.jaw.every(({ iconPath }) => iconPath === undefined)).toBe(true)
+    expect(catalog.options.jaw.map(({ badge }) => badge)).toEqual(['1', '2'])
     expect(catalog.options.irisSize.map(({ label }) => label)).toEqual(['Large', 'Small'])
     expect(catalog.options.facePaint.map(({ value }) => value)).toEqual([0, 1])
     expect(catalog.options.facePaint[1]?.iconPath).toBe('paint-1.tex')

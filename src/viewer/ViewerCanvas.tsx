@@ -450,16 +450,15 @@ function addDecodedModel(
       && !isFaceMaterial
       ? muscleNormalStrength(customization.muscleTone)
       : 1
-    const paletteMask = customization
-      ? isIris
-        ? mask
-        : shaderPackage === 'skin.shpk'
-          ? decodedMaterial?.textures.skinColorMask
-          : undefined
+    // Skin tints only the skin-masked pixels via the palette shader. The iris is
+    // NOT palette-masked: its baked diffuse is kept neutral, and the iris mask's
+    // red channel doesn't cover the iris, so masking left the eye color with
+    // nothing to tint. Iris instead tints its whole (neutral) diffuse through
+    // material.color below (tintKind 'iris'), like hair.
+    const paletteMask = customization && shaderPackage === 'skin.shpk'
+      ? decodedMaterial?.textures.skinColorMask
       : undefined
-    const paletteColor = customization
-      ? isIris ? customization.eyeColor : customization.skinColor
-      : undefined
+    const paletteColor = customization ? customization.skinColor : undefined
     // Iris masks encode palette influence, not generic character PBR channels.
     const usesGenericMaskPbr = !isIris
     const aoMap = ao

@@ -10,6 +10,7 @@ export interface VisualCustomizationOption {
   detail?: string
   iconPath?: string
   rowId?: number
+  badge?: string
 }
 
 export interface CustomizationCatalog {
@@ -52,6 +53,20 @@ const MENU_IDS: Record<VisualCustomizationField, number> = {
   mouth: 19,
   facePaint: 24,
 }
+
+// These facial-feature menus have NO real per-option icon in the game data: the
+// CharaMakeCustomize.Icon on their rows points at unrelated hairstyle portraits
+// (in-game you preview them on the 3D model, not via thumbnails). They render as
+// numbered options instead of misleading pictures. Face and Face Paint DO have
+// real icons and keep them.
+const NUMBERED_FIELDS = new Set<VisualCustomizationField>([
+  'jaw',
+  'eyeShape',
+  'irisSize',
+  'eyebrows',
+  'nose',
+  'mouth',
+])
 
 export function customizationMenuUrl(tribeId: number, gender: CharacterGender): URL {
   const url = xivapiApiUrl(`sheet/CharaMakeType/${charaMakeTypeRow(tribeId, gender)}`)
@@ -105,7 +120,10 @@ export function buildCustomizationCatalog(entries: MenuEntry[], rows: CustomizeR
         value,
         label: label(field, value, index),
         detail: field === 'facePaint' && value > 0 ? `Paint ${value}` : `Choice ${index + 1}`,
-        iconPath: row?.fields?.Icon?.path_hr1 ?? row?.fields?.Icon?.path ?? (field === 'face' ? iconPath(rowId) : undefined),
+        iconPath: NUMBERED_FIELDS.has(field)
+          ? undefined
+          : row?.fields?.Icon?.path_hr1 ?? row?.fields?.Icon?.path ?? (field === 'face' ? iconPath(rowId) : undefined),
+        ...(NUMBERED_FIELDS.has(field) ? { badge: String(index + 1) } : {}),
         ...(rowId > 0 ? { rowId } : {}),
       }
     })
@@ -121,7 +139,12 @@ export function buildCustomizationCatalog(entries: MenuEntry[], rows: CustomizeR
 function fallbackOptions(field: VisualCustomizationField, count: number): VisualCustomizationOption[] {
   return Array.from({ length: count }, (_, index) => {
     const value = field === 'face' ? index + 1 : index
-    return { value, label: label(field, value, index), detail: `Choice ${index + 1}` }
+    return {
+      value,
+      label: label(field, value, index),
+      detail: `Choice ${index + 1}`,
+      ...(NUMBERED_FIELDS.has(field) ? { badge: String(index + 1) } : {}),
+    }
   })
 }
 
@@ -153,9 +176,12 @@ export async function fetchCustomizationCatalog(
 ): Promise<CustomizationCatalog> {
   const menu = await fetchJson<MenuResponse>(customizationMenuUrl(tribeId, gender), signal)
   const entries = menu.fields?.CharaMakeStruct ?? []
-  const rowBackedMenus = new Set(Object.values(MENU_IDS).filter((id) => id !== MENU_IDS.face))
+  // Only face paint resolves icons + feature ids from CharaMakeCustomize rows.
+  // Face uses its SubMenuParam directly as an icon id; the numbered feature menus
+  // have no usable icon, so none of them need row lookups.
+  const iconRowMenus = new Set<number>([MENU_IDS.facePaint])
   const rowIds = entries
-    .filter((entry) => entry.Customize !== undefined && rowBackedMenus.has(entry.Customize))
+    .filter((entry) => entry.Customize !== undefined && iconRowMenus.has(entry.Customize))
     .flatMap((entry) => entry.SubMenuParam?.slice(0, entry.SubMenuNum ?? 0) ?? [])
     .filter((row) => Number.isSafeInteger(row) && row > 0)
   const rows = rowIds.length
