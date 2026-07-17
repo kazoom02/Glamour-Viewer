@@ -24,7 +24,6 @@ import { CHARACTER_PRESETS, type CharacterRaceCode } from './asset-source/charac
 import { customizationForRaceCode, type CharacterCustomization } from './customization/types'
 
 const ViewerCanvas = lazy(() => import('./viewer/ViewerCanvas'))
-const DefaultCharacterPreview = lazy(() => import('./viewer/DefaultCharacterPreview'))
 const ArmorCatalog = lazy(() => import('./components/ArmorCatalog'))
 const CustomizationPanel = lazy(() => import('./components/CustomizationPanel'))
 
@@ -147,26 +146,6 @@ export function App() {
       </header>
 
       <main>
-        <section className={`hero${source ? ' hero-connected' : ''}`}>
-          <div className="hero-copy">
-            <p className="eyebrow">Your wardrobe. Your files.</p>
-            <h1>Preview a look without uploading your game.</h1>
-            <p className="hero-lead">
-              Choose a local FFXIV install or connect your own converted asset bucket. Parsing, conversion, and rendering happen in your browser.
-            </p>
-            <div className="trust-row">
-              <span>No uploads</span><span>No account</span><span>No asset proxy</span>
-            </div>
-          </div>
-          {!source && (
-            <div className="hero-visual">
-              <Suspense fallback={<div className="viewer-loading">Loading default character…</div>}>
-                <DefaultCharacterPreview />
-              </Suspense>
-            </div>
-          )}
-        </section>
-
         {sharedSet && (
           <section className="shared-set" aria-labelledby="shared-title">
             <div>
@@ -186,17 +165,19 @@ export function App() {
           </section>
         )}
 
-        <section className="source-section" aria-labelledby="source-title">
-          <div className="section-heading">
-            <p className="eyebrow">Start here</p>
-            <h2 id="source-title">Choose where your assets live</h2>
-            <p>These are the only two connection modes. This deployed app never receives or stores game data.</p>
-          </div>
-          <div className="source-grid">
-            <LocalInstallPanel onConnect={setSource} />
-            <HostedAssetsPanel onConnect={setSource} />
-          </div>
-        </section>
+        {!source && (
+          <section className="source-section" aria-labelledby="source-title">
+            <div className="section-heading">
+              <p className="eyebrow">Start here</p>
+              <h2 id="source-title">Choose where your assets live</h2>
+              <p>These are the only two connection modes. This deployed app never receives or stores game data.</p>
+            </div>
+            <div className="source-grid">
+              <LocalInstallPanel onConnect={setSource} />
+              <HostedAssetsPanel onConnect={setSource} />
+            </div>
+          </section>
+        )}
 
         {source && (
           <section className="connection-bar" aria-live="polite">
