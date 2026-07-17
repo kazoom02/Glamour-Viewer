@@ -23,6 +23,8 @@ The equipment picker queries [XIVAPI v2](https://v2.xivapi.com/) directly from t
 
 The catalog is loaded only after an asset source is connected and makes no request until the user submits a search. `VITE_XIVAPI_BASE_URL` can override the public `https://v2.xivapi.com/api/` base URL for development; it is a public build-time setting, never a secret.
 
+Hovering an item in the equipment picker can also show live **market-board prices** from the public [Universalis API](https://docs.universalis.app/) and a link to the community wiki. Prices are opt-in: they appear only after the user selects a world or data center (remembered in that browser's `localStorage`), and a request is made only for the hovered item, keyed by its public game item id — no account or game data is involved. If Universalis is unreachable the rest of the dressing room is unaffected.
+
 The full local random-access and decoding design is documented in [`docs/local-sqpack.md`](docs/local-sqpack.md). In short, Vercel serves the parser code, while the browser uses `File.slice()` to read only required ranges from local SqPack `.index` and `.dat*` files. No game data is sent to Vercel.
 
 The current viewer decodes the actual highest-detail MDL LOD, base body pieces, face, hair, equipped armor, and SKLB skeletons from `040000.win32.index2`/`datN` in module workers. It binds MDL skin weights to the shared game reference skeleton, replaces the covered `e0000` body slot when armor is equipped, and exposes drag/zoom inspection. All playable race and gender model codes (`c0101`–`c1801`) are selectable. Default Miqo'te, Au Ra, and Hrothgar tails and Viera ears are loaded when those optional assets exist in the selected install.

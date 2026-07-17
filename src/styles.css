@@ -355,7 +355,27 @@ h2 { margin: 0; font-size: clamp(28px, 3.2vw, 42px); line-height: 1.1; letter-sp
 .catalog-results-heading span { color: #898b91; font-size: 10px; }
 .armor-results { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; max-height: 535px; padding-right: 5px; overflow: auto; }
 .catalog-load-more { display: block; margin: 16px auto 36px; }
-.armor-result { display: grid; grid-template-columns: 58px 1fr auto; gap: 13px; align-items: center; min-width: 0; padding: 13px; border: 1px solid #2b2e34; border-radius: 7px; background: #1b1d22; }
+.armor-result { position: relative; display: grid; grid-template-columns: 58px 1fr auto; gap: 13px; align-items: center; min-width: 0; padding: 13px; border: 1px solid #2b2e34; border-radius: 7px; background: #1b1d22; }
+.armor-result:hover, .armor-result:focus-within { border-color: #4e473b; }
+
+/* Market-board + wiki panel revealed as a full-width row while an item is hovered/focused. */
+.armor-market-popover { grid-column: 1 / -1; margin-top: 2px; }
+.market-info { display: flex; align-items: stretch; gap: 8px; padding: 9px 11px; border: 1px solid #4e473b; border-radius: 7px; background: #14151af6; box-shadow: 0 12px 28px #0009; backdrop-filter: blur(6px); }
+.market-info-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.market-info-title { color: var(--gold); font-size: 9px; text-transform: uppercase; letter-spacing: .1em; font-weight: 700; }
+.market-info-hint { color: var(--muted); font-size: 11px; }
+.market-prices { display: flex; flex-direction: column; gap: 2px; }
+.market-price-row { display: flex; flex-wrap: wrap; gap: 12px; }
+.market-price-row span { display: inline-flex; align-items: baseline; gap: 3px; color: #e7e2d6; font-size: 12px; }
+.market-price-row b { color: var(--gold-bright); font-size: 15px; font-weight: 700; }
+.market-price-row i { color: #8a8c92; font-size: 9px; font-style: normal; letter-spacing: .04em; }
+.market-prices small, .market-info-updated { color: #8a8c92; font-size: 9.5px; }
+.market-info-wiki { flex: none; align-self: center; padding: 6px 10px; border: 1px solid #4a4d54; border-radius: 5px; background: #24262b; color: #ede8de; font-size: 11px; text-decoration: none; white-space: nowrap; }
+.market-info-wiki:hover { border-color: #8b7550; background: #302a21; color: var(--gold-bright); }
+/* Let the picker controls wrap once the market-scope selector is added. */
+.catalog-picker .catalog-controls { flex-wrap: wrap; }
+.catalog-picker .catalog-field { flex: 1 1 150px; }
+.catalog-picker .catalog-field-search { flex: 2 1 220px; }
 .armor-icon { width: 58px; height: 58px; display: grid; place-items: center; overflow: hidden; border-radius: 6px; background: #111216; color: #72747a; }
 .armor-icon img { width: 100%; height: 100%; object-fit: cover; }
 .armor-copy { min-width: 0; }

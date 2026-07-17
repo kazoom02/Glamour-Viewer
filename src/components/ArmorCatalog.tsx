@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AssetSource } from '../asset-source/types'
 import {
   EQUIPMENT_SLOTS,
@@ -22,6 +22,10 @@ import {
   prefetchAllSlots,
 } from '../catalog/catalogCache'
 import DyePicker from './DyePicker'
+import MarketInfo from './MarketInfo'
+import { fetchDataCenters, fetchWorlds, type UniversalisDataCenter } from '../catalog/universalis'
+
+const MARKET_SCOPE_STORAGE_KEY = 'gv.marketScope'
 
 interface Props {
   source: AssetSource
@@ -62,6 +66,70 @@ export default function ArmorCatalog({ source, equipped, onEquip, onRemove, onDy
   const [jobFilter, setJobFilter] = useState('')
   const [categories, setCategories] = useState<Map<number, Set<string>> | null>(null)
   const [dyePicker, setDyePicker] = useState<{ slot: EquipmentSlot; channel: 0 | 1 } | null>(null)
+  const [marketScope, setMarketScope] = useState<string>(() => {
+    try { return localStorage.getItem(MARKET_SCOPE_STORAGE_KEY) ?? '' } catch { return '' }
+  })
+  const [dataCenters, setDataCenters] = useState<UniversalisDataCenter[]>([])
+  const [worldNames, setWorldNames] = useState<Map<number, string>>(new Map())
+  const [hoverItemId, setHoverItemId] = useState<number | null>(null)
+
+  // Load Universalis world/data-center lists once to populate the price selector.
+  useEffect(() => {
+    let active = true
+    Promise.all([fetchDataCenters(), fetchWorlds()])
+      .then(([centers, worlds]) => {
+        if (!active) return
+        setDataCenters(centers)
+        setWorldNames(new Map(worlds.map((world) => [world.id, world.name] as [number, string])))
+      })
+      .catch(() => { /* market prices simply stay unavailable if Universalis is unreachable */ })
+    return () => { active = false }
+  }, [])
+
+  const changeMarketScope = (value: string) => {
+    setMarketScope(value)
+    try {
+      if (value) localStorage.setItem(MARKET_SCOPE_STORAGE_KEY, value)
+      else localStorage.removeItem(MARKET_SCOPE_STORAGE_KEY)
+    } catch { /* private-mode storage failures are non-fatal */ }
+  }
+
+  // Hover-intent: only reveal the market panel (which triggers a fetch) once the
+  // pointer rests on an item, so skimming the list doesn't request every item.
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => { if (hoverTimer.current) clearTimeout(hoverTimer.current) }, [])
+  const handleHoverEnter = (id: number) => {
+    if (hoverTimer.current) clearTimeout(hoverTimer.current)
+    hoverTimer.current = setTimeout(() => setHoverItemId(id), 180)
+  }
+  const handleHoverLeave = (id: number) => {
+    if (hoverTimer.current) { clearTimeout(hoverTimer.current); hoverTimer.current = null }
+    setHoverItemId((current) => (current === id ? null : current))
+  }
+
+  // Inlined (not a nested component) so the controlled <select> is not remounted
+  // on every render, matching how the rest of this file renders its fields.
+  const renderMarketScopeField = () => {
+    if (dataCenters.length === 0) return null
+    return (
+      <div className="catalog-field">
+        <label className="field-label" htmlFor="market-scope">Market prices</label>
+        <select id="market-scope" value={marketScope} onChange={(event) => changeMarketScope(event.target.value)}>
+          <option value="">Off — pick a world/DC</option>
+          {dataCenters.map((center) => (
+            <optgroup key={center.name} label={`${center.region} — ${center.name}`}>
+              <option value={center.name}>{center.name} (all worlds)</option>
+              {center.worlds
+                .map((id) => worldNames.get(id))
+                .filter((name): name is string => Boolean(name))
+                .sort((a, b) => a.localeCompare(b))
+                .map((name) => <option key={name} value={name}>{name}</option>)}
+            </optgroup>
+          ))}
+        </select>
+      </div>
+    )
+  }
 
   // Warm the whole catalog + class lookup once, in the background.
   useEffect(() => {
@@ -297,6 +365,7 @@ export default function ArmorCatalog({ source, equipped, onEquip, onRemove, onDy
                   ))}
                 </select>
               </div>
+              {renderMarketScopeField()}
             </div>
 
             {error && <p className="error-message catalog-error" role="alert">{error}</p>}
@@ -320,7 +389,13 @@ export default function ArmorCatalog({ source, equipped, onEquip, onRemove, onDy
                     {displayed.map((item) => {
                       const isEquipped = equipped[selectedSlot]?.id === item.id
                       return (
-                        <article className="armor-result" key={item.id}>
+                        <article
+                          className="armor-result"
+                          key={item.id}
+                          onMouseEnter={() => handleHoverEnter(item.id)}
+                          onMouseLeave={() => handleHoverLeave(item.id)}
+                          onFocus={() => setHoverItemId(item.id)}
+                        >
                           <div className="armor-icon">
                             {item.iconPath ? <img src={xivapiIconUrl(item.iconPath)} alt="" loading="lazy" /> : <span>—</span>}
                           </div>
@@ -336,6 +411,11 @@ export default function ArmorCatalog({ source, equipped, onEquip, onRemove, onDy
                           >
                             {isEquipped ? 'Unequip' : 'Equip'}
                           </button>
+                          {hoverItemId === item.id && (
+                            <div className="armor-market-popover">
+                              <MarketInfo item={item} scope={marketScope || undefined} />
+                            </div>
+                          )}
                         </article>
                       )
                     })}
