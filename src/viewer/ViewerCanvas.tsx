@@ -267,6 +267,11 @@ function colorNumber(value: string, fallback = 0xffffff): number {
   return /^#[0-9a-f]{6}$/i.test(value) ? Number.parseInt(value.slice(1), 16) : fallback
 }
 
+// Applies the current appearance colors (hair/eye/skin/lip/tattoo/face paint) to
+// one already-built material. Collected per character material so a color change
+// updates the live materials in place instead of rebuilding the whole character.
+type CustomizationApplier = (customization: CharacterCustomization) => void
+
 interface MaterialCustomizationOptions {
   paletteMask?: DecodedMaterial['textures']['skinColorMask']
   paletteColor?: string
@@ -290,6 +295,12 @@ function enableMaterialCustomization(
   if (paletteMap) material.userData.paletteMaskMap = paletteMap
   if (lipMap) material.userData.lipMaskMap = lipMap
   if (facePaintMap) material.userData.facePaintMap = facePaintMap
+  // Keep references to the live uniform tint colors so a later color change can
+  // mutate them in place (the shader uniforms hold these Color objects by
+  // reference) without recompiling or rebuilding the material.
+  if (paletteMap) material.userData.paletteTintColor = paletteTint
+  if (lipMap) material.userData.lipTintColor = lipTint
+  if (facePaintMap) material.userData.facePaintTintColor = facePaintTint
   material.onBeforeCompile = (shader) => {
     const vertexDeclarations: string[] = []
     const vertexAssignments: string[] = []
@@ -352,6 +363,7 @@ function addDecodedModel(
   materialAnimation?: DecodedMaterialAnimation,
   animatedMaterials: AnimatedMaterial[] = [],
   facePaintTexture?: MaterialLoadResult['facePaintTexture'],
+  customizationAppliers: CustomizationApplier[] = [],
 ): number {
   for (const [index, part] of model.meshes.entries()) {
     if (slot && attributeMask !== undefined && !isVisibleEquipmentPart(part.attributes, slot, attributeMask)) continue
@@ -385,16 +397,25 @@ function addDecodedModel(
     const alphaMode = decodedMaterial?.alphaMode ?? 'opaque'
     const isIris = decodedMaterial?.shaderPackage.toLowerCase() === 'iris.shpk' || /_iri_[a-z]\.mtrl$/.test(materialPath)
     const isFaceMaterial = /mt_c\d{4}f\d{4}/.test(materialPath)
-    let materialTint = 0xffffff
+    // Which appearance color drives this material's tint. Resolved once so the
+    // initial build and the live color updates stay in lockstep.
+    let tintKind: 'iris' | 'hair' | 'faceOverlay' | 'skin' | 'none' = 'none'
     if (customization) {
-      if (isIris) materialTint = colorNumber(customization.eyeColor)
-      else if (/_hir_[a-z]\.mtrl$/.test(materialPath) || shaderPackage === 'hair.shpk') materialTint = colorNumber(customization.hairColor)
-      else if (shaderPackage.includes('tattoo') || /_etc_[a-z]\.mtrl$/.test(materialPath)) {
-        materialTint = colorNumber(customization.facePaint ? customization.facePaintColor : customization.tattooColor)
-      } else if (shaderPackage === 'skin.shpk' || /b0001_[a-z]\.mtrl$/.test(materialPath) || isFaceMaterial) {
-        materialTint = colorNumber(customization.skinColor)
+      if (isIris) tintKind = 'iris'
+      else if (/_hir_[a-z]\.mtrl$/.test(materialPath) || shaderPackage === 'hair.shpk') tintKind = 'hair'
+      else if (shaderPackage.includes('tattoo') || /_etc_[a-z]\.mtrl$/.test(materialPath)) tintKind = 'faceOverlay'
+      else if (shaderPackage === 'skin.shpk' || /b0001_[a-z]\.mtrl$/.test(materialPath) || isFaceMaterial) tintKind = 'skin'
+    }
+    const tintFor = (values: CharacterCustomization): number => {
+      switch (tintKind) {
+        case 'iris': return colorNumber(values.eyeColor)
+        case 'hair': return colorNumber(values.hairColor)
+        case 'faceOverlay': return colorNumber(values.facePaint ? values.facePaintColor : values.tattooColor)
+        case 'skin': return colorNumber(values.skinColor)
+        default: return 0xffffff
       }
     }
+    const materialTint = customization ? tintFor(customization) : 0xffffff
     const fallbackRoughness = shaderPackage === 'skin.shpk'
       ? 0.76
       : shaderPackage === 'hair.shpk'
@@ -505,6 +526,22 @@ function addDecodedModel(
         facePaintTexture: activeFacePaint,
         facePaintColor: customization.facePaintColor,
       }, anisotropy)
+    }
+    // Register a live color updater for materials that respond to appearance
+    // colors, so changing a picker retints these in place (see the color effect).
+    if (customization && (tintKind !== 'none' || paletteMask || lipMask || activeFacePaint)) {
+      customizationAppliers.push((values) => {
+        if (paletteMask) {
+          const tint = material.userData.paletteTintColor as THREE.Color | undefined
+          tint?.setHex(tintFor(values))
+        } else if (diffuse) {
+          material.color.setHex(tintFor(values))
+        }
+        const lip = material.userData.lipTintColor as THREE.Color | undefined
+        lip?.setHex(colorNumber(values.lipColor))
+        const paint = material.userData.facePaintTintColor as THREE.Color | undefined
+        paint?.setHex(colorNumber(values.facePaintColor))
+      })
     }
     const hasEmissivePixels = emissive && hasVisibleRgb(emissive)
     const animationTrack = materialAnimation && materialAnimationTrack(materialAnimation, part.materialIndex)
@@ -817,6 +854,10 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
   const motionInput = useRef<HTMLInputElement>(null)
   // Last catalog animation the user played, for the raw-.pap download affordance.
   const lastCatalogEntry = useRef<CatalogAnimation | null>(null)
+  // Per-material color updaters, repopulated whenever the character is rebuilt.
+  // A color-picker change runs these to retint the live materials in place
+  // instead of tearing down and reloading the whole character.
+  const customizationAppliers = useRef<CustomizationApplier[]>([])
   const previewItems = EQUIPMENT_SLOTS.flatMap((slot) => equipped[slot] ? [[slot, equipped[slot]!] as const] : [])
   const [status, setStatus] = useState('Loading character…')
   const [error, setError] = useState<string>()
@@ -952,6 +993,8 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
     let activeIdleMixer: THREE.AnimationMixer | undefined
     const animatedMaterials: AnimatedMaterial[] = []
     const avfxRuntimes: AvfxRuntime[] = []
+    // Rebuilt below as character materials are created; the color effect reads this.
+    customizationAppliers.current = []
     idleAction.current = null
     idleMixer.current = null
     playCatalogAnimation.current = null
@@ -1180,6 +1223,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               undefined,
               animatedMaterials,
               plan.part === 'face' ? materialResult?.facePaintTexture : undefined,
+              customizationAppliers.current,
             )
             if (result.warning) failures.push(`${plan.part}: ${result.warning}`)
             if (materialResult?.errors.length) failures.push(...materialResult.errors.map((error) => `${plan.part} ${error}`))
@@ -1566,18 +1610,35 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
     customization.gender,
     customization.bustSize,
     customization.muscleTone,
-    customization.skinColor,
-    customization.hairColor,
-    customization.eyeColor,
     customization.jaw,
     customization.eyeShape,
     customization.irisSize,
     customization.eyebrows,
     customization.nose,
     customization.mouth,
-    customization.lipColor,
     customization.facialFeatures,
     customization.tattoos,
+    // facePaint toggles the decal geometry/texture, so it still triggers a rebuild.
+    customization.facePaint,
+    // Appearance COLORS are intentionally omitted: they are pure tints applied
+    // live by the color effect below, so changing a picker must not tear down and
+    // reload the whole character (which recreated the WebGL context every tick and
+    // eventually stopped updating). The rebuild still reads the current colors for
+    // the initial tint because it runs on the other dependencies with fresh props.
+  ])
+
+  // Retint the already-built character materials when an appearance color
+  // changes — cheap, and it avoids the full character rebuild that made color
+  // changes appear to do nothing. Runs after the current character is built;
+  // during the initial async load the list is empty and the build sets colors.
+  useEffect(() => {
+    for (const apply of customizationAppliers.current) apply(customization)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    customization.skinColor,
+    customization.hairColor,
+    customization.eyeColor,
+    customization.lipColor,
     customization.tattooColor,
     customization.facePaint,
     customization.facePaintColor,
