@@ -178,6 +178,7 @@ h2 { margin: 0; font-size: clamp(28px, 3.2vw, 42px); line-height: 1.1; letter-sp
 .local-connect { display: flex; flex-direction: column; gap: 16px; margin-top: auto; }
 .local-connect .card-actions { margin-top: 0; }
 .source-card .method-note { align-self: stretch; margin: 4px 0 2px; color: #a9a49b; font-size: 12px; line-height: 1.5; }
+.source-card .method-unavailable { margin: 0; padding: 9px 11px; border: 1px solid #5a4a2a; border-radius: 5px; background: #241f14; color: #e2c68a; }
 .method-note code { color: #d4c8b4; }
 .install-hint { align-self: stretch; color: #b0ada7; font-size: 12px; }
 .install-hint summary { cursor: pointer; color: #aaa39a; text-underline-offset: 3px; }

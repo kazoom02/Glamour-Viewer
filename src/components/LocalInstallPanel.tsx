@@ -8,6 +8,25 @@ interface Props {
   onConnect: (source: AssetSource) => void
 }
 
+// Whether the automatic folder finder (File System Access API) is usable here,
+// and if not, an accurate reason. The API only exists in a secure context
+// (https or http://localhost), so a dev server opened via a LAN IP — or a
+// browser with the API disabled — lands on the manual path instead.
+function automaticPickerStatus(): { available: boolean; reason?: string } {
+  if (typeof window === 'undefined') return { available: false }
+  if (typeof window.showDirectoryPicker === 'function') return { available: true }
+  if (window.isSecureContext === false) {
+    return {
+      available: false,
+      reason: 'Automatic finding needs a secure page. Open the app at http://localhost or over https:// (not a http:// LAN address).',
+    }
+  }
+  return {
+    available: false,
+    reason: 'This browser has folder access turned off. Use manual upload, or enable the File System Access API in your browser settings.',
+  }
+}
+
 // A browser can't open the install path automatically, but showing the usual
 // location lets the user paste it into the picker's address bar. The pick is
 // forgiving now, so any folder along these paths works.
@@ -35,7 +54,8 @@ type SavedHandleState =
   | { status: 'permission'; handle: FileSystemDirectoryHandle }
 
 export function LocalInstallPanel({ onConnect }: Props) {
-  const supportsPicker = typeof window.showDirectoryPicker === 'function'
+  const picker = automaticPickerStatus()
+  const supportsPicker = picker.available
   const [saved, setSaved] = useState<SavedHandleState>({ status: 'checking' })
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string>()
@@ -160,7 +180,7 @@ export function LocalInstallPanel({ onConnect }: Props) {
           className={method === 'auto' ? 'active' : ''}
           onClick={() => setMethod('auto')}
           disabled={!supportsPicker}
-          title={supportsPicker ? undefined : 'Automatic finding needs Chrome or Edge'}
+          title={picker.reason}
         >
           Find automatically
         </button>
@@ -173,6 +193,10 @@ export function LocalInstallPanel({ onConnect }: Props) {
           Upload manually
         </button>
       </div>
+
+      {!supportsPicker && picker.reason && (
+        <p className="method-note method-unavailable" role="status">{picker.reason}</p>
+      )}
 
       {method === 'auto' ? (
         <div className="card-actions">
