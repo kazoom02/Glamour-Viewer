@@ -2,10 +2,30 @@ import { useEffect, useRef, useState } from 'react'
 import { forgetDirectoryHandle, loadDirectoryHandle, saveDirectoryHandle } from '../lib/handleStore'
 import { formatBytes } from '../lib/format'
 import type { AssetSource } from '../asset-source/types'
-import { inspectFallbackSqpack, inspectSqpackDirectory } from '../asset-source/localSqpack'
+import { inspectFallbackSqpack, inspectSqpackDirectory, locateSqpackRoot } from '../asset-source/localSqpack'
 
 interface Props {
   onConnect: (source: AssetSource) => void
+}
+
+// A browser can't open the install path automatically, but showing the usual
+// location lets the user paste it into the picker's address bar. The pick is
+// forgiving now, so any folder along these paths works.
+function defaultInstallHint(): { os: string; paths: string[] } {
+  const platform = typeof navigator === 'undefined' ? '' : navigator.userAgent
+  if (/Mac/i.test(platform)) {
+    return {
+      os: 'macOS',
+      paths: ['~/Library/Application Support/Steam/steamapps/common/FINAL FANTASY XIV Online/game/sqpack'],
+    }
+  }
+  return {
+    os: 'Windows',
+    paths: [
+      'C:\\Program Files (x86)\\Steam\\steamapps\\common\\FINAL FANTASY XIV Online\\game\\sqpack',
+      'C:\\Program Files (x86)\\SquareEnix\\FINAL FANTASY XIV - A Realm Reborn\\game\\sqpack',
+    ],
+  }
 }
 
 type SavedHandleState =
@@ -19,7 +39,9 @@ export function LocalInstallPanel({ onConnect }: Props) {
   const [saved, setSaved] = useState<SavedHandleState>({ status: 'checking' })
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string>()
+  const [method, setMethod] = useState<'auto' | 'manual'>(supportsPicker ? 'auto' : 'manual')
   const inputRef = useRef<HTMLInputElement>(null)
+  const installHint = defaultInstallHint()
 
   useEffect(() => {
     let active = true
@@ -51,20 +73,28 @@ export function LocalInstallPanel({ onConnect }: Props) {
   async function chooseDirectory() {
     if (!window.showDirectoryPicker) return
     setMessage(undefined)
+    setBusy(true)
     try {
-      const handle = await window.showDirectoryPicker({ id: 'ffxiv-sqpack', mode: 'read' })
-      const inspection = await inspectSqpackDirectory(handle)
+      const picked = await window.showDirectoryPicker({ id: 'ffxiv-sqpack', mode: 'read' })
+      // Accept the sqpack folder, the game folder, the install root, or a Steam
+      // library — then descend to the exact sqpack folder within the pick.
+      const located = await locateSqpackRoot(picked)
+      const target = located ?? picked
+      const inspection = await inspectSqpackDirectory(target)
       if (!inspection.valid) {
-        setMessage(`That does not look like game/sqpack. Missing: ${inspection.missing.join(', ')}`)
+        setMessage(`That does not look like a FINAL FANTASY XIV install. Couldn’t find game/sqpack (missing ${inspection.missing.join(', ')}).`)
         return
       }
-      await saveDirectoryHandle(handle)
-      setSaved({ status: 'ready', handle })
-      onConnect({ kind: 'local', label: handle.name, access: 'handle', handle })
-      setMessage(`Validated ${inspection.indexName} and the character data archive.`)
+      await saveDirectoryHandle(target)
+      setSaved({ status: 'ready', handle: target })
+      onConnect({ kind: 'local', label: target.name, access: 'handle', handle: target })
+      const note = located && located !== picked ? ` Found it inside “${picked.name}”.` : ''
+      setMessage(`Validated ${inspection.indexName} and the character data archive.${note}`)
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return
       setMessage('The folder could not be opened. Check browser permissions and try again.')
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -119,11 +149,34 @@ export function LocalInstallPanel({ onConnect }: Props) {
       <div>
         <p className="eyebrow">Private & direct</p>
         <h2 id="local-title">Local install</h2>
-        <p>Choose your <code>game/sqpack</code> folder. Files stay on this device and are read only when needed.</p>
+        <p>Point at your FINAL FANTASY XIV install — the <code>game/sqpack</code> folder, the game folder, or the install root all work. Files stay on this device and are read only when needed.</p>
       </div>
 
-      {supportsPicker ? (
+      <div className="local-connect">
+      <div className="method-toggle" role="group" aria-label="How to connect your install">
+        <button
+          type="button"
+          aria-pressed={method === 'auto'}
+          className={method === 'auto' ? 'active' : ''}
+          onClick={() => setMethod('auto')}
+          disabled={!supportsPicker}
+          title={supportsPicker ? undefined : 'Automatic finding needs Chrome or Edge'}
+        >
+          Find automatically
+        </button>
+        <button
+          type="button"
+          aria-pressed={method === 'manual'}
+          className={method === 'manual' ? 'active' : ''}
+          onClick={() => setMethod('manual')}
+        >
+          Upload manually
+        </button>
+      </div>
+
+      {method === 'auto' ? (
         <div className="card-actions">
+          <p className="method-note">We open a folder picker, then find your <code>game/sqpack</code> data inside whatever you choose. Files are read on demand and never uploaded. Chrome &amp; Edge.</p>
           {saved.status === 'ready' && (
             <button className="button secondary" onClick={() => reconnect(saved.handle)}>
               Continue with {saved.handle.name}
@@ -132,7 +185,9 @@ export function LocalInstallPanel({ onConnect }: Props) {
           {saved.status === 'permission' && (
             <button className="button secondary" onClick={() => reconnect(saved.handle)}>Restore folder access</button>
           )}
-          <button className="button primary" onClick={chooseDirectory}>Choose sqpack folder</button>
+          <button className="button primary" onClick={chooseDirectory} disabled={busy}>
+            {busy ? 'Locating install…' : 'Choose FFXIV folder'}
+          </button>
           {(saved.status === 'ready' || saved.status === 'permission') && (
             <button
               className="text-button"
@@ -144,11 +199,18 @@ export function LocalInstallPanel({ onConnect }: Props) {
               Forget saved folder
             </button>
           )}
+          <details className="install-hint">
+            <summary>Where is my install folder?</summary>
+            <p>Pick the folder in the picker — we’ll find <code>game/sqpack</code> inside it. Typical {installHint.os} locations:</p>
+            <ul>
+              {installHint.paths.map((path) => <li key={path}><code>{path}</code></li>)}
+            </ul>
+          </details>
         </div>
       ) : (
         <div className="fallback-box">
-          <strong>Compatibility folder picker</strong>
-          <p>Firefox and Safari load the whole directory into memory. Large installs will be slow and may exhaust the tab’s memory.</p>
+          <strong>Upload the folder</strong>
+          <p>Select your <code>game/sqpack</code> folder to load it into this tab. Works in any browser, but the whole folder is read into memory — pick the <code>sqpack</code> (or <code>game</code>) folder, not a larger parent, or a big install may exhaust the tab.</p>
           <input
             ref={inputRef}
             className="directory-input"
@@ -161,6 +223,7 @@ export function LocalInstallPanel({ onConnect }: Props) {
           />
         </div>
       )}
+      </div>
       {message && <p className="inline-message" role="status">{message}</p>}
     </section>
   )
