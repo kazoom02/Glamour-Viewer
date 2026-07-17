@@ -8,6 +8,8 @@ interface Request {
   id: number
   source: Extract<AssetSource, { kind: 'local' }>
   paths: string[]
+  // Optional internal track name for catalog animations; omitted for idle.
+  preferName?: string
 }
 
 function transferBuffers(animation: DecodedAnimation): ArrayBuffer[] {
@@ -21,22 +23,22 @@ function transferBuffers(animation: DecodedAnimation): ArrayBuffer[] {
 }
 
 self.onmessage = (event: MessageEvent<Request>) => {
-  const { id, source, paths } = event.data
+  const { id, source, paths, preferName } = event.data
   void (async () => {
     const reader = createLocalAssetReader(source)
     const errors: string[] = []
     for (const path of paths) {
       try {
-        const animation = decodePap(await reader.read(path), path)
+        const animation = decodePap(await reader.read(path), path, 30, preferName)
         self.postMessage({ id, animation }, { transfer: transferBuffers(animation) })
         return
       } catch (error) {
         errors.push(`${path}: ${error instanceof Error ? error.message : String(error)}`)
       }
     }
-    self.postMessage({ id, error: `Idle animation could not be decoded. ${errors.join(' / ')}` })
+    self.postMessage({ id, error: `Animation could not be decoded. ${errors.join(' / ')}` })
   })().catch((error) => {
-    self.postMessage({ id, error: error instanceof Error ? error.message : 'The idle animation worker failed.' })
+    self.postMessage({ id, error: error instanceof Error ? error.message : 'The animation worker failed.' })
   })
 }
 

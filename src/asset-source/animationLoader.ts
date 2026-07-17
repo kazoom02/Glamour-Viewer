@@ -9,9 +9,16 @@ interface WorkerResponse {
 
 let requestId = 0
 
-export function loadLocalIdleAnimation(
+/**
+ * Decodes the first PAP that resolves from `paths` in a module worker. When
+ * `preferName` is given, that named track is selected inside the PAP (catalog
+ * animations); otherwise the idle loop is chosen. Paths are tried in order so a
+ * race can fall back to a shared ancestor's animation.
+ */
+export function loadLocalAnimation(
   source: Extract<AssetSource, { kind: 'local' }>,
   paths: string[],
+  preferName?: string,
 ): Promise<DecodedAnimation> {
   const worker = new Worker(new URL('./animation.worker.ts', import.meta.url), { type: 'module' })
   const id = ++requestId
@@ -20,14 +27,22 @@ export function loadLocalIdleAnimation(
       if (event.data.id !== id) return
       worker.terminate()
       if (event.data.animation) resolve(event.data.animation)
-      else reject(new Error(event.data.error || 'The idle animation worker returned no clip.'))
+      else reject(new Error(event.data.error || 'The animation worker returned no clip.'))
     }
     worker.onerror = (event) => {
       worker.terminate()
-      reject(new Error(event.message || 'The idle animation worker failed.'))
+      reject(new Error(event.message || 'The animation worker failed.'))
     }
-    worker.postMessage({ id, source, paths })
+    worker.postMessage({ id, source, paths, preferName })
   })
+}
+
+/** Decodes the standing idle loop for a race (no named track). */
+export function loadLocalIdleAnimation(
+  source: Extract<AssetSource, { kind: 'local' }>,
+  paths: string[],
+): Promise<DecodedAnimation> {
+  return loadLocalAnimation(source, paths)
 }
 
 export type { DecodedAnimation, DecodedAnimationTrack } from './pap'

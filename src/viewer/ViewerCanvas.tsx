@@ -15,7 +15,8 @@ import {
   type CharacterPart,
   type CharacterRaceCode,
 } from '../asset-source/characterPlan'
-import { loadLocalIdleAnimation, type DecodedAnimation } from '../asset-source/animationLoader'
+import { loadLocalAnimation, loadLocalIdleAnimation, type DecodedAnimation } from '../asset-source/animationLoader'
+import { catalogAnimationCandidates, type CatalogAnimation } from '../asset-source/animationCatalog'
 import { HUMAN_CMP_PATH, loadLocalBustScale, type BustScale } from '../asset-source/cmp'
 import { equipmentAssetPlan } from '../asset-source/equipmentPlan'
 import {
@@ -46,6 +47,7 @@ import {
 import type { CharacterCustomization } from '../customization/types'
 import { activeFaceShapes, faceFeatureMask, faceFeatureVisible } from '../customization/faceShapes'
 import { animationClipFromDecoded } from './idleAnimation'
+import AnimationPicker from './AnimationPicker'
 import { createAvfxRuntime, type AvfxRuntime } from './avfxRuntime'
 import { subdivideCurvedMesh } from './geometryQuality'
 import {
@@ -804,12 +806,36 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
   const idleAction = useRef<THREE.AnimationAction | null>(null)
   const idleMixer = useRef<THREE.AnimationMixer | null>(null)
   const resetView = useRef<(() => void) | null>(null)
+  // Set once the character is built; loads and plays a catalog animation on the
+  // live rig. Null until ready and while the effect is torn down.
+  const playCatalogAnimation = useRef<((entry: CatalogAnimation) => Promise<void>) | null>(null)
   const previewItems = EQUIPMENT_SLOTS.flatMap((slot) => equipped[slot] ? [[slot, equipped[slot]!] as const] : [])
   const [status, setStatus] = useState('Loading character…')
   const [error, setError] = useState<string>()
   const [debug, setDebug] = useState<string>()
   const [idleState, setIdleState] = useState<IdleAnimationState>(source.kind === 'local' ? 'loading' : 'unavailable')
   const [idleLabel, setIdleLabel] = useState('Idle')
+  const [activeAnimId, setActiveAnimId] = useState<string>()
+  const [animBusy, setAnimBusy] = useState(false)
+  const [animNotice, setAnimNotice] = useState<string>()
+
+  const onSelectAnimation = async (entry: CatalogAnimation) => {
+    const play = playCatalogAnimation.current
+    if (!play) return
+    setAnimBusy(true)
+    setAnimNotice(undefined)
+    try {
+      await play(entry)
+      setActiveAnimId(entry.id)
+    } catch (reason) {
+      const detail = reason instanceof Error ? reason.message : String(reason)
+      setAnimNotice(/additive/i.test(detail)
+        ? `“${entry.label}” is an additive overlay clip and can’t play as a standalone pose yet.`
+        : `Could not play “${entry.label}”: ${detail}`)
+    } finally {
+      setAnimBusy(false)
+    }
+  }
 
   const startIdle = () => {
     const action = idleAction.current
@@ -868,8 +894,13 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
     const avfxRuntimes: AvfxRuntime[] = []
     idleAction.current = null
     idleMixer.current = null
+    playCatalogAnimation.current = null
     setIdleLabel('Idle')
     setIdleState(source.kind === 'local' ? 'loading' : 'unavailable')
+    // A character rebuild (gear/customization change) reverts to idle, so clear
+    // any catalog selection highlight and stale notice.
+    setActiveAnimId(undefined)
+    setAnimNotice(undefined)
 
     // A brighter neutral studio rig so dark, reflective gear reads as metal
     // instead of black. Neutral tone mapping still rolls off the highlights, so
@@ -1223,6 +1254,43 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             setIdleState('unavailable')
           }
         }
+        // Expose a live player for the animation catalog. It decodes the chosen
+        // PAP from the same local install and swaps the clip on the idle mixer,
+        // reusing the idle transport (Start/Pause) for the current animation.
+        if (rig) {
+          const animationRig = rig
+          const animationBustScale = bustScale
+          const localSource = source
+          playCatalogAnimation.current = async (entry: CatalogAnimation) => {
+            const decoded = await loadLocalAnimation(
+              localSource,
+              catalogAnimationCandidates(entry, raceCode),
+              entry.internal || undefined,
+            )
+            if (disposed) return
+            const clip = animationClipFromDecoded(decoded, animationRig.skeleton, animationBustScale)
+            let mixer = idleMixer.current
+            if (!mixer) {
+              mixer = new THREE.AnimationMixer(characterGroup)
+              idleMixer.current = mixer
+              activeIdleMixer = mixer
+            }
+            const previous = idleAction.current
+            if (previous) {
+              previous.stop()
+              mixer.uncacheClip(previous.getClip())
+            }
+            const action = mixer.clipAction(clip)
+            action.setLoop(THREE.LoopRepeat, Infinity)
+            action.clampWhenFinished = false
+            action.setEffectiveWeight(1)
+            action.setEffectiveTimeScale(1)
+            action.play()
+            idleAction.current = action
+            setIdleLabel(entry.label)
+            setIdleState('playing')
+          }
+        }
       } else {
         for (const plan of characterPlans) {
           if (plan.part === 'hair' && hairHidden) continue
@@ -1327,6 +1395,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       observer.disconnect()
       controls.dispose()
       avfxRuntimes.forEach((runtime) => runtime.dispose())
+      playCatalogAnimation.current = null
       activeIdleMixer?.stopAllAction()
       if (idleMixer.current === activeIdleMixer) {
         idleMixer.current = null
@@ -1410,7 +1479,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           </div>
         </details>
       )}
-      <div className={`viewer-animation-controls ${idleState}`} aria-label="Idle animation controls">
+      <div className={`viewer-animation-controls ${idleState}`} aria-label="Animation controls">
         <span className="viewer-animation-label" title={idleLabel}>
           <i aria-hidden="true" />
           {idleState === 'loading' ? 'Loading idle…' : idleState === 'unavailable' ? 'Idle unavailable' : idleLabel}
@@ -1419,7 +1488,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           type="button"
           onClick={startIdle}
           disabled={!idleAction.current || idleState === 'loading' || idleState === 'playing' || idleState === 'unavailable'}
-          title={source.kind === 'local' ? 'Start or resume the character idle animation' : 'Idle animation requires Local install mode'}
+          title={source.kind === 'local' ? 'Start or resume the current animation' : 'Animations require Local install mode'}
         >
           Start
         </button>
@@ -1427,7 +1496,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           type="button"
           onClick={pauseIdle}
           disabled={!idleAction.current || idleState !== 'playing'}
-          title="Pause the character idle animation"
+          title="Pause the current animation"
         >
           Pause
         </button>
@@ -1439,6 +1508,14 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           Fit
         </button>
       </div>
+      {source.kind === 'local' && (
+        <AnimationPicker
+          activeId={activeAnimId}
+          busy={animBusy}
+          notice={animNotice}
+          onSelect={onSelectAnimation}
+        />
+      )}
       <p className="viewer-status" aria-live="polite">{status}</p>
       {error && (
         <details className="viewer-error">

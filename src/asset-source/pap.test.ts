@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parsePapHeader } from './pap'
+import { orderedAnimations, parsePapHeader, type PapAnimationInfo } from './pap'
 
 function papFixture(): ArrayBuffer {
   const bytes = new Uint8Array(74)
@@ -27,6 +27,37 @@ describe('PAP decoder', () => {
 
   it('rejects non-PAP data', () => {
     expect(() => parsePapHeader(new ArrayBuffer(32))).toThrow('PAP magic')
+  })
+})
+
+describe('PAP animation selection', () => {
+  const infos: PapAnimationInfo[] = [
+    { name: 'cbbm_id0', havokIndex: 0 },
+    { name: 'cbbm_01l_lp0', havokIndex: 1 },
+    { name: 'cbbm_idle_loop', havokIndex: 2 },
+  ]
+
+  it('prefers the idle-ranked track when no name is requested', () => {
+    const { infos: ordered, explicit } = orderedAnimations(infos)
+    expect(explicit).toBe(false)
+    // id0 outranks idle_loop, which outranks a non-idle track.
+    expect(ordered.map((info) => info.name)).toEqual(['cbbm_id0', 'cbbm_idle_loop', 'cbbm_01l_lp0'])
+  })
+
+  it('promotes an explicitly named track and marks the pick explicit', () => {
+    const { infos: ordered, explicit } = orderedAnimations(infos, 'cbbm_01l_lp0')
+    expect(explicit).toBe(true)
+    expect(ordered[0]!.name).toBe('cbbm_01l_lp0')
+  })
+
+  it('falls back to the ranked order when the requested name is absent', () => {
+    const { explicit } = orderedAnimations(infos, 'does_not_exist')
+    expect(explicit).toBe(false)
+  })
+
+  it('ignores tracks with no Havok binding', () => {
+    const { infos: ordered } = orderedAnimations([...infos, { name: 'unbound', havokIndex: -1 }])
+    expect(ordered.some((info) => info.name === 'unbound')).toBe(false)
   })
 })
 

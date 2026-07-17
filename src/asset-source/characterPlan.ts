@@ -127,11 +127,31 @@ export function weaponRaceScale(raceCode: CharacterRaceCode): number {
   return WEAPON_RACE_SCALE[raceCode] ?? 1
 }
 
+/** The selected race followed by the ancestor races whose animations it shares. */
+export function raceAnimationFallbacks(raceCode: CharacterRaceCode): CharacterRaceCode[] {
+  return [raceCode, ...EQUIPMENT_FALLBACKS[raceCode]]
+}
+
+/**
+ * Resolves a `{weaponClass}/{sub}/{papFile}` animation reference to the in-game
+ * `.pap` paths to try, newest race first. The game stores animations per race but
+ * most fall back to a shared ancestor (ultimately Midlander `c0101`), mirroring how
+ * equipment models resolve. See docs/local-sqpack.md for the SqPack read path.
+ */
+export function animationPapCandidates(
+  raceCode: CharacterRaceCode,
+  weaponClass: string,
+  sub: string,
+  papFile: string,
+): string[] {
+  return raceAnimationFallbacks(raceCode).map((candidate) => (
+    `chara/human/${candidate}/animation/a0001/${weaponClass}/${sub}/${papFile}.pap`
+  ))
+}
+
 /** Race-authored standing idle loops, followed by compatible skeleton fallbacks. */
 export function idleAnimationCandidates(raceCode: CharacterRaceCode): string[] {
-  return [raceCode, ...EQUIPMENT_FALLBACKS[raceCode]].map((candidate) => (
-    `chara/human/${candidate}/animation/a0001/bt_common/resident/idle.pap`
-  ))
+  return animationPapCandidates(raceCode, 'bt_common', 'resident', 'idle')
 }
 
 /** The common face skeleton remains the first candidate for backwards compatibility. */

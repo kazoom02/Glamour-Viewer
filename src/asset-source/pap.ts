@@ -449,20 +449,48 @@ function rankedAnimations(infos: PapAnimationInfo[]): PapAnimationInfo[] {
   })
 }
 
-/** Decodes the preferred loop from an FFXIV idle PAP into browser keyframes. */
-export function decodePap(bytes: ArrayBuffer, path = '', sampleRate = 30): DecodedAnimation {
+/**
+ * Orders the animations inside a PAP for selection. When `preferName` is given
+ * (a catalog animation's internal track, e.g. `cbbm_01l_lp0`), the tracks whose
+ * name matches are tried first — exact match, then substring — so an explicit
+ * pick wins over the idle heuristic. Otherwise the idle-ranked order is used.
+ */
+export function orderedAnimations(infos: PapAnimationInfo[], preferName?: string): { infos: PapAnimationInfo[]; explicit: boolean } {
+  const ranked = rankedAnimations(infos)
+  if (!preferName) return { infos: ranked, explicit: false }
+  const target = preferName.trim().toLowerCase()
+  const exact = ranked.filter((info) => info.name.toLowerCase() === target)
+  const partial = ranked.filter((info) => info.name.toLowerCase() !== target && info.name.toLowerCase().includes(target))
+  const chosen = [...exact, ...partial]
+  if (!chosen.length) return { infos: ranked, explicit: false }
+  return { infos: [...chosen, ...ranked.filter((info) => !chosen.includes(info))], explicit: true }
+}
+
+/**
+ * Decodes an FFXIV PAP into browser keyframes. With no `preferName` it selects
+ * the idle-ranked loop (standing idle); with one it selects the named track,
+ * which is how the animation catalog plays a specific emote/pose/move clip.
+ */
+export function decodePap(bytes: ArrayBuffer, path = '', sampleRate = 30, preferName?: string): DecodedAnimation {
   const pap = parsePapHeader(bytes)
   const objects = decodeHavokTagfile(pap.havokData)
   const container = objects.find((object) => object.type.name === 'hkaAnimationContainer')
   assertPap(container, 'The PAP contains no hkaAnimationContainer.')
   const bindingValues = havokValueArray(havokObjectValue(container, 'bindings'), 'bindings')
+  const { infos: candidateInfos, explicit } = orderedAnimations(pap.animations, preferName)
   let selected: { info: PapAnimationInfo; binding: HavokObject; blendHint: number } | undefined
-  for (const info of rankedAnimations(pap.animations)) {
+  for (const info of candidateInfos) {
     const binding = bindingValues[info.havokIndex]
     if (typeof binding !== 'object' || binding === null || Array.isArray(binding) || !('type' in binding)) continue
     const candidate = binding as HavokObject
     const blendHint = numberMember(candidate, 'blendHint')
     selected ??= { info, binding: candidate, blendHint }
+    // An explicit catalog pick honours the first valid matching track even if it
+    // is additive; the caller decides whether an additive clip is playable.
+    if (explicit) {
+      selected = { info, binding: candidate, blendHint }
+      break
+    }
     // Standing idle playback must prefer a normal binding. Treating an additive
     // clip as absolute local transforms is the main cause of exploded poses.
     if (blendHint === 0) {
