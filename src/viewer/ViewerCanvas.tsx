@@ -809,6 +809,10 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
   // Set once the character is built; loads and plays a catalog animation on the
   // live rig. Null until ready and while the effect is torn down.
   const playCatalogAnimation = useRef<((entry: CatalogAnimation) => Promise<void>) | null>(null)
+  // Retargets a dropped-in glTF/GLB motion (e.g. a Meddle export) onto the rig by
+  // bone name — the reliable path that bypasses in-browser PAP spline decoding.
+  const playExternalMotion = useRef<((data: ArrayBuffer, label: string) => Promise<void>) | null>(null)
+  const motionInput = useRef<HTMLInputElement>(null)
   const previewItems = EQUIPMENT_SLOTS.flatMap((slot) => equipped[slot] ? [[slot, equipped[slot]!] as const] : [])
   const [status, setStatus] = useState('Loading character…')
   const [error, setError] = useState<string>()
@@ -833,6 +837,23 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       setAnimNotice(/additive/i.test(detail)
         ? `“${entry.label}” is an additive overlay clip and can’t play as a standalone pose yet.`
         : `Could not play “${entry.label}”: ${detail}`)
+    } finally {
+      setAnimBusy(false)
+    }
+  }
+
+  const onMotionFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    const play = playExternalMotion.current
+    if (!file || !play) return
+    setAnimBusy(true)
+    setAnimNotice(undefined)
+    try {
+      await play(await file.arrayBuffer(), file.name.replace(/\.[^.]+$/, ''))
+      setActiveAnimId(undefined)
+    } catch (reason) {
+      setAnimNotice(reason instanceof Error ? reason.message : 'Could not load that motion file.')
     } finally {
       setAnimBusy(false)
     }
@@ -896,6 +917,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
     idleAction.current = null
     idleMixer.current = null
     playCatalogAnimation.current = null
+    playExternalMotion.current = null
     setIdleLabel('Idle')
     setIdleState(source.kind === 'local' ? 'loading' : 'unavailable')
     // A character rebuild (gear/customization change) reverts to idle, so clear
@@ -1263,17 +1285,8 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           const animationRig = rig
           const animationBustScale = bustScale
           const localSource = source
-          playCatalogAnimation.current = async (entry: CatalogAnimation) => {
-            const decoded = await loadLocalAnimation(
-              localSource,
-              catalogAnimationCandidates(entry, raceCode),
-              entry.internal || undefined,
-            )
-            if (disposed) return
-            const { clip, boundBy, boundTracks, totalTracks } = animationClipFromDecoded(decoded, animationRig.skeleton, animationBustScale)
-            const diag = `animation ${entry.id}: pap=${decoded.path} track=${decoded.name} blend=${decoded.blendHint} boundBy=${boundBy} bound=${boundTracks}/${totalTracks} rigBones=${animationRig.skeleton.bones.length} duration=${decoded.duration.toFixed(3)}s`
-            console.info(`[glamour-viewer] ${diag}`)
-            setAnimDiag(diag)
+          // Swaps a clip onto the character mixer (reused idle mixer) and plays it.
+          const playClipOnRig = (clip: THREE.AnimationClip, label: string) => {
             let mixer = idleMixer.current
             if (!mixer) {
               mixer = new THREE.AnimationMixer(characterGroup)
@@ -1292,8 +1305,62 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             action.setEffectiveTimeScale(1)
             action.play()
             idleAction.current = action
-            setIdleLabel(entry.label)
+            setIdleLabel(label)
             setIdleState('playing')
+          }
+          playCatalogAnimation.current = async (entry: CatalogAnimation) => {
+            const decoded = await loadLocalAnimation(
+              localSource,
+              catalogAnimationCandidates(entry, raceCode),
+              entry.internal || undefined,
+            )
+            if (disposed) return
+            // Scan decoded transforms for anomalies. A standing idle stays near
+            // |t|≈1, scale≈1; a decoder bug shows up here as huge translations,
+            // out-of-range scales, or non-finite values — pinpointing the failure
+            // without needing the raw PAP bytes.
+            let maxTranslation = 0
+            let minScale = Infinity
+            let maxScale = -Infinity
+            let nonFinite = 0
+            for (const track of decoded.tracks) {
+              for (const value of track.translations) {
+                if (!Number.isFinite(value)) nonFinite += 1
+                else maxTranslation = Math.max(maxTranslation, Math.abs(value))
+              }
+              for (const value of track.scales) {
+                if (!Number.isFinite(value)) nonFinite += 1
+                else { minScale = Math.min(minScale, value); maxScale = Math.max(maxScale, value) }
+              }
+            }
+            const { clip, boundBy, boundTracks, totalTracks } = animationClipFromDecoded(decoded, animationRig.skeleton, animationBustScale)
+            const diag = `animation ${entry.id}: pap=${decoded.path} track=${decoded.name} blend=${decoded.blendHint} boundBy=${boundBy} bound=${boundTracks}/${totalTracks} maxT=${maxTranslation.toFixed(2)} scale=[${minScale.toFixed(2)},${maxScale.toFixed(2)}] nonFinite=${nonFinite} duration=${decoded.duration.toFixed(3)}s`
+            console.info(`[glamour-viewer] ${diag}`)
+            setAnimDiag(diag)
+            playClipOnRig(clip, entry.label)
+          }
+          playExternalMotion.current = async (data: ArrayBuffer, label: string) => {
+            const { GLTFLoader } = await import('three/examples/jsm/loaders/GLTFLoader.js')
+            const gltf = await new Promise<{ animations: THREE.AnimationClip[] }>((resolve, reject) => {
+              new GLTFLoader().parse(data, '', resolve, reject)
+            })
+            if (disposed) return
+            const clip = gltf.animations[0]
+            if (!clip) throw new Error('That glTF/GLB has no animation track.')
+            // Rig bones use FFXIV joint names (j_*, n_*); the mixer binds the clip's
+            // tracks to them by name, so a Meddle/TexTools export retargets directly.
+            // Drop the root position so the character stays centred in the preview.
+            const retargeted = clip.clone()
+            retargeted.tracks = retargeted.tracks.filter((track) => track.name !== 'n_root.position')
+            const rigBoneNames = new Set(animationRig.skeleton.bones.map((bone) => bone.name))
+            const matched = new Set(
+              retargeted.tracks.map((track) => track.name.split('.')[0]!).filter((name) => rigBoneNames.has(name)),
+            )
+            const diag = `external motion ${label}: clip=${clip.name || 'unnamed'} tracks=${clip.tracks.length} matchedBones=${matched.size}/${animationRig.skeleton.bones.length} duration=${clip.duration.toFixed(3)}s`
+            console.info(`[glamour-viewer] ${diag}`)
+            setAnimDiag(diag)
+            if (!matched.size) throw new Error('None of that motion’s bones match this character’s skeleton.')
+            playClipOnRig(retargeted, label)
           }
         }
       } else {
@@ -1401,6 +1468,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       controls.dispose()
       avfxRuntimes.forEach((runtime) => runtime.dispose())
       playCatalogAnimation.current = null
+      playExternalMotion.current = null
       activeIdleMixer?.stopAllAction()
       if (idleMixer.current === activeIdleMixer) {
         idleMixer.current = null
@@ -1512,7 +1580,24 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
         >
           Fit
         </button>
+        {source.kind === 'local' && (
+          <button
+            type="button"
+            onClick={() => motionInput.current?.click()}
+            disabled={animBusy || idleState === 'loading' || idleState === 'unavailable'}
+            title="Load a glTF/GLB motion (e.g. a Meddle export) and retarget it onto this character by bone name"
+          >
+            Load motion…
+          </button>
+        )}
       </div>
+      <input
+        ref={motionInput}
+        type="file"
+        accept=".glb,.gltf,model/gltf-binary,model/gltf+json"
+        hidden
+        onChange={onMotionFile}
+      />
       {source.kind === 'local' && (
         <AnimationPicker
           activeId={activeAnimId}
