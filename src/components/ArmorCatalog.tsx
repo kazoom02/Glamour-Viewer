@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { AssetSource } from '../asset-source/types'
 import {
   EQUIPMENT_SLOTS,
@@ -13,7 +13,14 @@ import {
   type WeaponSlot,
 } from '../catalog/types'
 import { dyeCssColor } from '../catalog/stains'
-import { continueArmorSearch, searchArmor, xivapiIconUrl } from '../catalog/xivapi'
+import { JOB_FILTERS, xivapiIconUrl } from '../catalog/xivapi'
+import {
+  catalogDataVersion,
+  getClassJobCategories,
+  getSlotCatalog,
+  isSlotCached,
+  prefetchAllSlots,
+} from '../catalog/catalogCache'
 import DyePicker from './DyePicker'
 
 interface Props {
@@ -33,67 +40,70 @@ const SLOT_GLYPHS: Record<EquipmentSlot, string> = {
   ears: '◉', neck: '◡', wrists: '◌', rightRing: '○', leftRing: '○',
 }
 
+type SortMode = 'ilvl-desc' | 'ilvl-asc' | 'name'
+
+// Class filter options grouped by role, in the order players expect.
+const JOB_GROUP_ORDER = ['Tank', 'Healer', 'Melee', 'Ranged', 'Caster', 'Crafter', 'Gatherer']
+const JOB_GROUPS = JOB_GROUP_ORDER.map((group) => ({
+  group,
+  jobs: JOB_FILTERS.filter((job) => job.group === group),
+})).filter((entry) => entry.jobs.length > 0)
+
 export default function ArmorCatalog({ source, equipped, onEquip, onRemove, onDye, onHeadHairVisibility, onWeaponPlacement }: Props) {
   const [query, setQuery] = useState('')
   const [selectedSlot, setSelectedSlot] = useState<EquipmentSlot | null>(null)
-  const [results, setResults] = useState<ArmorItem[]>([])
+  const [fullItems, setFullItems] = useState<ArmorItem[]>([])
   const [pagesLoaded, setPagesLoaded] = useState(0)
+  const [loading, setLoading] = useState(false)
+  const [cached, setCached] = useState(false)
   const [version, setVersion] = useState<string>()
   const [error, setError] = useState<string>()
-  const [busy, setBusy] = useState(false)
+  const [sortMode, setSortMode] = useState<SortMode>('ilvl-desc')
+  const [jobFilter, setJobFilter] = useState('')
+  const [categories, setCategories] = useState<Map<number, Set<string>> | null>(null)
   const [dyePicker, setDyePicker] = useState<{ slot: EquipmentSlot; channel: 0 | 1 } | null>(null)
-  const abortRef = useRef<AbortController>(null)
 
-  async function loadCatalog(search: string, slot: EquipmentSlot) {
-    abortRef.current?.abort()
-    const controller = new AbortController()
-    const itemsById = new Map<number, ArmorItem>()
-    const seenCursors = new Set<string>()
-    abortRef.current = controller
-    setBusy(true)
-    setError(undefined)
-    setResults([])
-    setPagesLoaded(0)
-    try {
-      let page = await searchArmor(search, slot, controller.signal)
-      let loadedPages = 0
-      while (true) {
-        if (controller.signal.aborted) return
-        loadedPages += 1
-        page.items.forEach((item) => itemsById.set(item.id, item))
-        setResults([...itemsById.values()])
-        setPagesLoaded(loadedPages)
-        setVersion(page.version)
-        const cursor = page.next
-        if (!cursor) break
-        if (seenCursors.has(cursor)) throw new Error('XIVAPI returned a repeated catalog cursor.')
-        seenCursors.add(cursor)
-        page = await continueArmorSearch(cursor, slot, controller.signal)
-      }
-      if (!itemsById.size) setError(`No ${SLOT_LABELS[slot].toLowerCase()} items matched that search.`)
-    } catch (caught) {
-      if (caught instanceof DOMException && caught.name === 'AbortError') return
-      const message = caught instanceof Error ? caught.message : 'The equipment catalog could not be searched.'
-      setError(itemsById.size ? `${itemsById.size} items loaded before the catalog stopped: ${message}` : message)
-    } finally {
-      if (abortRef.current === controller) setBusy(false)
-    }
-  }
+  // Warm the whole catalog + class lookup once, in the background.
+  useEffect(() => {
+    prefetchAllSlots()
+    let active = true
+    getClassJobCategories()
+      .then((map) => { if (active) setCategories(map) })
+      .catch(() => { /* class filter simply stays permissive if this fails */ })
+    return () => { active = false }
+  }, [])
 
-  function openSlot(slot: EquipmentSlot) {
-    setQuery('')
-    setSelectedSlot(slot)
-  }
-
-  function closePicker() {
-    abortRef.current?.abort()
-    setSelectedSlot(null)
-  }
-
+  // Load the selected slot's full catalog from cache (fetched at most once).
   useEffect(() => {
     if (!selectedSlot) return
-    void loadCatalog('', selectedSlot)
-    return () => abortRef.current?.abort()
+    let active = true
+    const alreadyCached = isSlotCached(selectedSlot)
+    setError(undefined)
+    setFullItems([])
+    setPagesLoaded(0)
+    setCached(alreadyCached)
+    setLoading(!alreadyCached)
+    getSlotCatalog(selectedSlot, {
+      onProgress: (items, pages) => {
+        if (!active) return
+        setFullItems(items)
+        if (pages >= 0) setPagesLoaded(pages)
+      },
+    })
+      .then((items) => {
+        if (!active) return
+        setFullItems(items)
+        setLoading(false)
+        setCached(true)
+        setVersion(catalogDataVersion())
+        if (items.length === 0) setError(`No ${SLOT_LABELS[selectedSlot].toLowerCase()} items are available.`)
+      })
+      .catch((reason) => {
+        if (!active) return
+        setLoading(false)
+        setError(reason instanceof Error ? reason.message : 'The equipment catalog could not be loaded.')
+      })
+    return () => { active = false }
   }, [selectedSlot])
 
   useEffect(() => {
@@ -101,7 +111,7 @@ export default function ArmorCatalog({ source, equipped, onEquip, onRemove, onDy
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') closePicker()
+      if (event.key === 'Escape') setSelectedSlot(null)
     }
     window.addEventListener('keydown', closeOnEscape)
     return () => {
@@ -110,9 +120,35 @@ export default function ArmorCatalog({ source, equipped, onEquip, onRemove, onDy
     }
   }, [selectedSlot])
 
-  function submit(event: FormEvent) {
-    event.preventDefault()
-    if (selectedSlot) void loadCatalog(query, selectedSlot)
+  const displayed = useMemo(() => {
+    let list = fullItems
+    const term = query.trim().toLowerCase()
+    if (term.length >= 2) list = list.filter((item) => item.name.toLowerCase().includes(term))
+    if (jobFilter) {
+      const columns = JOB_FILTERS.find((job) => job.code === jobFilter)?.columns ?? []
+      list = list.filter((item) => {
+        if (!item.classJobCategoryId) return true
+        const enabled = categories?.get(item.classJobCategoryId)
+        if (!enabled) return true
+        return columns.some((column) => enabled.has(column))
+      })
+    }
+    const sorted = [...list]
+    const ilvl = (item: ArmorItem) => item.itemLevel ?? 0
+    if (sortMode === 'ilvl-desc') sorted.sort((a, b) => ilvl(b) - ilvl(a) || a.name.localeCompare(b.name))
+    else if (sortMode === 'ilvl-asc') sorted.sort((a, b) => ilvl(a) - ilvl(b) || a.name.localeCompare(b.name))
+    else sorted.sort((a, b) => a.name.localeCompare(b.name))
+    return sorted
+  }, [fullItems, query, jobFilter, sortMode, categories])
+
+  function openSlot(slot: EquipmentSlot) {
+    setQuery('')
+    setJobFilter('')
+    setSelectedSlot(slot)
+  }
+
+  function closePicker() {
+    setSelectedSlot(null)
   }
 
   function equip(item: ArmorItem) {
@@ -211,7 +247,7 @@ export default function ArmorCatalog({ source, equipped, onEquip, onRemove, onDy
         <div className="dressing-rail">{RIGHT_SLOTS.map((slot) => <SlotButton slot={slot} key={slot} />)}</div>
       </div>
 
-      <p className="dressing-help">Select any slot to open its complete searchable catalog. Use × to unequip an item.</p>
+      <p className="dressing-help">Select any slot to open its catalog. Each slot loads once, then search, sort and class filters are instant. Use × to unequip an item.</p>
 
       {selectedSlot && (
         <div className="catalog-picker-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && closePicker()}>
@@ -227,56 +263,84 @@ export default function ArmorCatalog({ source, equipped, onEquip, onRemove, onDy
               </div>
             </header>
 
-            <form className="catalog-search" onSubmit={submit}>
-              <label className="field-label" htmlFor="equipment-search">Search {SLOT_LABELS[selectedSlot]}</label>
-              <div className="url-row">
+            <div className="catalog-controls">
+              <div className="catalog-field catalog-field-search">
+                <label className="field-label" htmlFor="equipment-search">Search</label>
                 <input
                   id="equipment-search"
                   type="search"
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  placeholder={`Search ${SLOT_LABELS[selectedSlot].toLowerCase()}, or leave empty to show everything`}
+                  placeholder={`Filter ${SLOT_LABELS[selectedSlot].toLowerCase()} by name`}
                   autoComplete="off"
                   autoFocus
                 />
-                <button className="button primary" disabled={query.trim().length === 1}>
-                  {busy ? 'Restart search' : query.trim() ? 'Search' : 'Show everything'}
-                </button>
               </div>
-            </form>
+              <div className="catalog-field">
+                <label className="field-label" htmlFor="equipment-sort">Sort</label>
+                <select id="equipment-sort" value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)}>
+                  <option value="ilvl-desc">Item level (high → low)</option>
+                  <option value="ilvl-asc">Item level (low → high)</option>
+                  <option value="name">Name (A → Z)</option>
+                </select>
+              </div>
+              <div className="catalog-field">
+                <label className="field-label" htmlFor="equipment-class">Class</label>
+                <select id="equipment-class" value={jobFilter} onChange={(event) => setJobFilter(event.target.value)}>
+                  <option value="">All classes</option>
+                  {JOB_GROUPS.map(({ group, jobs }) => (
+                    <optgroup key={group} label={group}>
+                      {jobs.map((job) => (
+                        <option key={job.code} value={job.code}>{job.label} ({job.code})</option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
+            </div>
 
             {error && <p className="error-message catalog-error" role="alert">{error}</p>}
-            {busy && results.length === 0 && <p className="catalog-loading-status" role="status">Loading the complete catalog…</p>}
-            {results.length > 0 && (
+            {loading && fullItems.length === 0 && <p className="catalog-loading-status" role="status">Loading the complete catalog…</p>}
+
+            {fullItems.length > 0 && (
               <>
                 <div className="catalog-results-heading">
-                  <strong>{results.length} {results.length === 1 ? 'item' : 'items'}</strong>
-                  <span>{pagesLoaded} {pagesLoaded === 1 ? 'page' : 'pages'}{busy ? ' · loading remaining pages…' : ' · complete'}</span>
+                  <strong>{displayed.length} {displayed.length === 1 ? 'item' : 'items'}</strong>
+                  <span>
+                    {loading
+                      ? `loading… ${pagesLoaded} ${pagesLoaded === 1 ? 'page' : 'pages'}`
+                      : `${fullItems.length} total · ${cached ? 'cached' : 'loaded'}`}
+                    {jobFilter ? ` · ${JOB_FILTERS.find((job) => job.code === jobFilter)?.label ?? jobFilter}` : ''}
+                  </span>
                 </div>
-                <div className="armor-results picker-results" aria-label={`${SLOT_LABELS[selectedSlot]} results`}>
-                  {results.map((item) => {
-                    const isEquipped = equipped[selectedSlot]?.id === item.id
-                    return (
-                      <article className="armor-result" key={item.id}>
-                        <div className="armor-icon">
-                          {item.iconPath ? <img src={xivapiIconUrl(item.iconPath)} alt="" loading="lazy" /> : <span>—</span>}
-                        </div>
-                        <div className="armor-copy">
-                          <span>Level {item.equipLevel}</span>
-                          <strong>{item.name}</strong>
-                          <small>{item.jobs} · Model {item.modelSet.toString().padStart(4, '0')}{item.modelBase ? `/${item.modelBase.toString().padStart(4, '0')}` : ''} v{item.modelVariant.toString().padStart(4, '0')}</small>
-                        </div>
-                        <button
-                          className={`button ${isEquipped ? 'equipped' : 'secondary'}`}
-                          type="button"
-                          onClick={() => isEquipped ? onRemove(selectedSlot) : equip(item)}
-                        >
-                          {isEquipped ? 'Unequip' : 'Equip'}
-                        </button>
-                      </article>
-                    )
-                  })}
-                </div>
+                {displayed.length === 0 ? (
+                  <p className="catalog-loading-status" role="status">No items match the current search and filters.</p>
+                ) : (
+                  <div className="armor-results picker-results" aria-label={`${SLOT_LABELS[selectedSlot]} results`}>
+                    {displayed.map((item) => {
+                      const isEquipped = equipped[selectedSlot]?.id === item.id
+                      return (
+                        <article className="armor-result" key={item.id}>
+                          <div className="armor-icon">
+                            {item.iconPath ? <img src={xivapiIconUrl(item.iconPath)} alt="" loading="lazy" /> : <span>—</span>}
+                          </div>
+                          <div className="armor-copy">
+                            <span>{item.itemLevel ? `i${item.itemLevel} · ` : ''}Lv {item.equipLevel}</span>
+                            <strong>{item.name}</strong>
+                            <small>{item.jobs} · Model {item.modelSet.toString().padStart(4, '0')}{item.modelBase ? `/${item.modelBase.toString().padStart(4, '0')}` : ''} v{item.modelVariant.toString().padStart(4, '0')}</small>
+                          </div>
+                          <button
+                            className={`button ${isEquipped ? 'equipped' : 'secondary'}`}
+                            type="button"
+                            onClick={() => isEquipped ? onRemove(selectedSlot) : equip(item)}
+                          >
+                            {isEquipped ? 'Unequip' : 'Equip'}
+                          </button>
+                        </article>
+                      )
+                    })}
+                  </div>
+                )}
               </>
             )}
           </section>
