@@ -9,10 +9,14 @@ import {
 interface AnimationPickerProps {
   /** Catalog id of the animation currently loaded on the character, if any. */
   activeId?: string
+  /** Human label of the active animation, shown when the panel is minimized. */
+  activeLabel?: string
   /** True while the selected animation is decoding. */
   busy?: boolean
   /** Status or error text from the parent (decode failures, additive notices). */
   notice?: string
+  /** One-line binding diagnostic from the parent (name/index, bound tracks). */
+  debug?: string
   onSelect: (entry: CatalogAnimation) => void
 }
 
@@ -20,12 +24,13 @@ interface AnimationPickerProps {
 // capped and the count invites the user to narrow with the class filter/search.
 const MAX_ROWS = 250
 
-export default function AnimationPicker({ activeId, busy, notice, onSelect }: AnimationPickerProps) {
+export default function AnimationPicker({ activeId, activeLabel, busy, notice, debug, onSelect }: AnimationPickerProps) {
   const [catalog, setCatalog] = useState<CatalogAnimation[]>()
   const [loadError, setLoadError] = useState<string>()
   const [category, setCategory] = useState<AnimationCategory>('idle')
   const [weaponClass, setWeaponClass] = useState('bt_common')
   const [query, setQuery] = useState('')
+  const [collapsed, setCollapsed] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -56,11 +61,29 @@ export default function AnimationPicker({ activeId, busy, notice, onSelect }: An
 
   const rows = matches.slice(0, MAX_ROWS)
 
-  if (loadError) return <p className="anim-picker-note" role="status">Animation catalog unavailable: {loadError}</p>
-  if (!catalog) return <p className="anim-picker-note" role="status">Loading animation catalog…</p>
-
   return (
-    <div className="anim-picker" aria-label="Animation catalog">
+    <div className={`anim-picker${collapsed ? ' collapsed' : ''}`} aria-label="Animation catalog">
+      <div className="anim-picker-head">
+        <span className="anim-picker-title" title={activeLabel || 'Animations'}>
+          {collapsed ? (activeLabel || 'Animations') : 'Animations'}
+        </span>
+        <button
+          type="button"
+          className="anim-picker-toggle"
+          aria-expanded={!collapsed}
+          title={collapsed ? 'Expand animations menu' : 'Minimize animations menu'}
+          onClick={() => setCollapsed((value) => !value)}
+        >
+          {collapsed ? '▢' : '—'}
+        </button>
+      </div>
+
+      {collapsed ? null : loadError ? (
+        <p className="anim-picker-note" role="status">Animation catalog unavailable: {loadError}</p>
+      ) : !catalog ? (
+        <p className="anim-picker-note" role="status">Loading animation catalog…</p>
+      ) : (
+        <>
       <div className="anim-picker-cats" role="tablist" aria-label="Animation categories">
         {ANIMATION_CATEGORIES.map(({ id, label, advanced }) => (
           <button
@@ -123,6 +146,15 @@ export default function AnimationPicker({ activeId, busy, notice, onSelect }: An
         <p className="anim-picker-note">
           Showing {rows.length} of {matches.length}. Narrow with the class filter or search.
         </p>
+      )}
+        </>
+      )}
+
+      {!collapsed && debug && (
+        <details className="anim-picker-debug">
+          <summary>Animation debug</summary>
+          <code>{debug}</code>
+        </details>
       )}
     </div>
   )

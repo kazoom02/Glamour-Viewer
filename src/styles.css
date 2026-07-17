@@ -90,6 +90,14 @@ h2 { margin: 0; font-size: clamp(28px, 3.2vw, 42px); line-height: 1.1; letter-sp
 
 /* Animation catalog panel — overlays the viewer under the transport controls. */
 .anim-picker { position: absolute; z-index: 2; top: 58px; right: 16px; display: flex; flex-direction: column; gap: 7px; width: 236px; max-height: min(60%, 420px); padding: 8px; border: 1px solid #4e473b; border-radius: 6px; background: #111216ee; color: #d7d0c4; backdrop-filter: blur(8px); }
+.anim-picker.collapsed { width: auto; max-width: 200px; max-height: none; }
+.anim-picker-head { display: flex; align-items: center; gap: 8px; }
+.anim-picker-title { flex: 1 1 auto; overflow: hidden; color: #cfcabf; font-size: 10px; font-weight: 600; letter-spacing: .02em; text-overflow: ellipsis; white-space: nowrap; }
+.anim-picker-toggle { flex: none; width: 22px; height: 22px; padding: 0; border: 1px solid #4a4d54; border-radius: 4px; background: #24262b; color: #ede8de; cursor: pointer; font-size: 12px; line-height: 1; }
+.anim-picker-toggle:hover { border-color: #8b7550; background: #302a21; }
+.anim-picker-debug { color: var(--muted); font-size: 9px; }
+.anim-picker-debug summary { cursor: pointer; }
+.anim-picker-debug code { display: block; margin-top: 4px; word-break: break-all; white-space: normal; color: #b9b4a8; }
 .anim-picker-cats { display: flex; flex-wrap: wrap; gap: 4px; }
 .anim-picker-cats button { padding: 2px 6px; border: 1px solid #43464d; border-radius: 4px; background: #212227; color: #cfcabf; cursor: pointer; font-size: 9px; }
 .anim-picker-cats button:hover { border-color: #8b7550; }

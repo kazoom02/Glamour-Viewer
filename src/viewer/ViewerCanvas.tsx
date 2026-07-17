@@ -818,6 +818,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
   const [activeAnimId, setActiveAnimId] = useState<string>()
   const [animBusy, setAnimBusy] = useState(false)
   const [animNotice, setAnimNotice] = useState<string>()
+  const [animDiag, setAnimDiag] = useState<string>()
 
   const onSelectAnimation = async (entry: CatalogAnimation) => {
     const play = playCatalogAnimation.current
@@ -901,6 +902,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
     // any catalog selection highlight and stale notice.
     setActiveAnimId(undefined)
     setAnimNotice(undefined)
+    setAnimDiag(undefined)
 
     // A brighter neutral studio rig so dark, reflective gear reads as metal
     // instead of black. Neutral tone mapping still rolls off the highlights, so
@@ -1228,7 +1230,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             setStatus(`Preparing ${raceCode} idle animation…`)
             const decodedAnimation = await idleAnimationPromise
             if (disposed) return
-            const clip = animationClipFromDecoded(decodedAnimation, rig.skeleton)
+            const { clip, boundBy, boundTracks, totalTracks } = animationClipFromDecoded(decodedAnimation, rig.skeleton)
             activeIdleMixer = new THREE.AnimationMixer(characterGroup)
             const action = activeIdleMixer.clipAction(clip)
             action.setLoop(THREE.LoopRepeat, Infinity)
@@ -1246,7 +1248,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             setIdleLabel(decodedAnimation.name || 'Idle')
             setIdleState('ready')
             diagnostics.push(
-              `idle animation: ${decodedAnimation.path} name=${decodedAnimation.name} blend=${decodedAnimation.blendHint} duration=${decodedAnimation.duration.toFixed(3)}s frames=${decodedAnimation.times.length} tracks=${decodedAnimation.tracks.length} rootTranslation=stabilized`,
+              `idle animation: ${decodedAnimation.path} name=${decodedAnimation.name} blend=${decodedAnimation.blendHint} duration=${decodedAnimation.duration.toFixed(3)}s frames=${decodedAnimation.times.length} tracks=${decodedAnimation.tracks.length} boundBy=${boundBy} bound=${boundTracks}/${totalTracks} rootTranslation=stabilized`,
             )
           } catch (reason) {
             const detail = reason instanceof Error ? reason.message : String(reason)
@@ -1268,7 +1270,10 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               entry.internal || undefined,
             )
             if (disposed) return
-            const clip = animationClipFromDecoded(decoded, animationRig.skeleton, animationBustScale)
+            const { clip, boundBy, boundTracks, totalTracks } = animationClipFromDecoded(decoded, animationRig.skeleton, animationBustScale)
+            const diag = `animation ${entry.id}: pap=${decoded.path} track=${decoded.name} blend=${decoded.blendHint} boundBy=${boundBy} bound=${boundTracks}/${totalTracks} rigBones=${animationRig.skeleton.bones.length} duration=${decoded.duration.toFixed(3)}s`
+            console.info(`[glamour-viewer] ${diag}`)
+            setAnimDiag(diag)
             let mixer = idleMixer.current
             if (!mixer) {
               mixer = new THREE.AnimationMixer(characterGroup)
@@ -1511,8 +1516,10 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       {source.kind === 'local' && (
         <AnimationPicker
           activeId={activeAnimId}
+          activeLabel={idleLabel}
           busy={animBusy}
           notice={animNotice}
+          debug={animDiag}
           onSelect={onSelectAnimation}
         />
       )}

@@ -26,19 +26,44 @@ function scaledValues(values: Float32Array, multiplier: readonly [number, number
   return result
 }
 
-/** Converts an absolute Havok standing loop to a stable Three.js inspection clip. */
+export interface AnimationClipResult {
+  clip: THREE.AnimationClip
+  /** How tracks were bound to the model skeleton. */
+  boundBy: 'name' | 'index'
+  totalTracks: number
+  boundTracks: number
+  /** Tracks that resolved to no bone on the model skeleton (dropped). */
+  unboundTracks: number
+}
+
+/**
+ * Converts an absolute Havok clip to a stable Three.js inspection clip.
+ *
+ * Tracks bind to the model skeleton by bone *name* when the animation carries one
+ * (`transformTrackToBoneIndices` is only valid against the clip's own authored
+ * skeleton, so binding by raw index explodes any clip whose skeleton order differs
+ * from the model's combined skeleton). Only when no names are present does it fall
+ * back to index binding.
+ */
 export function animationClipFromDecoded(
   animation: DecodedAnimation,
   skeleton: THREE.Skeleton,
   bustScale: readonly [number, number, number] = [1, 1, 1],
-): THREE.AnimationClip {
+): AnimationClipResult {
   if (animation.blendHint === 'additive') {
-    throw new Error('The selected idle animation is additive and cannot be used as an absolute standing pose.')
+    throw new Error('The selected animation is additive and cannot be used as an absolute standing pose.')
   }
+  const useNames = animation.boneNamesResolved && animation.tracks.some((track) => track.boneName)
+  const bonesByName = useNames ? new Map(skeleton.bones.map((bone) => [bone.name, bone])) : undefined
   const tracks: THREE.KeyframeTrack[] = []
+  let boundTracks = 0
   for (const track of animation.tracks) {
-    const bone = skeleton.bones[track.boneIndex]
+    // Prefer the authored bone name; fall back to raw index so name binding can
+    // never drop a track that index binding would have matched.
+    const named = track.boneName ? bonesByName?.get(track.boneName) : undefined
+    const bone = named ?? skeleton.bones[track.boneIndex]
     if (!bone) continue
+    boundTracks += 1
     const translations = ROOT_TRANSLATION_BONES.has(bone.name)
       ? stableRootTranslations(track.translations)
       : track.translations
@@ -51,6 +76,12 @@ export function animationClipFromDecoded(
       new THREE.VectorKeyframeTrack(`${bone.name}.scale`, animation.times, scales),
     )
   }
-  if (!tracks.length) throw new Error('The idle animation has no tracks matching the selected character skeleton.')
-  return new THREE.AnimationClip(animation.name || 'Idle', animation.duration, tracks).optimize()
+  if (!tracks.length) throw new Error('The animation has no tracks matching the selected character skeleton.')
+  return {
+    clip: new THREE.AnimationClip(animation.name || 'Idle', animation.duration, tracks).optimize(),
+    boundBy: useNames ? 'name' : 'index',
+    totalTracks: animation.tracks.length,
+    boundTracks,
+    unboundTracks: animation.tracks.length - boundTracks,
+  }
 }

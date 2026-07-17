@@ -14,6 +14,7 @@ function fixture() {
     blendHint: 'normal',
     duration: 1,
     times: new Float32Array([0, 0.5, 1]),
+    boneNamesResolved: false,
     tracks: [
       { boneIndex: 0, translations: new Float32Array(9), rotations: new Float32Array(12), scales: new Float32Array(9) },
       {

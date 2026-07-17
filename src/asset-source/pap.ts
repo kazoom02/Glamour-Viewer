@@ -10,6 +10,14 @@ import {
 
 export interface DecodedAnimationTrack {
   boneIndex: number
+  /**
+   * Bone name from the animation's own bind skeleton, when the PAP embeds one.
+   * Preferred over boneIndex for retargeting: `transformTrackToBoneIndices` is
+   * only valid against that authored skeleton, so binding by name avoids the
+   * exploded poses that appear when a clip's skeleton order differs from the
+   * model's combined skeleton.
+   */
+  boneName?: string
   translations: Float32Array
   rotations: Float32Array
   scales: Float32Array
@@ -22,6 +30,8 @@ export interface DecodedAnimation {
   duration: number
   times: Float32Array
   tracks: DecodedAnimationTrack[]
+  /** True when track bone names came from a skeleton embedded in the PAP. */
+  boneNamesResolved: boolean
 }
 
 export interface PapAnimationInfo {
@@ -471,9 +481,31 @@ export function orderedAnimations(infos: PapAnimationInfo[], preferName?: string
  * the idle-ranked loop (standing idle); with one it selects the named track,
  * which is how the animation catalog plays a specific emote/pose/move clip.
  */
+/**
+ * Reads bone names from an hkaSkeleton embedded in the PAP, if any. FFXIV PAPs
+ * usually leave the skeleton in the SKLB, so this is often undefined; when it is
+ * present, binding tracks by these names is exact regardless of skeleton order.
+ */
+function papSkeletonBoneNames(objects: HavokObject[]): string[] | undefined {
+  const skeleton = objects.find((object) => object.type.name === 'hkaSkeleton')
+  if (!skeleton) return undefined
+  try {
+    const boneValues = havokValueArray(havokObjectValue(skeleton, 'bones'), 'bones')
+    const names = boneValues.map((value) => {
+      if (typeof value !== 'object' || value === null || Array.isArray(value) || !('type' in value)) return ''
+      const name = havokObjectValue(value as HavokObject, 'name')
+      return typeof name === 'string' ? name : ''
+    })
+    return names.some((name) => name.length > 0) ? names : undefined
+  } catch {
+    return undefined
+  }
+}
+
 export function decodePap(bytes: ArrayBuffer, path = '', sampleRate = 30, preferName?: string): DecodedAnimation {
   const pap = parsePapHeader(bytes)
   const objects = decodeHavokTagfile(pap.havokData)
+  const boneNames = papSkeletonBoneNames(objects)
   const container = objects.find((object) => object.type.name === 'hkaAnimationContainer')
   assertPap(container, 'The PAP contains no hkaAnimationContainer.')
   const bindingValues = havokValueArray(havokObjectValue(container, 'bindings'), 'bindings')
@@ -506,12 +538,16 @@ export function decodePap(bytes: ArrayBuffer, path = '', sampleRate = 30, prefer
   const animation = new SplineAnimation(animationObject)
   const frameTotal = Math.min(1801, Math.max(2, Math.ceil(animation.duration * sampleRate) + 1))
   const times = Float32Array.from({ length: frameTotal }, (_, frame) => Math.min(animation.duration, frame / sampleRate))
-  const tracks = trackToBone.map((boneIndex): DecodedAnimationTrack => ({
-    boneIndex,
-    translations: new Float32Array(frameTotal * 3),
-    rotations: new Float32Array(frameTotal * 4),
-    scales: new Float32Array(frameTotal * 3),
-  }))
+  const tracks = trackToBone.map((boneIndex): DecodedAnimationTrack => {
+    const boneName = boneNames?.[boneIndex]
+    return {
+      boneIndex,
+      boneName: boneName && boneName.length > 0 ? boneName : undefined,
+      translations: new Float32Array(frameTotal * 3),
+      rotations: new Float32Array(frameTotal * 4),
+      scales: new Float32Array(frameTotal * 3),
+    }
+  })
   for (let frame = 0; frame < frameTotal; frame += 1) {
     const transforms = animation.sample(times[frame]!)
     const count = Math.min(transforms.length, tracks.length)
@@ -537,5 +573,6 @@ export function decodePap(bytes: ArrayBuffer, path = '', sampleRate = 30, prefer
     duration: animation.duration,
     times,
     tracks,
+    boneNamesResolved: Boolean(boneNames),
   }
 }
