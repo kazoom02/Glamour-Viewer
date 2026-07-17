@@ -242,9 +242,14 @@ export function bakeCharacterMaterial(
       ao[target] = ao[target + 1] = ao[target + 2] = occlusion
       roughness[target] = roughness[target + 1] = roughness[target + 2] = rough
       
+      // Metalness comes from the colorset row, not the mask. The colorset
+      // already distinguishes cloth (metalness ~0) from metal (metalness ~1)
+      // per material, and a metallic dye raises this row value — so cloth stays
+      // matte by default and only genuine metal (or a metal dye) turns metallic.
+      // The Dawntrail mask red channel is NOT metalness: it reads high on plain
+      // cloth, which previously baked every garment as polished metal.
       const rowMetalness = mix(a.metalness, b.metalness)
-      const textureMetalness = textures.mask && !legacyShader ? mask[0] / 255 : rowMetalness
-      metalness[target] = metalness[target + 1] = metalness[target + 2] = clampByte(textureMetalness)
+      metalness[target] = metalness[target + 1] = metalness[target + 2] = clampByte(rowMetalness)
       specularIntensity[target] = specularIntensity[target + 1] = specularIntensity[target + 2] = 255
       specularIntensity[target + 3] = specularStrength
       specularColor[target + 3] = 255

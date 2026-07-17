@@ -41,6 +41,47 @@ describe('character colorset baking', () => {
     expect(Array.from(result.metalness.rgba.slice(0, 3))).toEqual([255, 255, 255])
   })
 
+  it('keeps cloth matte even when the mask red channel is bright', () => {
+    // The regression: Dawntrail cloth carries a high mask red channel, which
+    // was misread as metalness and made every garment render as polished metal.
+    // Metalness must follow the colorset row (0 here), not the mask red channel.
+    const rows = Array.from({ length: 32 }, () => ({
+      diffuse: [0.5, 0.4, 0.3] as [number, number, number],
+      specular: [0, 0, 0] as [number, number, number],
+      specularMask: 1,
+      emissive: [0, 0, 0] as [number, number, number],
+      roughness: 1,
+      metalness: 0,
+    }))
+    const result = bakeCharacterMaterial({ kind: 'dawntrail', rows }, {
+      index: texture([0, 255, 0, 255]),
+      diffuse: texture([255, 255, 255, 255]),
+      mask: texture([255, 200, 128, 255]),
+    }, 'character.shpk')!
+
+    expect(Array.from(result.metalness.rgba.slice(0, 3))).toEqual([0, 0, 0])
+  })
+
+  it('turns a cloth row metallic when a dye raised its colorset metalness', () => {
+    // Simulates the row a metallic dye produces: the colorset metalness is now
+    // high, so the same garment reads as metal without any mask change.
+    const rows = Array.from({ length: 32 }, () => ({
+      diffuse: [0.5, 0.4, 0.3] as [number, number, number],
+      specular: [0, 0, 0] as [number, number, number],
+      specularMask: 1,
+      emissive: [0, 0, 0] as [number, number, number],
+      roughness: 1,
+      metalness: 1,
+    }))
+    const result = bakeCharacterMaterial({ kind: 'dawntrail', rows }, {
+      index: texture([0, 255, 0, 255]),
+      diffuse: texture([255, 255, 255, 255]),
+      mask: texture([0, 200, 128, 255]),
+    }, 'character.shpk')!
+
+    expect(Array.from(result.metalness.rgba.slice(0, 3))).toEqual([255, 255, 255])
+  })
+
   it('keeps legacy ambient occlusion, roughness and specular controls separate', () => {
     const rows = Array.from({ length: 16 }, () => ({
       diffuse: [1, 1, 1] as [number, number, number],
