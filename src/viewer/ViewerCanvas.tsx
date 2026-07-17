@@ -1289,7 +1289,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             setStatus(`Preparing ${raceCode} idle animation…`)
             const decodedAnimation = await idleAnimationPromise
             if (disposed) return
-            const { clip, boundBy, boundTracks, totalTracks } = animationClipFromDecoded(decodedAnimation, rig.skeleton)
+            const { clip, boundTracks, totalTracks, channels } = animationClipFromDecoded(decodedAnimation, rig.skeleton)
             activeIdleMixer = new THREE.AnimationMixer(characterGroup)
             const action = activeIdleMixer.clipAction(clip)
             action.setLoop(THREE.LoopRepeat, Infinity)
@@ -1307,7 +1307,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             setIdleLabel(decodedAnimation.name || 'Idle')
             setIdleState('ready')
             diagnostics.push(
-              `idle animation: ${decodedAnimation.path} name=${decodedAnimation.name} blend=${decodedAnimation.blendHint} duration=${decodedAnimation.duration.toFixed(3)}s frames=${decodedAnimation.times.length} tracks=${decodedAnimation.tracks.length} boundBy=${boundBy} bound=${boundTracks}/${totalTracks} rootTranslation=stabilized`,
+              `idle animation: ${decodedAnimation.path} name=${decodedAnimation.name} blend=${decodedAnimation.blendHint} duration=${decodedAnimation.duration.toFixed(3)}s frames=${decodedAnimation.times.length} tracks=${decodedAnimation.tracks.length} bound=${boundTracks}/${totalTracks} channels=${channels} rootTranslation=stabilized`,
             )
           } catch (reason) {
             const detail = reason instanceof Error ? reason.message : String(reason)
@@ -1370,8 +1370,8 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
                 else { minScale = Math.min(minScale, value); maxScale = Math.max(maxScale, value) }
               }
             }
-            const { clip, boundBy, boundTracks, totalTracks } = animationClipFromDecoded(decoded, animationRig.skeleton, animationBustScale)
-            const diag = `animation ${entry.id}: pap=${decoded.path} track=${decoded.name} blend=${decoded.blendHint} boundBy=${boundBy} bound=${boundTracks}/${totalTracks} maxT=${maxTranslation.toFixed(2)} scale=[${minScale.toFixed(2)},${maxScale.toFixed(2)}] nonFinite=${nonFinite} duration=${decoded.duration.toFixed(3)}s`
+            const { clip, boundTracks, totalTracks, channels } = animationClipFromDecoded(decoded, animationRig.skeleton, animationBustScale)
+            const diag = `animation ${entry.id}: pap=${decoded.path} track=${decoded.name} blend=${decoded.blendHint} bound=${boundTracks}/${totalTracks} channels=${channels} maxT=${maxTranslation.toFixed(2)} scale=[${minScale.toFixed(2)},${maxScale.toFixed(2)}] nonFinite=${nonFinite} duration=${decoded.duration.toFixed(3)}s`
             console.info(`[glamour-viewer] ${diag}`)
             setAnimDiag(diag)
             playClipOnRig(clip, entry.label)

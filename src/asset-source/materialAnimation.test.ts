@@ -14,11 +14,13 @@ function fixture() {
     blendHint: 'normal',
     duration: 1,
     times: new Float32Array([0, 0.5, 1]),
-    boneNamesResolved: false,
     tracks: [
-      { boneIndex: 0, translations: new Float32Array(9), rotations: new Float32Array(12), scales: new Float32Array(9) },
+      { boneIndex: 0, hasTranslation: true, hasRotation: true, hasScale: true, translations: new Float32Array(9), rotations: new Float32Array(12), scales: new Float32Array(9) },
       {
         boneIndex: 1,
+        hasTranslation: true,
+        hasRotation: true,
+        hasScale: true,
         translations: new Float32Array([0, 0.2, 1, 0.5, 0.6, 0.4, 1, 0.8, 0]),
         rotations: new Float32Array(12),
         scales: new Float32Array(9),

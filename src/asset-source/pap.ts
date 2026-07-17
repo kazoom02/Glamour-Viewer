@@ -11,13 +11,16 @@ import {
 export interface DecodedAnimationTrack {
   boneIndex: number
   /**
-   * Bone name from the animation's own bind skeleton, when the PAP embeds one.
-   * Preferred over boneIndex for retargeting: `transformTrackToBoneIndices` is
-   * only valid against that authored skeleton, so binding by name avoids the
-   * exploded poses that appear when a clip's skeleton order differs from the
-   * model's combined skeleton.
+   * Whether each channel is actually animated by the clip (its Havok mask is
+   * non-zero). A spline-compressed track returns identity/zero for channels it
+   * does not animate, but the correct behaviour is to keep the skeleton's
+   * REFERENCE (bind) pose for those channels — so the consumer must only apply a
+   * channel when its flag is set. Ignoring this is what collapses non-animated
+   * bones (e.g. the idle's static hip `j_kosi`) to identity and explodes the pose.
    */
-  boneName?: string
+  hasTranslation: boolean
+  hasRotation: boolean
+  hasScale: boolean
   translations: Float32Array
   rotations: Float32Array
   scales: Float32Array
@@ -30,8 +33,6 @@ export interface DecodedAnimation {
   duration: number
   times: Float32Array
   tracks: DecodedAnimationTrack[]
-  /** True when track bone names came from a skeleton embedded in the PAP. */
-  boneNamesResolved: boolean
 }
 
 export interface PapAnimationInfo {
@@ -400,6 +401,26 @@ class SplineAnimation {
     assertPap(this.blockCount > 0 && this.maxFramesPerBlock > 1 && this.blockOffsets.length >= this.blockCount, 'The PAP spline block table is invalid.')
   }
 
+  /**
+   * Which channels each track actually animates, OR-ed across every block. Each
+   * block begins with a 4-byte mask per track (packed types, translation,
+   * rotation, scale); a zero mask means that channel keeps the reference pose.
+   */
+  trackFlags(): { translation: boolean; rotation: boolean; scale: boolean }[] {
+    const flags = Array.from({ length: this.trackCount }, () => ({ translation: false, rotation: false, scale: false }))
+    for (let block = 0; block < this.blockCount; block += 1) {
+      const base = this.blockOffsets[block]!
+      for (let track = 0; track < this.trackCount; track += 1) {
+        const offset = base + track * 4
+        if (offset + 4 > this.data.length) break
+        if (this.data[offset + 1]! !== 0) flags[track]!.translation = true
+        if (this.data[offset + 2]! !== 0) flags[track]!.rotation = true
+        if (this.data[offset + 3]! !== 0) flags[track]!.scale = true
+      }
+    }
+    return flags
+  }
+
   sample(timeSeconds: number): Transform[] {
     const frameFloat = Math.min(1, Math.max(0, timeSeconds / this.duration)) * (this.frameCount - 1)
     const frame = Math.floor(frameFloat)
@@ -481,31 +502,9 @@ export function orderedAnimations(infos: PapAnimationInfo[], preferName?: string
  * the idle-ranked loop (standing idle); with one it selects the named track,
  * which is how the animation catalog plays a specific emote/pose/move clip.
  */
-/**
- * Reads bone names from an hkaSkeleton embedded in the PAP, if any. FFXIV PAPs
- * usually leave the skeleton in the SKLB, so this is often undefined; when it is
- * present, binding tracks by these names is exact regardless of skeleton order.
- */
-function papSkeletonBoneNames(objects: HavokObject[]): string[] | undefined {
-  const skeleton = objects.find((object) => object.type.name === 'hkaSkeleton')
-  if (!skeleton) return undefined
-  try {
-    const boneValues = havokValueArray(havokObjectValue(skeleton, 'bones'), 'bones')
-    const names = boneValues.map((value) => {
-      if (typeof value !== 'object' || value === null || Array.isArray(value) || !('type' in value)) return ''
-      const name = havokObjectValue(value as HavokObject, 'name')
-      return typeof name === 'string' ? name : ''
-    })
-    return names.some((name) => name.length > 0) ? names : undefined
-  } catch {
-    return undefined
-  }
-}
-
 export function decodePap(bytes: ArrayBuffer, path = '', sampleRate = 30, preferName?: string): DecodedAnimation {
   const pap = parsePapHeader(bytes)
   const objects = decodeHavokTagfile(pap.havokData)
-  const boneNames = papSkeletonBoneNames(objects)
   const container = objects.find((object) => object.type.name === 'hkaAnimationContainer')
   assertPap(container, 'The PAP contains no hkaAnimationContainer.')
   const bindingValues = havokValueArray(havokObjectValue(container, 'bindings'), 'bindings')
@@ -536,18 +535,18 @@ export function decodePap(bytes: ArrayBuffer, path = '', sampleRate = 30, prefer
   const animationObject = objectMember(bindingObject, 'animation')
   assertPap(animationObject.type.name === 'hkaSplineCompressedAnimation', `Unsupported PAP animation type ${animationObject.type.name}.`)
   const animation = new SplineAnimation(animationObject)
+  const flags = animation.trackFlags()
   const frameTotal = Math.min(1801, Math.max(2, Math.ceil(animation.duration * sampleRate) + 1))
   const times = Float32Array.from({ length: frameTotal }, (_, frame) => Math.min(animation.duration, frame / sampleRate))
-  const tracks = trackToBone.map((boneIndex): DecodedAnimationTrack => {
-    const boneName = boneNames?.[boneIndex]
-    return {
-      boneIndex,
-      boneName: boneName && boneName.length > 0 ? boneName : undefined,
-      translations: new Float32Array(frameTotal * 3),
-      rotations: new Float32Array(frameTotal * 4),
-      scales: new Float32Array(frameTotal * 3),
-    }
-  })
+  const tracks = trackToBone.map((boneIndex, trackIndex): DecodedAnimationTrack => ({
+    boneIndex,
+    hasTranslation: flags[trackIndex]?.translation ?? false,
+    hasRotation: flags[trackIndex]?.rotation ?? false,
+    hasScale: flags[trackIndex]?.scale ?? false,
+    translations: new Float32Array(frameTotal * 3),
+    rotations: new Float32Array(frameTotal * 4),
+    scales: new Float32Array(frameTotal * 3),
+  }))
   for (let frame = 0; frame < frameTotal; frame += 1) {
     const transforms = animation.sample(times[frame]!)
     const count = Math.min(transforms.length, tracks.length)
@@ -573,6 +572,5 @@ export function decodePap(bytes: ArrayBuffer, path = '', sampleRate = 30, prefer
     duration: animation.duration,
     times,
     tracks,
-    boneNamesResolved: Boolean(boneNames),
   }
 }
