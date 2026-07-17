@@ -77,15 +77,7 @@ export default function MarketInfo({ item, scope }: Props) {
           <Prices data={state.data} scope={scope} />
         )}
       </div>
-      <a
-        className="market-info-wiki"
-        href={wikiItemUrl(item.name)}
-        target="_blank"
-        rel="noopener noreferrer"
-        title={`Open “${item.name}” on the FFXIV wiki`}
-      >
-        Wiki ↗
-      </a>
+      
     </div>
   )
 }

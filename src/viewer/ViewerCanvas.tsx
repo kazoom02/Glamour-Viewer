@@ -185,6 +185,7 @@ function addCharacterRig(target: THREE.Group, decoded: DecodedSkeleton, bustScal
     bone.position.fromArray(source.translation)
     bone.quaternion.fromArray(source.rotation).normalize()
     bone.scale.fromArray(source.scale)
+    if (source.isAuxiliary) bone.userData.isAuxiliary = true
     return bone
   })
   decoded.bones.forEach((source, index) => {
@@ -1022,6 +1023,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       let rig: CharacterRig | undefined
       let decodedSkeleton: DecodedSkeleton | undefined
       let bustScale: BustScale = [1, 1, 1]
+      let baseIdleClip: THREE.AnimationClip | undefined
       let idleAnimationPromise: Promise<DecodedAnimation> | undefined
       let idleReady = false
       if (source.kind === 'local') {
@@ -1290,8 +1292,12 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             const decodedAnimation = await idleAnimationPromise
             if (disposed) return
             const { clip, boundTracks, totalTracks, channels } = animationClipFromDecoded(decodedAnimation, rig.skeleton)
+            baseIdleClip = clip
             activeIdleMixer = new THREE.AnimationMixer(characterGroup)
             const action = activeIdleMixer.clipAction(clip)
+            if (decodedAnimation.blendHint === 'additive') {
+              action.blendMode = THREE.AdditiveAnimationBlendMode
+            }
             action.setLoop(THREE.LoopRepeat, Infinity)
             action.clampWhenFinished = false
             action.setEffectiveWeight(1)
@@ -1323,7 +1329,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           const animationBustScale = bustScale
           const localSource = source
           // Swaps a clip onto the character mixer (reused idle mixer) and plays it.
-          const playClipOnRig = (clip: THREE.AnimationClip, label: string) => {
+          const playClipOnRig = (clip: THREE.AnimationClip, label: string, blendHint?: 'normal' | 'additive') => {
             let mixer = idleMixer.current
             if (!mixer) {
               mixer = new THREE.AnimationMixer(characterGroup)
@@ -1336,6 +1342,9 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               mixer.uncacheClip(previous.getClip())
             }
             const action = mixer.clipAction(clip)
+            if (blendHint === 'additive') {
+              action.blendMode = THREE.AdditiveAnimationBlendMode
+            }
             action.setLoop(THREE.LoopRepeat, Infinity)
             action.clampWhenFinished = false
             action.setEffectiveWeight(1)
@@ -1374,7 +1383,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             const diag = `animation ${entry.id}: pap=${decoded.path} track=${decoded.name} blend=${decoded.blendHint} bound=${boundTracks}/${totalTracks} channels=${channels} maxT=${maxTranslation.toFixed(2)} scale=[${minScale.toFixed(2)},${maxScale.toFixed(2)}] nonFinite=${nonFinite} duration=${decoded.duration.toFixed(3)}s`
             console.info(`[glamour-viewer] ${diag}`)
             setAnimDiag(diag)
-            playClipOnRig(clip, entry.label)
+            playClipOnRig(clip, entry.label, decoded.blendHint)
           }
           playExternalMotion.current = async (data: ArrayBuffer, label: string) => {
             const { GLTFLoader } = await import('three/examples/jsm/loaders/GLTFLoader.js')
@@ -1386,13 +1395,19 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             if (!clip) throw new Error('That glTF/GLB has no animation track.')
             // Rig bones use FFXIV joint names (j_*, n_*); the mixer binds the clip's
             // tracks to them by name, so a Meddle/TexTools export retargets directly.
-            // Drop the root position so the character stays centred in the preview.
+            // Drop all translations except for weapons/ik, to prevent limb stretching.
+            // We drop n_root to keep them centered in the preview.
             const retargeted = clip.clone()
-            retargeted.tracks = retargeted.tracks.filter((track) => track.name !== 'n_root.position')
+            retargeted.tracks = retargeted.tracks.filter((track) => {
+              if (!track.name.endsWith('.position')) return true
+              const boneName = track.name.split('.')[0]!
+              return boneName.startsWith('j_buki_') || boneName.startsWith('n_buki_') || boneName.startsWith('ik_') || boneName.startsWith('iv_')
+            })
             const rigBoneNames = new Set(animationRig.skeleton.bones.map((bone) => bone.name))
             const matched = new Set(
               retargeted.tracks.map((track) => track.name.split('.')[0]!).filter((name) => rigBoneNames.has(name)),
             )
+
             const diag = `external motion ${label}: clip=${clip.name || 'unnamed'} tracks=${clip.tracks.length} matchedBones=${matched.size}/${animationRig.skeleton.bones.length} duration=${clip.duration.toFixed(3)}s`
             console.info(`[glamour-viewer] ${diag}`)
             setAnimDiag(diag)

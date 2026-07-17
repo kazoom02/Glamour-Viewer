@@ -7,6 +7,7 @@ export interface DecodedSkeletonBone {
   translation: [number, number, number]
   rotation: [number, number, number, number]
   scale: [number, number, number]
+  isAuxiliary?: boolean
 }
 
 export interface DecodedSkeleton {
@@ -36,7 +37,7 @@ export function attachSkeleton(
       : attachmentIndex
     remap[index] = bones.length
     byName.set(bone.name, bones.length)
-    bones.push({ ...bone, parentIndex })
+    bones.push({ ...bone, parentIndex, isAuxiliary: true })
   })
   return { bones }
 }

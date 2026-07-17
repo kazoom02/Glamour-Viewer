@@ -194,6 +194,7 @@ export function bakeCharacterMaterial(
       let first: number
       let second: number
       let blend: number
+      const base = sample(textures.diffuse, x, y, width, height)
       if (table.kind === 'dawntrail') {
         const pair = Math.min(15, Math.round(selection[0] / 17))
         first = Math.min(table.rows.length - 1, pair * 2)
@@ -206,7 +207,6 @@ export function bakeCharacterMaterial(
       const a = table.rows[first]!
       const b = table.rows[second]!
       const mix = (left: number, right: number) => left + (right - left) * blend
-      const base = sample(textures.diffuse, x, y, width, height)
       const mask = sample(textures.mask, x, y, width, height)
       const specularBase = sample(textures.specular, x, y, width, height)
       const opacity = textures.normal && textures.normal.format !== TEX_FORMAT.BC5
@@ -219,7 +219,8 @@ export function bakeCharacterMaterial(
         emissive[target + channel] = clampByte(linearToSrgb(mix(a.emissive[channel]!, b.emissive[channel]!)))
         specularColor[target + channel] = clampByte(linearToSrgb(tableSpecular * srgbToLinear(specularBase[channel]!)))
       }
-      diffuse[target + 3] = clampByte((base[3] / 255) * opacity)
+      const baseAlpha = table.kind === 'dawntrail' ? base[3] / 255 : 1
+      diffuse[target + 3] = clampByte(baseAlpha * opacity * 255)
       const rowRoughness = mix(a.roughness, b.roughness)
       // The character mask's green channel is GLOSS (smoothness), not roughness:
       // polished metal is near-white, matte cloth is dark. Reading it directly as
@@ -229,24 +230,21 @@ export function bakeCharacterMaterial(
       // detail); fall back to the colorset row otherwise. The floor keeps metals
       // from becoming a perfect mirror under Three's sharper microfacet response.
       const textureRoughness = textures.mask
-        ? 1 - mask[1] / 255
+        ? (legacyShader ? 1 - mask[1] / 255 : mask[1] / 255)
         : rowRoughness
       const pbrRoughness = Math.max(0.25, textureRoughness)
       const rough = clampByte(pbrRoughness)
       const occlusion = textures.mask ? mask[2] : 255
       const rowSpecularMask = legacyShader ? mix(a.specularMask, b.specularMask) : 1
-      const textureSpecularMask = textures.mask ? mask[0] / 255 : 1
+      const textureSpecularMask = textures.mask ? (legacyShader ? mask[0] / 255 : 1) : 1
       const specularAlpha = textures.specular ? specularBase[3] / 255 : 1
       const specularStrength = clampByte(rowSpecularMask * textureSpecularMask * specularAlpha)
       ao[target] = ao[target + 1] = ao[target + 2] = occlusion
       roughness[target] = roughness[target + 1] = roughness[target + 2] = rough
-      // Character colorsets carry a real metalness value. With a reflection
-      // environment now present, feed it through so metal gear reflects (the
-      // glossy in-game look) while colored-specular cloth/leather (metalness 0)
-      // stays matte. This used to be forced to zero because, without anything to
-      // reflect, metallic surfaces rendered as flat black.
+      
       const rowMetalness = mix(a.metalness, b.metalness)
-      metalness[target] = metalness[target + 1] = metalness[target + 2] = clampByte(rowMetalness)
+      const textureMetalness = textures.mask && !legacyShader ? mask[0] / 255 : rowMetalness
+      metalness[target] = metalness[target + 1] = metalness[target + 2] = clampByte(textureMetalness)
       specularIntensity[target] = specularIntensity[target + 1] = specularIntensity[target + 2] = 255
       specularIntensity[target + 3] = specularStrength
       specularColor[target + 3] = 255

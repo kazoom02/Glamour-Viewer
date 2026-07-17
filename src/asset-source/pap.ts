@@ -10,6 +10,7 @@ import {
 
 export interface DecodedAnimationTrack {
   boneIndex: number
+  boneName?: string
   /**
    * Whether each channel is actually animated by the clip (its Havok mask is
    * non-zero). A spline-compressed track returns identity/zero for channels it
@@ -160,9 +161,9 @@ function unpackPolar32(data: Uint8Array): [number, number, number, number] {
   const low = input & 0x3ffff
   const high = ((input & 0x0ffc0000) >>> 18) / 1023
   const value = 1 - high * high
-  const a = Math.sqrt(low)
+  const a = Math.floor(Math.sqrt(low))
   const b = low - a * a
-  const c = a === 0 ? Number.MAX_VALUE : 1 / (a + a)
+  const c = a === 0 ? 0 : 1 / (a + a)
   const theta = a / 511 * (Math.PI / 2)
   const phi = b * c * (Math.PI / 2)
   const factor = Math.sqrt(Math.max(0, 1 - value * value))
@@ -190,7 +191,7 @@ function unpackThreeComp40(data: Uint8Array): [number, number, number, number] {
   const masks = [4095, 4095, 4095, 0]
   const defaults = [0, 0, 0, 2047]
   const values = packed.map((value, index) => (((value & masks[index]!) | defaults[index]!) - 2047) / 2895)
-  const sourceFlags = new DataView(data.buffer, data.byteOffset, 8).getUint32(4, true)
+  const sourceFlags = data[4]!
   let remaining = Math.sqrt(Math.max(0, 1 - values.reduce((sum, value) => sum + value * value, 0)))
   if ((sourceFlags & 64) === 64) remaining = -remaining
   if ((sourceFlags & 48) === 0) return [remaining, values[0]!, values[1]!, values[2]!]
@@ -246,7 +247,7 @@ function readKnots(data: ByteReader, quantizedTime: number, frameDuration: numbe
   const raw = data.raw()
   const span = findSpan(n, degree, quantizedTime, raw)
   const knots = Array.from({ length: degree * 2 }, (_, index) => (
-    (raw[index + 1]! + span - degree) * frameDuration
+    (raw[span - degree + index + 1]!) * frameDuration
   ))
   data.skip(n + degree + 2)
   return { n, degree, knots, span }
@@ -362,6 +363,14 @@ function readNurbsQuaternion(
       selected.skip(bytesPerQuaternion)
       return value
     })
+    for (let i = 1; i <= curve.degree; i += 1) {
+      const prev = points[i - 1]!
+      const current = points[i]!
+      const dot = prev[0]! * current[0]! + prev[1]! * current[1]! + prev[2]! * current[2]! + prev[3]! * current[3]!
+      if (dot < 0) {
+        points[i] = [-current[0]!, -current[1]!, -current[2]!, -current[3]!]
+      }
+    }
     data.skip(bytesPerQuaternion * (curve.n + 1))
     return evaluate(time, curve.degree, curve.knots, points)
   }
@@ -502,7 +511,7 @@ export function orderedAnimations(infos: PapAnimationInfo[], preferName?: string
  * the idle-ranked loop (standing idle); with one it selects the named track,
  * which is how the animation catalog plays a specific emote/pose/move clip.
  */
-export function decodePap(bytes: ArrayBuffer, path = '', sampleRate = 30, preferName?: string): DecodedAnimation {
+export function decodePap(bytes: ArrayBuffer, path = '', sampleRate = 30, preferName?: string, boneNamesOverride?: string[]): DecodedAnimation {
   const pap = parsePapHeader(bytes)
   const objects = decodeHavokTagfile(pap.havokData)
   const container = objects.find((object) => object.type.name === 'hkaAnimationContainer')
@@ -531,7 +540,35 @@ export function decodePap(bytes: ArrayBuffer, path = '', sampleRate = 30, prefer
   }
   assertPap(selected, 'The PAP contains no usable skeletal animation binding.')
   const { info, binding: bindingObject, blendHint } = selected
+  let boneNames: string[] | undefined
+  const skeletonObject = objects.find((object) => object.type.name === 'hkaSkeleton')
+  if (skeletonObject) {
+    try {
+      const boneValues = havokValueArray(havokObjectValue(skeletonObject, 'bones'), 'bones')
+      boneNames = boneValues.map((value) => {
+        assertPap(typeof value === 'object' && !Array.isArray(value) && value !== null && 'type' in value, 'A PAP skeleton bone is malformed.')
+        const name = havokObjectValue(value as HavokObject, 'name')
+        assertPap(typeof name === 'string', 'A PAP skeleton bone name is malformed.')
+        return name
+      })
+    } catch {
+      // Graceful fallback if the skeleton in the PAP is somehow atypical or malformed
+    }
+  }
+
   const trackToBone = numberArray(bindingObject, 'transformTrackToBoneIndices')
+
+  if (boneNames) {
+    // If tracks reference indices outside the skeleton, or the skeleton has no standard
+    // FFXIV bones, it is a dummy skeleton. The tracks map to the external SKLB indices.
+    const isStandard = boneNames.some((name) => name.startsWith('j_') || name.startsWith('n_'))
+    const isOutOfBounds = trackToBone.some((index) => index >= boneNames!.length)
+    if (!isStandard || isOutOfBounds) boneNames = undefined
+  }
+  if (!boneNames && boneNamesOverride) {
+    boneNames = boneNamesOverride
+  }
+
   const animationObject = objectMember(bindingObject, 'animation')
   assertPap(animationObject.type.name === 'hkaSplineCompressedAnimation', `Unsupported PAP animation type ${animationObject.type.name}.`)
   const animation = new SplineAnimation(animationObject)
@@ -540,6 +577,7 @@ export function decodePap(bytes: ArrayBuffer, path = '', sampleRate = 30, prefer
   const times = Float32Array.from({ length: frameTotal }, (_, frame) => Math.min(animation.duration, frame / sampleRate))
   const tracks = trackToBone.map((boneIndex, trackIndex): DecodedAnimationTrack => ({
     boneIndex,
+    boneName: boneNames?.[boneIndex],
     hasTranslation: flags[trackIndex]?.translation ?? false,
     hasRotation: flags[trackIndex]?.rotation ?? false,
     hasScale: flags[trackIndex]?.scale ?? false,

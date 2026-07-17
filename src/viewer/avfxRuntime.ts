@@ -285,6 +285,28 @@ function discGeometry(definition: AvfxParticleDefinition): THREE.BufferGeometry 
   return geometry
 }
 
+
+function cylinderGeometry(definition: AvfxParticleDefinition): THREE.BufferGeometry {
+  const segmentsValue = definition.data.PCnV
+  const segments = Math.max(8, Math.min(64, typeof segmentsValue === 'number' ? Math.round(segmentsValue) : 16))
+  const geometry = new THREE.CylinderGeometry(0.5, 0.5, 1, segments, 1, true)
+  geometry.rotateX(Math.PI / 2)
+  return geometry
+}
+
+function sphereGeometry(definition: AvfxParticleDefinition): THREE.BufferGeometry {
+  const segmentsValue = definition.data.PCnV
+  const segments = Math.max(8, Math.min(64, typeof segmentsValue === 'number' ? Math.round(segmentsValue) : 16))
+  return new THREE.SphereGeometry(0.5, segments, segments)
+}
+
+function createProceduralGeometry(definition: AvfxParticleDefinition): THREE.BufferGeometry {
+  if (definition.type === 2) return cylinderGeometry(definition)
+  if (definition.type === 3) return sphereGeometry(definition)
+  if (definition.type === 12 || definition.type === 13) return discGeometry(definition)
+  return spriteGeometry()
+}
+
 function spriteGeometry(): THREE.PlaneGeometry {
   return new THREE.PlaneGeometry(1, 1)
 }
@@ -613,7 +635,7 @@ export function createAvfxRuntime(
     } else {
       let proceduralGeometry = proceduralGeometryCache.get(rule.target)
       if (!authoredGeometry && !proceduralGeometry) {
-        proceduralGeometry = ensureShaderAttributes(definition.type === 12 ? discGeometry(definition) : spriteGeometry())
+        proceduralGeometry = ensureShaderAttributes(createProceduralGeometry(definition))
         proceduralGeometryCache.set(rule.target, proceduralGeometry)
       }
       geometry = authoredGeometry ?? proceduralGeometry!

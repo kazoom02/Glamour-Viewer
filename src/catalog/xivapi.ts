@@ -66,7 +66,7 @@ interface SearchResponse {
   results?: Array<{ row_id?: number; fields?: SearchFields }>
 }
 
-const PAGE_SIZE = 50
+const PAGE_SIZE = 500
 
 function apiBaseUrl(): URL {
   const configured = import.meta.env.VITE_XIVAPI_BASE_URL || DEFAULT_XIVAPI_BASE_URL

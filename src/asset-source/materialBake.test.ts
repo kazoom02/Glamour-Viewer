@@ -64,7 +64,7 @@ describe('character colorset baking', () => {
     expect(result.specularIntensity.rgba[3]).toBe(16)
   })
 
-  it('reads the mask green channel as gloss, so glossy metal stays reflective', () => {
+  it('reads the Dawntrail mask green channel as roughness, not gloss', () => {
     const rows = Array.from({ length: 32 }, () => ({
       diffuse: [1, 1, 1] as [number, number, number],
       specular: [0, 0, 0] as [number, number, number],
@@ -73,17 +73,16 @@ describe('character colorset baking', () => {
       roughness: 1,
       metalness: 0,
     }))
-    // A polished weapon: rough colorset row but a near-white gloss mask. The
-    // gloss map wins, so the surface is smooth (floored) instead of matte black.
+    // A matte cloth: rough colorset row, near-white roughness mask.
     const result = bakeCharacterMaterial({ kind: 'dawntrail', rows }, {
       index: texture([0, 255, 0, 255]),
       mask: texture([255, 242, 255, 255]),
     }, 'character.shpk')!
 
-    expect(result.roughness.rgba[0]).toBe(64)
+    expect(result.roughness.rgba[0]).toBe(242)
   })
 
-  it('keeps a matte gloss mask rough', () => {
+  it('keeps a smooth roughness mask smooth', () => {
     const rows = Array.from({ length: 32 }, () => ({
       diffuse: [1, 1, 1] as [number, number, number],
       specular: [1, 1, 1] as [number, number, number],
@@ -92,14 +91,13 @@ describe('character colorset baking', () => {
       roughness: 0.05,
       metalness: 0,
     }))
-    // Low gloss (green 16) is a matte surface, so it stays rough even though the
-    // colorset row is smooth: the per-pixel gloss map is the authored detail.
+    // Low roughness (green 16) is a smooth surface.
     const result = bakeCharacterMaterial({ kind: 'dawntrail', rows }, {
       index: texture([0, 255, 0, 255]),
       mask: texture([255, 16, 255, 255]),
     }, 'character.shpk')!
 
-    expect(result.roughness.rgba[0]).toBe(239)
+    expect(result.roughness.rgba[0]).toBe(64) // 0.25 max
   })
 
   it('builds facial-hair color and opacity from normal and mask channels', () => {

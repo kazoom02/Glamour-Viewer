@@ -189,6 +189,13 @@ export default function DefaultCharacterPreview() {
     }
 
     const addClip = (name: string, clip: THREE.AnimationClip) => {
+      // Drop translation tracks so exported emotes don’t stretch limbs.
+      // We keep n_root translations if present so locomotion works.
+      clip.tracks = clip.tracks.filter((track) => {
+        if (!track.name.endsWith('.position')) return true
+        const boneName = track.name.split('.')[0]!
+        return boneName === 'n_root' || boneName.startsWith('j_buki_') || boneName.startsWith('n_buki_') || boneName.startsWith('ik_') || boneName.startsWith('iv_')
+      })
       let unique = name
       let n = 2
       while (clipMap.has(unique)) unique = `${name} ${n++}`
@@ -269,6 +276,11 @@ export default function DefaultCharacterPreview() {
         if (!modelRes.ok || !idleRes.ok) throw new Error('Bundled model failed to download.')
         const [modelBuf, idleBuf] = await Promise.all([modelRes.arrayBuffer(), idleRes.arrayBuffer()])
         if (disposed) return
+        // Avoid crashing on empty GLBs (e.g. Git LFS issues)
+        const fetchCheck = await Promise.all([fetch(MODEL_URL, {method: 'HEAD'}), fetch(IDLE_URL, {method: 'HEAD'})])
+        if (Number(fetchCheck[0].headers.get('content-length')) < 1000) {
+          throw new Error('Default character GLB is missing or empty.')
+        }
         const [modelGltf, idleGltf] = await Promise.all([parseGlb(modelBuf), parseGlb(idleBuf)])
         if (disposed) return
         if (idleGltf.animations[0]) addClip('Idle', idleGltf.animations[0])

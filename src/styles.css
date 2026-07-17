@@ -370,8 +370,9 @@ h2 { margin: 0; font-size: clamp(28px, 3.2vw, 42px); line-height: 1.1; letter-sp
 .market-price-row b { color: var(--gold-bright); font-size: 15px; font-weight: 700; }
 .market-price-row i { color: #8a8c92; font-size: 9px; font-style: normal; letter-spacing: .04em; }
 .market-prices small, .market-info-updated { color: #8a8c92; font-size: 9.5px; }
-.market-info-wiki { flex: none; align-self: center; padding: 6px 10px; border: 1px solid #4a4d54; border-radius: 5px; background: #24262b; color: #ede8de; font-size: 11px; text-decoration: none; white-space: nowrap; }
-.market-info-wiki:hover { border-color: #8b7550; background: #302a21; color: var(--gold-bright); }
+.market-info-links { display: flex; flex-direction: column; gap: 4px; justify-content: center; flex: none; align-self: center; }
+.market-info-link { flex: none; text-align: center; padding: 6px 10px; border: 1px solid #4a4d54; border-radius: 5px; background: #24262b; color: #ede8de; font-size: 11px; text-decoration: none; white-space: nowrap; }
+.market-info-link:hover { border-color: #8b7550; background: #302a21; color: var(--gold-bright); }
 /* Let the picker controls wrap once the market-scope selector is added. */
 .catalog-picker .catalog-controls { flex-wrap: wrap; }
 .catalog-picker .catalog-field { flex: 1 1 150px; }
@@ -470,4 +471,36 @@ footer { width: min(1180px, calc(100% - 40px)); margin: 0 auto; padding: 30px 0 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   .button { transition: none; }
+}
+
+/* Removed absolute pos for inline rendering */
+.item-hover-menu {
+  display: none;
+  grid-column: 1 / -1;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+.dressing-slot:hover .item-hover-menu {
+  display: flex;
+}
+.item-hover-link {
+  display: block;
+  text-align: center;
+  padding: 6px 10px;
+  border: 1px solid #4a4d54;
+  border-radius: 5px;
+  background: #24262b;
+  color: #ede8de;
+  font-size: 11px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.item-hover-link:hover {
+  border-color: #8b7550;
+  background: #302a21;
+  color: var(--gold-bright);
+}
+.dressing-slot:hover {
+  z-index: 60;
 }

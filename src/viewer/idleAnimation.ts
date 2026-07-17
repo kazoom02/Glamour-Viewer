@@ -55,19 +55,54 @@ export function animationClipFromDecoded(
   bustScale: readonly [number, number, number] = [1, 1, 1],
 ): AnimationClipResult {
   if (animation.blendHint === 'additive') {
-    throw new Error('The selected animation is additive and cannot be used as an absolute standing pose.')
+    throw new Error('Refusing to convert an additive animation as an absolute clip.')
   }
   const tracks: THREE.KeyframeTrack[] = []
+  const bonesByName = new Map<string, THREE.Bone>()
+  for (const bone of skeleton.bones) {
+    bonesByName.set(bone.name, bone)
+  }
   let boundTracks = 0
   for (const track of animation.tracks) {
-    const bone = skeleton.bones[track.boneIndex]
+    let bone = track.boneName
+      ? bonesByName.get(track.boneName)
+      : skeleton.bones[track.boneIndex]
+    
+    // If we bound by index, ensure we didn't accidentally bind to an appended face/hair bone.
+    // Dummy PAP skeletons don't specify names, and their out-of-bounds indices for props/weapons
+    // can accidentally map to the hair/face bones that we appended to the combined skeleton.
+    if (!track.boneName && bone && bone.userData.isAuxiliary) {
+      bone = undefined
+    }
+
+    // Emotes often contain baked garbage tracks for hair/cloth bones from the animator's reference rig.
+    // In-game, Havok physics overrides these. In our viewer, applying them causes hair to explode or
+    // stick straight up. We explicitly ignore hair bones so they stay in their stable bind pose.
+    if (bone && (bone.name.includes('kami') || bone.name.includes('skirt') || bone.name.includes('sode') || bone.name.includes('manto'))) {
+      bone = undefined
+    }
+
     if (!bone) continue
     boundTracks += 1
     if (track.hasTranslation) {
-      const translations = ROOT_TRANSLATION_BONES.has(bone.name)
-        ? stableRootTranslations(track.translations)
-        : track.translations
-      tracks.push(new THREE.VectorKeyframeTrack(`${bone.name}.position`, animation.times, translations))
+      // FFXIV animations are shared across races/heights; applying authored translations
+      // to limbs stretches them to the animator's reference rig. We only apply translations
+      // to the root, hips, weapons, and IK targets.
+      const allowTranslation =
+        ROOT_TRANSLATION_BONES.has(bone.name) ||
+        bone.name === 'n_hara' ||
+        bone.name.startsWith('j_buki_') ||
+        bone.name.startsWith('n_buki_') ||
+        bone.name.startsWith('ik_') ||
+        bone.name.startsWith('iv_') ||
+        bone.name.startsWith('f_') // Allow facial translations just in case
+
+      if (allowTranslation) {
+        const translations = ROOT_TRANSLATION_BONES.has(bone.name)
+          ? stableRootTranslations(track.translations)
+          : track.translations
+        tracks.push(new THREE.VectorKeyframeTrack(`${bone.name}.position`, animation.times, translations))
+      }
     }
     if (track.hasRotation) {
       tracks.push(new THREE.QuaternionKeyframeTrack(`${bone.name}.quaternion`, animation.times, track.rotations))

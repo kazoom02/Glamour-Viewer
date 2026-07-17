@@ -22,7 +22,7 @@ describe('XIVAPI catalog helpers', () => {
 
   it('builds a slot-only catalog query when the name is empty', () => {
     const url = armorSearchUrl('', 'head')
-    expect(url.searchParams.get('limit')).toBe('50')
+    expect(url.searchParams.get('limit')).toBe('500')
     expect(url.searchParams.get('query')).toBe('+EquipSlotCategory.Head>0')
   })
 

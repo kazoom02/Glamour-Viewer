@@ -37,7 +37,7 @@ interface Request {
 
 // Bump whenever decoded/baked texture semantics change so IndexedDB cannot
 // retain an older, glossier material interpretation across deployments.
-const CACHE_VERSION = 4
+const CACHE_VERSION = 5
 const memoryCache = new Map<string, DecodedTexture>()
 const stainingTemplateCache = new Map<string, Promise<StainingTemplate>>()
 const equipmentParameterCache = new Map<string, Promise<ArrayBuffer>>()
