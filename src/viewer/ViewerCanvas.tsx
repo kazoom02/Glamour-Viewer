@@ -703,13 +703,15 @@ function equipmentTarget(
 // and similar). The blade's long axis is aimed along DIRECTION (world space, character
 // facing +Z toward the camera: +X = left, +Y = up, +Z = forward), then ROLL_DEG spins
 // it around that axis to sit flat against the hip; OFFSET nudges it off the hip bone.
+// The model's near endpoint, rather than its centre, is placed on that anchor so the
+// scabbard starts at the belt and extends down/back from it like it does in game.
 // TUNABLE — adjust from the "weapon attachment … placement=hip" diagnostic:
 //   • wrong side → flip the X sign of OFFSET (and small X of DIRECTION)
 //   • tip points the wrong way → negate DIRECTION
 //   • saya lies flat / edge-on wrong → change ROLL_DEG (±90 / 180)
 const HIP_SCABBARD_BONES = ['j_kosi', 'n_hara', 'j_sebo_a']
 const HIP_SCABBARD_OFFSET: readonly [number, number, number] = [0.11, -0.12, 0.03]
-const HIP_SCABBARD_DIRECTION: readonly [number, number, number] = [0.1, -0.28, -0.95]
+const HIP_SCABBARD_DIRECTION: readonly [number, number, number] = [0.08, -0.62, -0.78]
 const HIP_SCABBARD_ROLL_DEG = 0
 
 function hipWeaponTarget(character: THREE.Group, rig: CharacterRig | undefined, model: DecodedModel): EquipmentAttachment {
@@ -730,21 +732,25 @@ function hipWeaponTarget(character: THREE.Group, rig: CharacterRig | undefined, 
   // Spin the sheath around its own length so a flat cross-section faces the hip.
   const roll = new THREE.Quaternion().setFromAxisAngle(desiredDirection, (HIP_SCABBARD_ROLL_DEG * Math.PI) / 180)
   orientation.premultiply(roll)
-  const center = new THREE.Vector3(
+  const pivot = new THREE.Vector3(
     (model.bounds.min[0] + model.bounds.max[0]) / 2,
     (model.bounds.min[1] + model.bounds.max[1]) / 2,
     (model.bounds.min[2] + model.bounds.max[2]) / 2,
   )
+  // setFromUnitVectors maps the positive longest axis onto desiredDirection.
+  // Pin its minimum endpoint to the hip, leaving the rest of the model to grow
+  // away from the belt along that direction.
+  pivot.setComponent(longestAxisIndex, model.bounds.min[longestAxisIndex])
   const mount = new THREE.Group()
   mount.name = 'offHand-hip-mount'
   mount.quaternion.copy(orientation)
-  mount.position.copy(anchor).sub(center.clone().applyQuaternion(orientation))
+  mount.position.copy(anchor).sub(pivot.clone().applyQuaternion(orientation))
   character.add(mount)
   character.updateMatrixWorld(true)
   if (hip) hip.attach(mount)
   return {
     target: mount,
-    diagnostic: `placement=hip bone=${hip?.name ?? 'character-root'} modelSize=${formatVector(size.toArray())} longestModelAxis=${['x', 'y', 'z'][longestAxisIndex]} anchor=${formatVector(anchor.toArray())} direction=${formatVector(desiredDirection.toArray())} roll=${HIP_SCABBARD_ROLL_DEG}° fallback=${!hip}`,
+    diagnostic: `placement=hip bone=${hip?.name ?? 'character-root'} modelSize=${formatVector(size.toArray())} longestModelAxis=${['x', 'y', 'z'][longestAxisIndex]} pivot=min-${['x', 'y', 'z'][longestAxisIndex]} anchor=${formatVector(anchor.toArray())} direction=${formatVector(desiredDirection.toArray())} roll=${HIP_SCABBARD_ROLL_DEG}° fallback=${!hip}`,
   }
 }
 
