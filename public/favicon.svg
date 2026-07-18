@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Glamour Viewer">
+  <defs>
+    <linearGradient id="gv-left" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffd7ec"/>
+      <stop offset=".28" stop-color="#c9b4ff"/>
+      <stop offset=".55" stop-color="#9ad8ff"/>
+      <stop offset=".8" stop-color="#a6ffd6"/>
+      <stop offset="1" stop-color="#fff2a6"/>
+    </linearGradient>
+    <linearGradient id="gv-right" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e0ccff"/>
+      <stop offset=".35" stop-color="#ffd0ea"/>
+      <stop offset=".7" stop-color="#c8e6ff"/>
+      <stop offset="1" stop-color="#dcffee"/>
+    </linearGradient>
+    <linearGradient id="gv-sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".8"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <g stroke="#9d8fd0" stroke-opacity=".45" stroke-width="1.4" stroke-linejoin="round">
+    <path d="M50 8 L15 79 L50 92 Z" fill="url(#gv-left)"/>
+    <path d="M50 8 L85 79 L50 92 Z" fill="url(#gv-right)"/>
+  </g>
+  <path d="M50 8 L34 46 L50 54 Z" fill="url(#gv-sheen)" opacity=".55"/>
+  <path d="M50 8 L50 92" stroke="#ffffff" stroke-opacity=".5" stroke-width="1.1"/>
+</svg>
