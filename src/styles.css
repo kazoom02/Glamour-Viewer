@@ -73,14 +73,13 @@ h2 { margin: 0; font-size: clamp(28px, 3.2vw, 42px); line-height: 1.1; letter-sp
 .mv-transport button { flex: 1; }
 .mv-notice { position: absolute; z-index: 3; left: 50%; bottom: 118px; transform: translateX(-50%); margin: 0; padding: 6px 12px; border: 1px solid #4e473b; border-radius: 999px; background: #111216e8; color: #cfc7ba; font-size: 11px; white-space: nowrap; backdrop-filter: blur(8px); }
 .viewer-status { position: absolute; z-index: 2; left: 50%; bottom: 30px; margin: 0; padding: 8px 12px; transform: translateX(-50%); border: 1px solid #4e473b; border-radius: 999px; background: #111216d9; color: #cfc7ba; font-size: 10px; white-space: nowrap; backdrop-filter: blur(8px); }
-.viewer-animation-controls { position: absolute; z-index: 2; top: 16px; right: 16px; display: flex; align-items: center; gap: 5px; min-height: 32px; padding: 4px; border: 1px solid #4e473b; border-radius: 6px; background: #111216e8; backdrop-filter: blur(8px); }
-.viewer-animation-label { display: flex; align-items: center; gap: 6px; max-width: 116px; padding: 0 5px; overflow: hidden; color: #d7d0c4; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
-.viewer-animation-label i { flex: none; width: 6px; height: 6px; border-radius: 50%; background: #77736b; }
-.viewer-animation-controls.ready .viewer-animation-label i, .viewer-animation-controls.paused .viewer-animation-label i { background: var(--gold); }
-.viewer-animation-controls.playing .viewer-animation-label i { background: var(--green); box-shadow: 0 0 8px #75cba288; }
-.viewer-animation-controls button { min-height: 24px; padding: 0 7px; border: 1px solid #4a4d54; border-radius: 4px; background: #24262b; color: #ede8de; cursor: pointer; font-size: 9px; }
-.viewer-animation-controls button:hover:not(:disabled) { border-color: #8b7550; background: #302a21; }
-.viewer-animation-controls button:disabled { opacity: .4; cursor: default; }
+.viewer-gear-controls { position: absolute; z-index: 2; left: 12px; right: 12px; bottom: 14px; display: flex; justify-content: space-between; pointer-events: none; }
+.viewer-gear-group { display: flex; gap: 6px; pointer-events: auto; }
+.viewer-gear-controls button { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 1px solid #4e473b; border-radius: 50%; background: #111216cc; color: #cbc4b7; cursor: pointer; backdrop-filter: blur(8px); transition: color .12s, border-color .12s, background .12s; }
+.viewer-gear-controls button svg { width: 16px; height: 16px; }
+.viewer-gear-controls button:hover:not(:disabled) { border-color: #8b7550; background: #302a21e0; color: #f0e8da; }
+.viewer-gear-controls button:disabled { opacity: .35; cursor: default; }
+.viewer-gear-controls button.active { border-color: var(--gold); background: #2a2318e0; color: var(--gold); }
 .visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* Animation catalog panel — overlays the viewer under the transport controls. */

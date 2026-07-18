@@ -149,9 +149,15 @@ export function animationPapCandidates(
   ))
 }
 
-/** Race-authored standing idle loops, followed by compatible skeleton fallbacks. */
-export function idleAnimationCandidates(raceCode: CharacterRaceCode): string[] {
-  return animationPapCandidates(raceCode, 'bt_common', 'resident', 'idle')
+/**
+ * Race-authored standing idle loops for a weapon class, followed by compatible
+ * skeleton fallbacks. When a weapon class ships no authored resident idle, the
+ * unarmed `bt_common` idle is appended so a clip always resolves.
+ */
+export function idleAnimationCandidates(raceCode: CharacterRaceCode, weaponClass = 'bt_common'): string[] {
+  const weaponIdle = animationPapCandidates(raceCode, weaponClass, 'resident', 'idle')
+  if (weaponClass === 'bt_common') return weaponIdle
+  return [...weaponIdle, ...animationPapCandidates(raceCode, 'bt_common', 'resident', 'idle')]
 }
 
 /** The common face skeleton remains the first candidate for backwards compatibility. */

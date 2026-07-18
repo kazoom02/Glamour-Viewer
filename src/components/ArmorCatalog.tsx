@@ -244,15 +244,12 @@ export default function ArmorCatalog({ source, equipped, onEquip, onRemove, onDy
   }
 
   return (
-    <section className="catalog-section dressing-room" aria-labelledby="catalog-title">
-      <div className="catalog-heading">
-        <div>
-          <p className="eyebrow">Dressing room</p>
-          <h2 id="catalog-title">Click a slot to change it</h2>
-          <p>Names and icons come from XIVAPI. Models and textures are read directly from <strong>{source.label}</strong>.</p>
+    <section className="catalog-section dressing-room" aria-label="Dressing room">
+      {version && (
+        <div className="catalog-heading">
+          <span className="catalog-version">Game data {version.slice(0, 8)}</span>
         </div>
-        {version && <span className="catalog-version">Game data {version.slice(0, 8)}</span>}
-      </div>
+      )}
 
       <div className="dressing-layout" aria-label="Equipment slots">
         <div className="dressing-rail">{LEFT_SLOTS.map((slot) => <SlotButton slot={slot} key={slot} />)}</div>

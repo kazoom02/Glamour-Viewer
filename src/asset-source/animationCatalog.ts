@@ -86,6 +86,45 @@ export function weaponClassLabel(weaponClass: string): string {
   return WEAPON_CLASS_LABELS[weaponClass] ?? weaponClass
 }
 
+/**
+ * FFXIV job/class codes → the weapon animation class whose standing `resident/idle`
+ * loop the job uses. Only classes that actually ship a `{class}/resident/idle.pap`
+ * are listed; jobs whose weapon has no authored resident idle (Sage, Reaper, Viper,
+ * Pictomancer, crafters, non-fisher gatherers…) are omitted and fall back to the
+ * unarmed `bt_common` idle.
+ */
+const JOB_IDLE_WEAPON_CLASS: Record<string, string> = {
+  GLA: 'bt_swd_sld', PLD: 'bt_swd_sld',
+  MRD: 'bt_2ax_emp', WAR: 'bt_2ax_emp',
+  DRK: 'bt_2sw_emp',
+  GNB: 'bt_2gb_emp',
+  CNJ: 'bt_stf_sld', WHM: 'bt_stf_sld', THM: 'bt_stf_sld', BLM: 'bt_stf_sld',
+  ACN: 'bt_2bk_emp', SCH: 'bt_2bk_emp', SMN: 'bt_2bk_emp',
+  AST: 'bt_2gl_emp',
+  PGL: 'bt_clw_clw', MNK: 'bt_clw_clw',
+  LNC: 'bt_2sp_emp', DRG: 'bt_2sp_emp',
+  ROG: 'bt_dgr_dgr', NIN: 'bt_dgr_dgr',
+  SAM: 'bt_2kt_emp',
+  RDM: 'bt_2rp_emp',
+  ARC: 'bt_2bw_emp', BRD: 'bt_2bw_emp',
+  MCH: 'bt_2gn_emp',
+  DNC: 'bt_chk_chk',
+  FSH: 'bt_rod_emp',
+}
+
+/**
+ * Resolves the resident-idle weapon class for a weapon from the job codes that can
+ * equip it (as returned by the ClassJobCategory lookup). Returns `undefined` when no
+ * listed job matches, so the caller uses the unarmed idle.
+ */
+export function idleWeaponClassForJobs(jobCodes: Iterable<string>): string | undefined {
+  for (const code of jobCodes) {
+    const weaponClass = JOB_IDLE_WEAPON_CLASS[code]
+    if (weaponClass) return weaponClass
+  }
+  return undefined
+}
+
 interface ParsedAnimationId {
   weaponClass: string
   sub: string

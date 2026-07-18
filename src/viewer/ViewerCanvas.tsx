@@ -16,7 +16,8 @@ import {
   type CharacterRaceCode,
 } from '../asset-source/characterPlan'
 import { loadLocalAnimation, loadLocalIdleAnimation, type DecodedAnimation } from '../asset-source/animationLoader'
-import { catalogAnimationCandidates, type CatalogAnimation } from '../asset-source/animationCatalog'
+import { catalogAnimationCandidates, idleWeaponClassForJobs, toCatalogAnimation, type CatalogAnimation } from '../asset-source/animationCatalog'
+import { getClassJobCategories } from '../catalog/catalogCache'
 import { createLocalAssetReader } from '../asset-source/sqpack'
 import { HUMAN_CMP_PATH, loadLocalBustScale, type BustScale } from '../asset-source/cmp'
 import { equipmentAssetPlan } from '../asset-source/equipmentPlan'
@@ -847,7 +848,15 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
   const resetView = useRef<(() => void) | null>(null)
   // Set once the character is built; loads and plays a catalog animation on the
   // live rig. Null until ready and while the effect is torn down.
-  const playCatalogAnimation = useRef<((entry: CatalogAnimation) => Promise<void>) | null>(null)
+  const playCatalogAnimation = useRef<((entry: CatalogAnimation, options?: { once?: boolean }) => Promise<void>) | null>(null)
+  // The live character group and the resolved idle weapon class, so the display
+  // buttons can toggle gear visibility and play the draw/sheath transition.
+  const characterGroupRef = useRef<THREE.Group | null>(null)
+  const idleWeaponClassRef = useRef('bt_common')
+  // Gear-visibility toggles are held in refs too so the (visibility-agnostic)
+  // character rebuild can re-apply them to the freshly built group.
+  const weaponsHiddenRef = useRef(false)
+  const headgearHiddenRef = useRef(false)
   // Retargets a dropped-in glTF/GLB motion (e.g. a Meddle export) onto the rig by
   // bone name — the reliable path that bypasses in-browser PAP spline decoding.
   const playExternalMotion = useRef<((data: ArrayBuffer, label: string) => Promise<void>) | null>(null)
@@ -868,6 +877,49 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
   const [animBusy, setAnimBusy] = useState(false)
   const [animNotice, setAnimNotice] = useState<string>()
   const [animDiag, setAnimDiag] = useState<string>()
+  const [weaponsHidden, setWeaponsHidden] = useState(false)
+  const [headgearHidden, setHeadgearHidden] = useState(false)
+  const [weaponDrawn, setWeaponDrawn] = useState(false)
+
+  // Show/hide the equipped gear by name on the live scene, without a full rebuild.
+  const applyGearVisibility = () => {
+    const group = characterGroupRef.current
+    if (!group) return
+    group.traverse((object) => {
+      if (/^equipment-(mainHand|offHand)/.test(object.name)) object.visible = !weaponsHiddenRef.current
+      else if (/^equipment-head/.test(object.name)) object.visible = !headgearHiddenRef.current
+    })
+  }
+
+  useEffect(() => {
+    weaponsHiddenRef.current = weaponsHidden
+    headgearHiddenRef.current = headgearHidden
+    applyGearVisibility()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weaponsHidden, headgearHidden])
+
+  // 1 — Hide/show the main- and off-hand weapons. 2 — Hide/show the headgear.
+  const toggleWeapons = () => setWeaponsHidden((hidden) => !hidden)
+  const toggleHeadgear = () => setHeadgearHidden((hidden) => !hidden)
+
+  // 4 — Play the weapon's draw (drawing) or sheath (putting away) transition once.
+  const onDrawSheath = async () => {
+    const play = playCatalogAnimation.current
+    const weaponClass = idleWeaponClassRef.current
+    if (!play || weaponClass === 'bt_common' || !equipped.mainHand) return
+    const drawn = !weaponDrawn
+    setAnimBusy(true)
+    setAnimNotice(undefined)
+    try {
+      const suffix = drawn ? 'cbbp_a_activ' : 'cbbp_a_deact'
+      await play(toCatalogAnimation(`${weaponClass}-resident-sub-${suffix}`), { once: true })
+      setWeaponDrawn(drawn)
+    } catch {
+      setAnimNotice(`Could not ${drawn ? 'draw' : 'sheathe'} the weapon for this class.`)
+    } finally {
+      setAnimBusy(false)
+    }
+  }
 
   const onSelectAnimation = async (entry: CatalogAnimation) => {
     const play = playCatalogAnimation.current
@@ -938,21 +990,6 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
     }
   }
 
-  const startIdle = () => {
-    const action = idleAction.current
-    if (!action) return
-    action.paused = false
-    action.play()
-    setIdleState('playing')
-  }
-
-  const pauseIdle = () => {
-    const action = idleAction.current
-    if (!action) return
-    action.paused = true
-    setIdleState('paused')
-  }
-
   useEffect(() => {
     const host = container.current
     if (!host) return
@@ -990,6 +1027,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
     const characterGroup = new THREE.Group()
     characterGroup.name = `${raceCode}-character`
     scene.add(characterGroup)
+    characterGroupRef.current = characterGroup
     let activeIdleMixer: THREE.AnimationMixer | undefined
     const animatedMaterials: AnimatedMaterial[] = []
     const avfxRuntimes: AvfxRuntime[] = []
@@ -1002,10 +1040,12 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
     setIdleLabel('Idle')
     setIdleState(source.kind === 'local' ? 'loading' : 'unavailable')
     // A character rebuild (gear/customization change) reverts to idle, so clear
-    // any catalog selection highlight and stale notice.
+    // any catalog selection highlight and stale notice, and re-sheathe the weapon
+    // (the reloaded resident idle is the sheathed pose).
     setActiveAnimId(undefined)
     setAnimNotice(undefined)
     setAnimDiag(undefined)
+    setWeaponDrawn(false)
 
     // A brighter neutral studio rig so dark, reflective gear reads as metal
     // instead of black. Neutral tone mapping still rolls off the highlights, so
@@ -1144,7 +1184,22 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           }
           rig = addCharacterRig(characterGroup, combinedSkeleton, bustScale)
           diagnostics.push(bustRigDiagnostic(rig, 'after CMP bind', bustScale))
-          idleAnimationPromise = loadLocalIdleAnimation(source, idleAnimationCandidates(raceCode))
+          // Match the standing idle to the equipped weapon (daggers → dagger idle,
+          // greatsword → greatsword idle, …). The weapon's job(s) select the
+          // animation class; anything unmapped keeps the unarmed idle.
+          let idleWeaponClass = 'bt_common'
+          const idleWeapon = equipped.mainHand
+          if (idleWeapon?.classJobCategoryId) {
+            try {
+              const jobs = (await getClassJobCategories()).get(idleWeapon.classJobCategoryId)
+              if (jobs) idleWeaponClass = idleWeaponClassForJobs(jobs) ?? 'bt_common'
+            } catch {
+              // XIVAPI unavailable — keep the unarmed idle.
+            }
+          }
+          idleWeaponClassRef.current = idleWeaponClass
+          diagnostics.push(`idle weapon class: ${idleWeaponClass} (mainHand=${idleWeapon?.name ?? 'none'})`)
+          idleAnimationPromise = loadLocalIdleAnimation(source, idleAnimationCandidates(raceCode, idleWeaponClass))
         } catch (reason) {
           failures.push(`base skeleton: ${reason instanceof Error ? reason.message : String(reason)}`)
           setIdleState('unavailable')
@@ -1272,17 +1327,18 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             const attachment = weapon
               ? equipmentTarget(characterGroup, rig, plan.slot, plan.item.weaponPlacement ?? 'hand', result.model)
               : { target: characterGroup, diagnostic: '' }
-            // FFXIV sizes a weapon to the wielder's race. Scale the weapon mesh
-            // and its VFX together inside a group under the attach point so the
-            // whole effect stays proportional on small races such as Lalafell.
+            // FFXIV sizes a weapon to the wielder's race. Wrap the weapon mesh and
+            // its VFX in one named mount group under the attach point so race
+            // scaling stays proportional AND the display toggle hides the whole
+            // weapon (blade + glow) at once rather than leaving orphaned VFX.
             const weaponScale = weapon ? weaponRaceScale(raceCode) : 1
             let renderTarget = attachment.target
-            if (weapon && weaponScale !== 1) {
-              const scaled = new THREE.Group()
-              scaled.name = `equipment-${plan.slot}-scale`
-              scaled.scale.setScalar(weaponScale)
-              attachment.target.add(scaled)
-              renderTarget = scaled
+            if (weapon) {
+              const mount = new THREE.Group()
+              mount.name = `equipment-${plan.slot}-mount`
+              if (weaponScale !== 1) mount.scale.setScalar(weaponScale)
+              attachment.target.add(mount)
+              renderTarget = mount
             }
             addDecodedModel(
               renderTarget,
@@ -1372,16 +1428,16 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             action.clampWhenFinished = false
             action.setEffectiveWeight(1)
             action.setEffectiveTimeScale(1)
-            // Apply the authored first frame, but wait for an explicit Start.
+            // Start the idle immediately so the character is animated on load — no
+            // Start click needed. The render loop advances the mixer each frame.
             action.play()
             activeIdleMixer.update(0)
-            action.paused = true
             diagnostics.push(bustRigDiagnostic(rig, 'after idle frame 0 (CPU-baked geometry)', bustScale))
             idleMixer.current = activeIdleMixer
             idleAction.current = action
             idleReady = true
             setIdleLabel(decodedAnimation.name || 'Idle')
-            setIdleState('ready')
+            setIdleState('playing')
             diagnostics.push(
               `idle animation: ${decodedAnimation.path} name=${decodedAnimation.name} blend=${decodedAnimation.blendHint} duration=${decodedAnimation.duration.toFixed(3)}s frames=${decodedAnimation.times.length} tracks=${decodedAnimation.tracks.length} bound=${boundTracks}/${totalTracks} channels=${channels} rootTranslation=stabilized`,
             )
@@ -1399,7 +1455,8 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           const animationBustScale = bustScale
           const localSource = source
           // Swaps a clip onto the character mixer (reused idle mixer) and plays it.
-          const playClipOnRig = (clip: THREE.AnimationClip, label: string, blendHint?: 'normal' | 'additive') => {
+          // A one-shot clip (draw/sheath) plays once and holds its final frame.
+          const playClipOnRig = (clip: THREE.AnimationClip, label: string, blendHint?: 'normal' | 'additive', once = false) => {
             let mixer = idleMixer.current
             if (!mixer) {
               mixer = new THREE.AnimationMixer(characterGroup)
@@ -1415,8 +1472,8 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             if (blendHint === 'additive') {
               action.blendMode = THREE.AdditiveAnimationBlendMode
             }
-            action.setLoop(THREE.LoopRepeat, Infinity)
-            action.clampWhenFinished = false
+            action.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, once ? 1 : Infinity)
+            action.clampWhenFinished = once
             action.setEffectiveWeight(1)
             action.setEffectiveTimeScale(1)
             action.play()
@@ -1424,7 +1481,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             setIdleLabel(label)
             setIdleState('playing')
           }
-          playCatalogAnimation.current = async (entry: CatalogAnimation) => {
+          playCatalogAnimation.current = async (entry: CatalogAnimation, options?: { once?: boolean }) => {
             const decoded = await loadLocalAnimation(
               localSource,
               catalogAnimationCandidates(entry, raceCode),
@@ -1453,7 +1510,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             const diag = `animation ${entry.id}: pap=${decoded.path} track=${decoded.name} blend=${decoded.blendHint} bound=${boundTracks}/${totalTracks} channels=${channels} maxT=${maxTranslation.toFixed(2)} scale=[${minScale.toFixed(2)},${maxScale.toFixed(2)}] nonFinite=${nonFinite} duration=${decoded.duration.toFixed(3)}s`
             console.info(`[glamour-viewer] ${diag}`)
             setAnimDiag(diag)
-            playClipOnRig(clip, entry.label, decoded.blendHint)
+            playClipOnRig(clip, entry.label, decoded.blendHint, options?.once)
           }
           playExternalMotion.current = async (data: ArrayBuffer, label: string) => {
             const { GLTFLoader } = await import('three/examples/jsm/loaders/GLTFLoader.js')
@@ -1522,6 +1579,8 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
 
       if (disposed) return
       fallback.visible = characterParts === 0
+      // Re-apply the display toggles (hidden weapons/headgear) to the fresh build.
+      applyGearVisibility()
       if (characterParts || equippedItems) {
         const refit = () => {
           const bodyBox = characterFramingBox(characterGroup)
@@ -1532,9 +1591,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
         resetView.current = refit
         diagnostics.push(framingDiagnostic(refit(), camera, controls, host))
       }
-      setStatus(characterParts
-        ? `${raceCode} ${rig ? 'skinned' : 'bind-pose'} character · ${equippedItems}/${selected.length} equipped${source.kind === 'local' ? ` · idle ${idleReady ? 'ready' : 'unavailable'}` : ''} · drag to rotate`
-        : 'Character models could not be decoded')
+      setStatus(characterParts ? '' : 'Character models could not be decoded')
       if (source.kind === 'local') {
         const report = await diagnosticReport(source, failures, diagnostics)
         if (!disposed) {
@@ -1585,6 +1642,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
     return () => {
       disposed = true
       resetView.current = null
+      characterGroupRef.current = null
       cancelAnimationFrame(frame)
       observer.disconnect()
       controls.dispose()
@@ -1691,44 +1749,52 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           </div>
         </details>
       )}
-      <div className={`viewer-animation-controls ${idleState}`} aria-label="Animation controls">
-        <span className="viewer-animation-label" title={idleLabel}>
-          <i aria-hidden="true" />
-          {idleState === 'loading' ? 'Loading idle…' : idleState === 'unavailable' ? 'Idle unavailable' : idleLabel}
-        </span>
-        <button
-          type="button"
-          onClick={startIdle}
-          disabled={!idleAction.current || idleState === 'loading' || idleState === 'playing' || idleState === 'unavailable'}
-          title={source.kind === 'local' ? 'Start or resume the current animation' : 'Animations require Local install mode'}
-        >
-          Start
-        </button>
-        <button
-          type="button"
-          onClick={pauseIdle}
-          disabled={!idleAction.current || idleState !== 'playing'}
-          title="Pause the current animation"
-        >
-          Pause
-        </button>
-        <button
-          type="button"
-          onClick={() => resetView.current?.()}
-          title="Fit the complete character in the preview"
-        >
-          Fit
-        </button>
-        {source.kind === 'local' && (
+      <div className="viewer-gear-controls" aria-label="Display controls">
+        <div className="viewer-gear-group">
           <button
             type="button"
-            onClick={() => motionInput.current?.click()}
-            disabled={animBusy || idleState === 'loading' || idleState === 'unavailable'}
-            title="Load a glTF/GLB motion (e.g. a Meddle export) and retarget it onto this character by bone name"
+            className={weaponsHidden ? 'active' : ''}
+            aria-pressed={weaponsHidden}
+            onClick={toggleWeapons}
+            title={weaponsHidden ? 'Show main and off-hand weapons' : 'Hide main and off-hand weapons'}
           >
-            Load motion…
+            <svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4 L14 14" /><path d="M20 4 L10 14" /><path d="M13 17 l4 4" /><path d="M11 17 l-4 4" /></g></svg>
           </button>
-        )}
+          <button
+            type="button"
+            className={headgearHidden ? 'active' : ''}
+            aria-pressed={headgearHidden}
+            onClick={toggleHeadgear}
+            title={headgearHidden ? 'Show headgear' : 'Hide headgear'}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 15 a8 8 0 0 1 16 0" /><path d="M3 15 h18" /></g></svg>
+          </button>
+          <button type="button" disabled title="Unassigned">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2.2" fill="currentColor" /></svg>
+          </button>
+        </div>
+        <div className="viewer-gear-group">
+          <button
+            type="button"
+            className={weaponDrawn ? 'active' : ''}
+            aria-pressed={weaponDrawn}
+            onClick={onDrawSheath}
+            disabled={source.kind !== 'local' || animBusy || idleState === 'unavailable' || !equipped.mainHand}
+            title={source.kind !== 'local' ? 'Draw/sheathe requires Local install mode' : weaponDrawn ? 'Sheathe weapon' : 'Draw weapon'}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2 L12 15" /><path d="M8 15 L16 15" /><path d="M12 15 L12 22" /></g></svg>
+          </button>
+          <button type="button" disabled title="Unassigned">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2.2" fill="currentColor" /></svg>
+          </button>
+          <button
+            type="button"
+            onClick={() => resetView.current?.()}
+            title="Reset display"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M20 11 a8 8 0 1 0 -2.2 5.6" /><path d="M20 4 v7 h-7" /></g></svg>
+          </button>
+        </div>
       </div>
       <input
         ref={motionInput}
@@ -1748,7 +1814,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           onDownloadSource={activeAnimId ? onDownloadSource : undefined}
         />
       )}
-      <p className="viewer-status" aria-live="polite">{status}</p>
+      {status && <p className="viewer-status" aria-live="polite">{status}</p>}
       {error && (
         <details className="viewer-error">
           <summary>Some character assets did not load</summary>
@@ -1760,19 +1826,6 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             Copy debug report
           </button>
           <pre>{error}</pre>
-        </details>
-      )}
-      {!error && debug && (
-        <details className="viewer-debug">
-          <summary>Material, body, and eye debug report</summary>
-          <button
-            className="viewer-copy-debug"
-            type="button"
-            onClick={() => void navigator.clipboard.writeText(debug)}
-          >
-            Copy debug report
-          </button>
-          <pre>{debug}</pre>
         </details>
       )}
     </div>

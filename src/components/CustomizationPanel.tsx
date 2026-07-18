@@ -22,7 +22,7 @@ interface Props {
   onRaceChange: (raceCode: CharacterRaceCode) => void
 }
 
-export default function CustomizationPanel({ raceCode, customization, onChange, onRaceChange }: Props) {
+export default function CustomizationPanel({ customization, onChange, onRaceChange }: Props) {
   const [catalog, setCatalog] = useState<CustomizationCatalog>(FALLBACK_CUSTOMIZATION_CATALOG)
   const [catalogLoading, setCatalogLoading] = useState(true)
   const [catalogError, setCatalogError] = useState<string>()
@@ -83,16 +83,7 @@ export default function CustomizationPanel({ raceCode, customization, onChange, 
   )
 
   return (
-    <section className="customization-panel" aria-labelledby="customization-title">
-      <div className="catalog-heading customization-heading">
-        <div>
-          <p className="eyebrow">Character creator</p>
-          <h2 id="customization-title">Customization</h2>
-          <p>Choose any playable race, tribe, and gender, then edit the character appearance used by the local preview.</p>
-        </div>
-        <span className="catalog-version">Model {raceCode}</span>
-      </div>
-
+    <section className="customization-panel" aria-label="Customization">
       <div className="customization-identity">
         <VisualOptionPicker
           label="Race / Tribe"

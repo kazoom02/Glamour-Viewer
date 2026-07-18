@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { idleAnimationCandidates } from './characterPlan'
 import {
   catalogAnimationCandidates,
+  idleWeaponClassForJobs,
   parseAnimationId,
   toCatalogAnimation,
   weaponClassLabel,
@@ -76,5 +77,19 @@ describe('weapon class labels', () => {
     expect(weaponClassLabel('bt_common')).toBe('Common (no weapon)')
     expect(weaponClassLabel('bt_2kt_emp')).toBe('Katana')
     expect(weaponClassLabel('bt_zzz_zzz')).toBe('bt_zzz_zzz')
+  })
+})
+
+describe('idle weapon class resolution', () => {
+  it('maps a weapon job set to its resident-idle class', () => {
+    expect(idleWeaponClassForJobs(new Set(['ROG', 'NIN']))).toBe('bt_dgr_dgr')
+    expect(idleWeaponClassForJobs(new Set(['DRK']))).toBe('bt_2sw_emp')
+    expect(idleWeaponClassForJobs(new Set(['GLA', 'PLD']))).toBe('bt_swd_sld')
+  })
+
+  it('returns undefined when no job has an authored resident idle', () => {
+    expect(idleWeaponClassForJobs(new Set(['SGE']))).toBeUndefined()
+    expect(idleWeaponClassForJobs(new Set(['CRP', 'BTN']))).toBeUndefined()
+    expect(idleWeaponClassForJobs(new Set())).toBeUndefined()
   })
 })

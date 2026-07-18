@@ -45,6 +45,15 @@ describe('character asset planning', () => {
     ])
   })
 
+  it('prefers the weapon idle then falls back to the unarmed idle', () => {
+    expect(idleAnimationCandidates('c0201', 'bt_dgr_dgr')).toEqual([
+      'chara/human/c0201/animation/a0001/bt_dgr_dgr/resident/idle.pap',
+      'chara/human/c0101/animation/a0001/bt_dgr_dgr/resident/idle.pap',
+      'chara/human/c0201/animation/a0001/bt_common/resident/idle.pap',
+      'chara/human/c0101/animation/a0001/bt_common/resident/idle.pap',
+    ])
+  })
+
   it('adds the male Midlander equipment fallback', () => {
     expect(equipmentModelCandidates(bodyItem, 'c0901')).toEqual([
       'chara/equipment/e0190/model/c0901e0190_top.mdl',
