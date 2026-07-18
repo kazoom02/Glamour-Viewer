@@ -173,6 +173,16 @@ interface RawCatalog {
   animations: string[]
 }
 
+/**
+ * The picker only surfaces three motions: the resting idle (`resident/idle`)
+ * and the draw/sheath weapon clips (`cbbp_a_activ` / `cbbp_a_deact`). Everything
+ * else in the bundled catalog is filtered out.
+ */
+function isSurfacedAnimation(entry: CatalogAnimation): boolean {
+  if (entry.sub === 'resident' && entry.papFile === 'idle') return true
+  return entry.internal === 'cbbp_a_activ' || entry.internal === 'cbbp_a_deact'
+}
+
 let catalogPromise: Promise<CatalogAnimation[]> | undefined
 
 /** Lazily fetches and parses the bundled animation catalog (cached on success). */
@@ -182,7 +192,7 @@ export function loadAnimationCatalog(): Promise<CatalogAnimation[]> {
     if (!response.ok) throw new Error(`The animation catalog failed to load (${response.status}).`)
     const raw = (await response.json()) as RawCatalog
     if (!Array.isArray(raw.animations)) throw new Error('The animation catalog is malformed.')
-    return raw.animations.map(toCatalogAnimation)
+    return raw.animations.map(toCatalogAnimation).filter(isSurfacedAnimation)
   })().catch((reason) => {
     // Don't cache a transient failure — allow the next mount to retry.
     catalogPromise = undefined
