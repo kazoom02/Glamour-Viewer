@@ -67,6 +67,7 @@ const WEAPON_CLASS_LABELS: Record<string, string> = {
   bt_brs_plt: 'Brush & palette',
   bt_clw_clw: 'Fist weapons',
   bt_dgr_dgr: 'Daggers',
+  bt_jst_sld: 'Nouliths',
   bt_nin_nin: 'Ninja blades',
   bt_swd_emp: 'Sword & shield',
   bt_swd_sld: 'Sword & shield',
@@ -92,7 +93,7 @@ export function weaponClassLabel(weaponClass: string): string {
 /**
  * FFXIV job/class codes → the weapon animation class whose standing `resident/idle`
  * loop the job uses. Only classes that actually ship a `{class}/resident/idle.pap`
- * are listed; jobs whose weapon has no authored resident idle (Sage, Reaper,
+ * are listed; jobs whose weapon has no authored resident idle (Reaper,
  * crafters, non-fisher gatherers…) are omitted and fall back to the
  * unarmed `bt_common` idle.
  */
@@ -104,6 +105,7 @@ const JOB_IDLE_WEAPON_CLASS: Record<string, string> = {
   CNJ: 'bt_stf_sld', WHM: 'bt_stf_sld', THM: 'bt_stf_sld', BLM: 'bt_stf_sld',
   ACN: 'bt_2bk_emp', SCH: 'bt_2bk_emp', SMN: 'bt_2bk_emp',
   AST: 'bt_2gl_emp',
+  SGE: 'bt_jst_sld',
   PGL: 'bt_clw_clw', MNK: 'bt_clw_clw',
   LNC: 'bt_2sp_emp', DRG: 'bt_2sp_emp',
   ROG: 'bt_dgr_dgr', NIN: 'bt_dgr_dgr',
