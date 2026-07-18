@@ -886,12 +886,12 @@ function syncSageWeaponIdle(
     const localAxis = localAxes.get(weaponName)
     if (localAxis) {
       const currentWorldAxis = localAxis.clone().applyQuaternion(sourceWorldRotation).normalize()
-      const horizontalWorldAxis = new THREE.Vector3(1, 0, 0).applyQuaternion(rootRotation).normalize()
-      // A principal axis has no direction; choose the sign requiring the smaller
-      // correction so the noulith does not flip end-for-end between frames.
-      if (currentWorldAxis.dot(horizontalWorldAxis) < 0) horizontalWorldAxis.negate()
-      const horizontalCorrection = new THREE.Quaternion().setFromUnitVectors(currentWorldAxis, horizontalWorldAxis)
-      sourceWorldRotation.premultiply(horizontalCorrection).normalize()
+      // Character +Z is forward. Use the same directed target for every piece
+      // instead of choosing the nearest horizontal direction, which made half
+      // of the nouliths face left and the other half face right.
+      const forwardWorldAxis = new THREE.Vector3(0, 0, 1).applyQuaternion(rootRotation).normalize()
+      const forwardCorrection = new THREE.Quaternion().setFromUnitVectors(currentWorldAxis, forwardWorldAxis)
+      sourceWorldRotation.premultiply(forwardCorrection).normalize()
     }
     const parentWorldRotation = parent.getWorldQuaternion(new THREE.Quaternion())
     target.quaternion.copy(parentWorldRotation.invert().multiply(sourceWorldRotation)).normalize()
