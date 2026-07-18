@@ -710,7 +710,9 @@ function equipmentTarget(
 //   • tip points the wrong way → negate DIRECTION
 //   • saya lies flat / edge-on wrong → change ROLL_DEG (±90 / 180)
 const HIP_SCABBARD_BONES = ['j_kosi', 'n_hara', 'j_sebo_a']
-const HIP_SCABBARD_OFFSET: readonly [number, number, number] = [0.11, -0.12, 0.03]
+// Keep the mount outside the left hip and slightly behind the pelvis so the
+// first section of the scabbard does not intersect the character mesh.
+const HIP_SCABBARD_OFFSET: readonly [number, number, number] = [0.19, -0.12, -0.04]
 const HIP_SCABBARD_DIRECTION: readonly [number, number, number] = [0.08, -0.62, -0.78]
 const HIP_SCABBARD_PIVOT_FRACTION = 0.1
 const HIP_SCABBARD_ROLL_DEG = 90
