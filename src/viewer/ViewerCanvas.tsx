@@ -849,10 +849,19 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
   // Set once the character is built; loads and plays a catalog animation on the
   // live rig. Null until ready and while the effect is torn down.
   const playCatalogAnimation = useRef<((entry: CatalogAnimation, options?: { once?: boolean }) => Promise<void>) | null>(null)
+  // Plays the draw or sheath transition once, then loops into the resting idle
+  // (the weapon-specific idle when drawing, the unarmed idle when sheathing).
+  const playWeaponTransition = useRef<((weaponClass: string, drawing: boolean) => Promise<void>) | null>(null)
+  // Removes any pending "transition finished → resting idle" listener.
+  const weaponTransitionCleanup = useRef<(() => void) | null>(null)
   // The live character group and the resolved idle weapon class, so the display
   // buttons can toggle gear visibility and play the draw/sheath transition.
   const characterGroupRef = useRef<THREE.Group | null>(null)
   const idleWeaponClassRef = useRef('bt_common')
+  // Whether the weapon is currently drawn; read by the rebuild so the resting idle
+  // survives customization changes without re-sheathing. Defaults to drawn so an
+  // equipped weapon shows its weapon-specific idle on load.
+  const weaponDrawnRef = useRef(true)
   // Gear-visibility toggles are held in refs too so the (visibility-agnostic)
   // character rebuild can re-apply them to the freshly built group.
   const weaponsHiddenRef = useRef(false)
@@ -879,7 +888,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
   const [animDiag, setAnimDiag] = useState<string>()
   const [weaponsHidden, setWeaponsHidden] = useState(false)
   const [headgearHidden, setHeadgearHidden] = useState(false)
-  const [weaponDrawn, setWeaponDrawn] = useState(false)
+  const [weaponDrawn, setWeaponDrawn] = useState(true)
 
   // Show/hide the equipped gear by name on the live scene, without a full rebuild.
   const applyGearVisibility = () => {
@@ -898,24 +907,28 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [weaponsHidden, headgearHidden])
 
+  useEffect(() => {
+    weaponDrawnRef.current = weaponDrawn
+  }, [weaponDrawn])
+
   // 1 — Hide/show the main- and off-hand weapons. 2 — Hide/show the headgear.
   const toggleWeapons = () => setWeaponsHidden((hidden) => !hidden)
   const toggleHeadgear = () => setHeadgearHidden((hidden) => !hidden)
 
-  // 4 — Play the weapon's draw (drawing) or sheath (putting away) transition once.
+  // 4 — Draw or sheathe the weapon: play the transition once, then settle into the
+  // matching resting idle (weapon idle when drawn, unarmed idle when sheathed).
   const onDrawSheath = async () => {
-    const play = playCatalogAnimation.current
+    const play = playWeaponTransition.current
     const weaponClass = idleWeaponClassRef.current
     if (!play || weaponClass === 'bt_common' || !equipped.mainHand) return
-    const drawn = !weaponDrawn
+    const drawing = !weaponDrawn
     setAnimBusy(true)
     setAnimNotice(undefined)
     try {
-      const suffix = drawn ? 'cbbp_a_activ' : 'cbbp_a_deact'
-      await play(toCatalogAnimation(`${weaponClass}-resident-sub-${suffix}`), { once: true })
-      setWeaponDrawn(drawn)
+      await play(weaponClass, drawing)
+      setWeaponDrawn(drawing)
     } catch {
-      setAnimNotice(`Could not ${drawn ? 'draw' : 'sheathe'} the weapon for this class.`)
+      setAnimNotice(`Could not ${drawing ? 'draw' : 'sheathe'} the weapon for this class.`)
     } finally {
       setAnimBusy(false)
     }
@@ -1036,16 +1049,16 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
     idleAction.current = null
     idleMixer.current = null
     playCatalogAnimation.current = null
+    playWeaponTransition.current = null
     playExternalMotion.current = null
     setIdleLabel('Idle')
     setIdleState(source.kind === 'local' ? 'loading' : 'unavailable')
-    // A character rebuild (gear/customization change) reverts to idle, so clear
-    // any catalog selection highlight and stale notice, and re-sheathe the weapon
-    // (the reloaded resident idle is the sheathed pose).
+    // A character rebuild (gear/customization change) reverts to the resting idle,
+    // so clear any catalog selection highlight and stale notice. The draw/sheath
+    // state is intentionally preserved (weaponDrawnRef) across rebuilds.
     setActiveAnimId(undefined)
     setAnimNotice(undefined)
     setAnimDiag(undefined)
-    setWeaponDrawn(false)
 
     // A brighter neutral studio rig so dark, reflective gear reads as metal
     // instead of black. Neutral tone mapping still rolls off the highlights, so
@@ -1184,9 +1197,9 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           }
           rig = addCharacterRig(characterGroup, combinedSkeleton, bustScale)
           diagnostics.push(bustRigDiagnostic(rig, 'after CMP bind', bustScale))
-          // Match the standing idle to the equipped weapon (daggers → dagger idle,
-          // greatsword → greatsword idle, …). The weapon's job(s) select the
-          // animation class; anything unmapped keeps the unarmed idle.
+          // Resolve the weapon's animation class from its job(s) — used both for the
+          // resting idle when drawn and for the draw/sheath button. Anything unmapped
+          // stays on the unarmed idle.
           let idleWeaponClass = 'bt_common'
           const idleWeapon = equipped.mainHand
           if (idleWeapon?.classJobCategoryId) {
@@ -1198,8 +1211,11 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             }
           }
           idleWeaponClassRef.current = idleWeaponClass
-          diagnostics.push(`idle weapon class: ${idleWeaponClass} (mainHand=${idleWeapon?.name ?? 'none'})`)
-          idleAnimationPromise = loadLocalIdleAnimation(source, idleAnimationCandidates(raceCode, idleWeaponClass))
+          // Sheathed rests on the unarmed idle; drawn rests on the weapon idle. The
+          // draw state survives customization rebuilds (weaponDrawnRef).
+          const restingClass = weaponDrawnRef.current && idleWeaponClass !== 'bt_common' ? idleWeaponClass : 'bt_common'
+          diagnostics.push(`idle: weaponClass=${idleWeaponClass} drawn=${weaponDrawnRef.current} resting=${restingClass} (mainHand=${idleWeapon?.name ?? 'none'})`)
+          idleAnimationPromise = loadLocalIdleAnimation(source, idleAnimationCandidates(raceCode, restingClass))
         } catch (reason) {
           failures.push(`base skeleton: ${reason instanceof Error ? reason.message : String(reason)}`)
           setIdleState('unavailable')
@@ -1512,6 +1528,36 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             setAnimDiag(diag)
             playClipOnRig(clip, entry.label, decoded.blendHint, options?.once)
           }
+          playWeaponTransition.current = async (weaponClass: string, drawing: boolean) => {
+            const transitionEntry = toCatalogAnimation(`${weaponClass}-resident-sub-${drawing ? 'cbbp_a_activ' : 'cbbp_a_deact'}`)
+            // Drawing settles into the weapon idle; sheathing into the unarmed idle.
+            const restingClass = drawing ? weaponClass : 'bt_common'
+            const [transitionDecoded, restingDecoded] = await Promise.all([
+              loadLocalAnimation(localSource, catalogAnimationCandidates(transitionEntry, raceCode), transitionEntry.internal || undefined),
+              loadLocalIdleAnimation(localSource, idleAnimationCandidates(raceCode, restingClass)),
+            ])
+            if (disposed) return
+            const transitionClip = animationClipFromDecoded(transitionDecoded, animationRig.skeleton, animationBustScale).clip
+            const restingClip = animationClipFromDecoded(restingDecoded, animationRig.skeleton, animationBustScale).clip
+            const restingLabel = restingDecoded.name || (drawing ? 'Weapon idle' : 'Idle')
+            // Play the transition once, then loop into the resting idle when it ends.
+            playClipOnRig(transitionClip, drawing ? 'Draw weapon' : 'Sheathe weapon', transitionDecoded.blendHint, true)
+            const mixer = idleMixer.current
+            const transitionAction = idleAction.current
+            weaponTransitionCleanup.current?.()
+            weaponTransitionCleanup.current = null
+            if (!mixer || !transitionAction) return
+            const onFinished = (event: { action: THREE.AnimationAction }) => {
+              if (event.action !== transitionAction) return
+              mixer.removeEventListener('finished', onFinished)
+              weaponTransitionCleanup.current = null
+              // Skip if the rig was torn down or another clip took over meanwhile.
+              if (disposed || idleAction.current !== transitionAction) return
+              playClipOnRig(restingClip, restingLabel, restingDecoded.blendHint, false)
+            }
+            mixer.addEventListener('finished', onFinished)
+            weaponTransitionCleanup.current = () => mixer.removeEventListener('finished', onFinished)
+          }
           playExternalMotion.current = async (data: ArrayBuffer, label: string) => {
             const { GLTFLoader } = await import('three/examples/jsm/loaders/GLTFLoader.js')
             const gltf = await new Promise<{ animations: THREE.AnimationClip[] }>((resolve, reject) => {
@@ -1647,7 +1693,10 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       observer.disconnect()
       controls.dispose()
       avfxRuntimes.forEach((runtime) => runtime.dispose())
+      weaponTransitionCleanup.current?.()
+      weaponTransitionCleanup.current = null
       playCatalogAnimation.current = null
+      playWeaponTransition.current = null
       playExternalMotion.current = null
       activeIdleMixer?.stopAllAction()
       if (idleMixer.current === activeIdleMixer) {
