@@ -16,7 +16,7 @@ import {
   type CharacterRaceCode,
 } from '../asset-source/characterPlan'
 import { loadLocalAnimation, loadLocalIdleAnimation, type DecodedAnimation } from '../asset-source/animationLoader'
-import { catalogAnimationCandidates, idleWeaponClassForJobs, isDualWieldJobs, isHeldSubWeaponJobs, toCatalogAnimation, type CatalogAnimation } from '../asset-source/animationCatalog'
+import { catalogAnimationCandidates, idleWeaponClassForJobs, isCompactHipSubWeaponJobs, isDualWieldJobs, toCatalogAnimation, type CatalogAnimation } from '../asset-source/animationCatalog'
 import { getClassJobCategories } from '../catalog/catalogCache'
 import { createLocalAssetReader } from '../asset-source/sqpack'
 import { HUMAN_CMP_PATH, loadLocalBustScale, type BustScale } from '../asset-source/cmp'
@@ -403,6 +403,7 @@ function addDecodedModel(
     const specularColor = decodedMaterial?.textures.specularColor ?? decodedMaterial?.textures.specular
     const specularIntensity = decodedMaterial?.textures.specularIntensity
     const alphaMode = decodedMaterial?.alphaMode ?? 'opaque'
+    const alphaCutoff = materialAlphaCutoff(shaderPackage, alphaMode, Boolean(diffuse))
     const isIris = decodedMaterial?.shaderPackage.toLowerCase() === 'iris.shpk' || /_iri_[a-z]\.mtrl$/.test(materialPath)
     const isFaceMaterial = /mt_c\d{4}f\d{4}/.test(materialPath)
     // Which appearance color drives this material's tint. Resolved once so the
@@ -510,7 +511,7 @@ function addDecodedModel(
       ior: isGearShader ? 2.0 : 1.45,
       clearcoat: 0,
       sheen: 0,
-      alphaTest: materialAlphaCutoff(shaderPackage, alphaMode, Boolean(diffuse)),
+      alphaTest: alphaCutoff,
       transparent: alphaMode === 'blend',
       depthWrite: alphaMode !== 'blend',
       side: materialRendersBackfaces(shaderPackage, materialPath, decodedMaterial?.renderBackfaces, alphaMode)
@@ -522,6 +523,10 @@ function addDecodedModel(
       polygonOffsetFactor: isIris ? -1 : 0,
       polygonOffsetUnits: isIris ? -1 : 0,
     })
+    // MSAA turns the hard cutout boundary into sub-pixel coverage while retaining
+    // depth writes between layered hairstyle cards. This avoids both rectangular
+    // seams and noisy blended-card sorting around bangs and ponytails.
+    material.alphaToCoverage = isHairMaterial && alphaCutoff > 0
     const activeFacePaint = facePaintTexture && customization?.facePaint && renderPart.uvs2
       ? facePaintTexture
       : undefined
@@ -807,6 +812,53 @@ function hipWeaponTarget(character: THREE.Group, rig: CharacterRig | undefined, 
   return {
     target: mount,
     diagnostic: `placement=hip bone=${hip?.name ?? 'character-root'} modelSize=${formatVector(size.toArray())} longestModelAxis=${['x', 'y', 'z'][longestAxisIndex]} pivot=${Math.round(HIP_SCABBARD_PIVOT_FRACTION * 100)}%-${['x', 'y', 'z'][longestAxisIndex]} anchor=${formatVector(anchor.toArray())} direction=${formatVector(desiredDirection.toArray())} roll=${HIP_SCABBARD_ROLL_DEG}° fallback=${!hip}`,
+  }
+}
+
+// Machinist's ModelSub is the compact aetherotransformer that hangs beside the
+// left waist. It needs a high, almost vertical mount; the long-scabbard pivot
+// would send this short device backward and below the thigh.
+const COMPACT_HIP_OFFSET: readonly [number, number, number] = [0.18, -0.03, 0.015]
+const COMPACT_HIP_DIRECTION: readonly [number, number, number] = [0.03, -0.995, -0.095]
+const COMPACT_HIP_PIVOT_FRACTION = 0.08
+const COMPACT_HIP_ROLL_DEG = 90
+
+function compactHipWeaponTarget(character: THREE.Group, rig: CharacterRig | undefined, model: DecodedModel): EquipmentAttachment {
+  if (!rig) return { target: character, diagnostic: 'placement=compact-hip bone=unavailable fallback=character-root' }
+  character.updateMatrixWorld(true)
+  const hip = HIP_SCABBARD_BONES.map((name) => rig.skeleton.bones.find((bone) => bone.name === name)).find(Boolean)
+  const anchor = hip ? hip.getWorldPosition(new THREE.Vector3()) : new THREE.Vector3(0, 0.95, 0)
+  anchor.add(new THREE.Vector3(...COMPACT_HIP_OFFSET))
+  const size = new THREE.Vector3(
+    model.bounds.max[0] - model.bounds.min[0],
+    model.bounds.max[1] - model.bounds.min[1],
+    model.bounds.max[2] - model.bounds.min[2],
+  )
+  const longestAxisIndex = size.x >= size.y && size.x >= size.z ? 0 : size.y >= size.z ? 1 : 2
+  const longestAxis = new THREE.Vector3(longestAxisIndex === 0 ? 1 : 0, longestAxisIndex === 1 ? 1 : 0, longestAxisIndex === 2 ? 1 : 0)
+  const desiredDirection = new THREE.Vector3(...COMPACT_HIP_DIRECTION).normalize()
+  const orientation = new THREE.Quaternion().setFromUnitVectors(longestAxis, desiredDirection)
+  const roll = new THREE.Quaternion().setFromAxisAngle(desiredDirection, (COMPACT_HIP_ROLL_DEG * Math.PI) / 180)
+  orientation.premultiply(roll)
+  const pivot = new THREE.Vector3(
+    (model.bounds.min[0] + model.bounds.max[0]) / 2,
+    (model.bounds.min[1] + model.bounds.max[1]) / 2,
+    (model.bounds.min[2] + model.bounds.max[2]) / 2,
+  )
+  pivot.setComponent(
+    longestAxisIndex,
+    model.bounds.min[longestAxisIndex] + size.getComponent(longestAxisIndex) * COMPACT_HIP_PIVOT_FRACTION,
+  )
+  const mount = new THREE.Group()
+  mount.name = 'offHand-compact-hip-mount'
+  mount.quaternion.copy(orientation)
+  mount.position.copy(anchor).sub(pivot.clone().applyQuaternion(orientation))
+  character.add(mount)
+  character.updateMatrixWorld(true)
+  if (hip) hip.attach(mount)
+  return {
+    target: mount,
+    diagnostic: `placement=compact-hip bone=${hip?.name ?? 'character-root'} modelSize=${formatVector(size.toArray())} longestModelAxis=${['x', 'y', 'z'][longestAxisIndex]} pivot=${Math.round(COMPACT_HIP_PIVOT_FRACTION * 100)}%-${['x', 'y', 'z'][longestAxisIndex]} anchor=${formatVector(anchor.toArray())} direction=${formatVector(desiredDirection.toArray())} roll=${COMPACT_HIP_ROLL_DEG}° fallback=${!hip}`,
   }
 }
 
@@ -1213,13 +1265,14 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       candidates: equipmentModelCandidates(item, raceCode),
       imcOptional: false,
       hipMount: false,
+      compactHipMount: false,
       shieldMount: false,
       leftHandMount: false,
     }))
     // A main-hand weapon's ModelSub becomes a second held off-hand weapon for true
-    // dual-wield jobs, a held utility device (Machinist), or a left-hip scabbard
-    // (Samurai). The caller resolves the appropriate mount from the equip jobs.
-    const addSubWeaponOffHand = (hipMount: boolean, shieldMount: boolean, leftHandMount: boolean) => {
+    // dual-wield jobs, a compact hip device (Machinist), or a long left-hip
+    // scabbard (Samurai). The caller resolves the mount from the equip jobs.
+    const addSubWeaponOffHand = (hipMount: boolean, compactHipMount: boolean, shieldMount: boolean) => {
       const mainHand = equipped.mainHand
       if (!mainHand?.weaponSubModel || equipped.offHand) return
       const sub = mainHand.weaponSubModel
@@ -1240,8 +1293,9 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
         // reuses the main set's material, so a missing IMC here isn't a failure.
         imcOptional: true,
         hipMount,
+        compactHipMount,
         shieldMount,
-        leftHandMount,
+        leftHandMount: false,
       })
     }
     const characterPlans = allCharacterPlans.filter((plan) => !plan.coveredBy || !equipped[plan.coveredBy])
@@ -1322,14 +1376,14 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           const idleWeapon = equipped.mainHand
           let mainHandUsesShield = Boolean(idleWeapon && /\b(?:GLA|PLD|Gladiator|Paladin)\b/i.test(idleWeapon.jobs))
           let mainHandUsesLeftHand = Boolean(idleWeapon && /\b(?:AST|Astrologian)\b/i.test(idleWeapon.jobs))
-          let subWeaponUsesLeftHand = Boolean(idleWeapon && /\b(?:MCH|Machinist)\b/i.test(idleWeapon.jobs))
+          let subWeaponUsesCompactHip = Boolean(idleWeapon && /\b(?:MCH|Machinist)\b/i.test(idleWeapon.jobs))
           if (idleWeapon?.classJobCategoryId) {
             try {
               const jobs = (await getClassJobCategories()).get(idleWeapon.classJobCategoryId)
               if (jobs) {
                 idleWeaponClass = idleWeaponClassForJobs(jobs) ?? 'bt_common'
                 mainHandDualWield = isDualWieldJobs(jobs)
-                subWeaponUsesLeftHand ||= isHeldSubWeaponJobs(jobs)
+                subWeaponUsesCompactHip ||= isCompactHipSubWeaponJobs(jobs)
                 mainHandUsesShield ||= idleWeaponClass === 'bt_swd_sld'
                 mainHandUsesLeftHand ||= idleWeaponClass === 'bt_2gl_emp'
               }
@@ -1344,9 +1398,9 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             if (plan.slot === 'offHand' && mainHandUsesShield) plan.shieldMount = true
             if (plan.slot === 'mainHand' && mainHandUsesLeftHand) plan.leftHandMount = true
           }
-          addSubWeaponOffHand(!mainHandDualWield && !subWeaponUsesLeftHand, mainHandUsesShield, subWeaponUsesLeftHand)
+          addSubWeaponOffHand(!mainHandDualWield && !subWeaponUsesCompactHip, subWeaponUsesCompactHip, mainHandUsesShield)
           diagnostics.push(`weapon handedness: class=${idleWeaponClass} forceMainLeft=${mainHandUsesLeftHand}`)
-          diagnostics.push(`off-hand weapon: dualWield=${mainHandDualWield} heldSub=${subWeaponUsesLeftHand} shield=${mainHandUsesShield} placement=${mainHandUsesShield ? 'shield' : mainHandDualWield || subWeaponUsesLeftHand ? 'hand' : 'hip'} sub=${idleWeapon?.weaponSubModel ? `${idleWeapon.weaponSubModel.set}/${idleWeapon.weaponSubModel.base}` : 'none'}`)
+          diagnostics.push(`off-hand weapon: dualWield=${mainHandDualWield} compactHipSub=${subWeaponUsesCompactHip} shield=${mainHandUsesShield} placement=${mainHandUsesShield ? 'shield' : mainHandDualWield ? 'hand' : subWeaponUsesCompactHip ? 'compact-hip' : 'hip'} sub=${idleWeapon?.weaponSubModel ? `${idleWeapon.weaponSubModel.set}/${idleWeapon.weaponSubModel.base}` : 'none'}`)
           // Sheathed rests on the unarmed idle; drawn rests on the weapon idle. The
           // draw state survives customization rebuilds (weaponDrawnRef).
           const restingClass = weaponDrawnRef.current && idleWeaponClass !== 'bt_common' ? idleWeaponClass : 'bt_common'
@@ -1480,7 +1534,9 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             const animatedMaterialCount = animatedMaterials.length
             const attachment = !weapon
               ? { target: characterGroup, diagnostic: '' }
-              : plan.hipMount
+              : plan.compactHipMount
+                ? compactHipWeaponTarget(characterGroup, rig, result.model)
+                : plan.hipMount
                 ? hipWeaponTarget(characterGroup, rig, result.model)
                 : equipmentTarget(
                     characterGroup,

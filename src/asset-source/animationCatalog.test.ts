@@ -3,7 +3,7 @@ import { idleAnimationCandidates } from './characterPlan'
 import {
   catalogAnimationCandidates,
   idleWeaponClassForJobs,
-  isHeldSubWeaponJobs,
+  isCompactHipSubWeaponJobs,
   parseAnimationId,
   toCatalogAnimation,
   weaponClassLabel,
@@ -98,9 +98,9 @@ describe('idle weapon class resolution', () => {
   })
 })
 
-describe('held secondary weapon resolution', () => {
-  it('holds the Machinist utility device in the left hand without treating other sheaths as held', () => {
-    expect(isHeldSubWeaponJobs(new Set(['MCH']))).toBe(true)
-    expect(isHeldSubWeaponJobs(new Set(['SAM']))).toBe(false)
+describe('compact hip secondary weapon resolution', () => {
+  it('gives Machinist a compact hip device without changing long sheaths', () => {
+    expect(isCompactHipSubWeaponJobs(new Set(['MCH']))).toBe(true)
+    expect(isCompactHipSubWeaponJobs(new Set(['SAM']))).toBe(false)
   })
 })

@@ -56,9 +56,13 @@ function cleanedNormal(texture: DecodedTexture): DecodedTexture {
 export function materialAlphaMode(shaderPackage: string, materialReference: string, shaderFlags = 0): MaterialAlphaMode {
   const shader = shaderPackage.toLowerCase()
   const face = /mt_c\d{4}f\d{4}/i.test(materialReference)
+  // Character hairstyles are layered cutout cards. Their MTRL commonly carries
+  // the generic translucency flag (for example 0x1d), but treating that as a
+  // conventional blended surface disables depth writes and exposes the scalp
+  // between overlapping cards. Face hair remains a blended overlay.
+  if (shader === 'hair.shpk') return face ? 'blend' : 'mask'
   if ((shaderFlags & 0x10) !== 0) return 'blend'
   if (shader === 'characterglass.shpk' || shader === 'charactertattoo.shpk') return 'blend'
-  if (shader === 'hair.shpk') return face ? 'blend' : 'mask'
   if (shader === 'skin.shpk') return face ? 'mask' : 'opaque'
   if (shader === 'character.shpk' || shader === 'characterlegacy.shpk') return 'mask'
   return 'opaque'
@@ -82,7 +86,7 @@ export function materialAlphaCutoff(
   hasDiffuse: boolean,
 ): number {
   if (!hasDiffuse || alphaMode !== 'mask') return 0
-  return shaderPackage.toLowerCase() === 'hair.shpk' ? 0.34 : 0.46
+  return shaderPackage.toLowerCase() === 'hair.shpk' ? 0.15 : 0.46
 }
 
 /** Only gear-style shaders interpret a MTRL color table as the character PBR lookup. */

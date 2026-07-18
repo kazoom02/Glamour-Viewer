@@ -6,6 +6,17 @@ import type { DecodedAnimation } from '../asset-source/animationLoader'
 const ROOT_TRANSLATION_BONES = new Set(['n_root'])
 const BUST_BONES = new Set(['j_mune_l', 'j_mune_r'])
 
+/** Bones driven by the game's secondary-motion simulation, not pose clips. */
+function isPhysicsDrivenBone(name: string): boolean {
+  const lower = name.toLowerCase()
+  return lower.includes('kami')
+    || lower.includes('hair')
+    || lower.startsWith('j_ex_h')
+    || lower.includes('skirt')
+    || lower.includes('sode')
+    || lower.includes('manto')
+}
+
 function stableRootTranslations(values: Float32Array): Float32Array {
   const result = new Float32Array(values)
   for (let offset = 3; offset < result.length; offset += 3) {
@@ -78,8 +89,7 @@ export function animationClipFromDecoded(
     // Emotes often contain baked garbage tracks for hair/cloth bones from the animator's reference rig.
     // In-game, Havok physics overrides these. In our viewer, applying them causes hair to explode or
     // stick straight up. We explicitly ignore hair bones so they stay in their stable bind pose.
-    const lowerBoneName = bone?.name.toLowerCase() ?? ''
-    if (bone && (lowerBoneName.includes('kami') || lowerBoneName.includes('hair') || lowerBoneName.includes('skirt') || lowerBoneName.includes('sode') || lowerBoneName.includes('manto'))) {
+    if (bone && isPhysicsDrivenBone(bone.name)) {
       bone = undefined
     }
 

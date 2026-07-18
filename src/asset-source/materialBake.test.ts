@@ -175,6 +175,7 @@ describe('character colorset baking', () => {
   it('uses face-aware alpha modes for skin and hair overlays', () => {
     const face = '/mt_c0101f0001_etc_a.mtrl'
     expect(materialAlphaMode('hair.shpk', face)).toBe('blend')
+    expect(materialAlphaMode('hair.shpk', '/mt_c0201h0014_hir_a.mtrl', 0x1d)).toBe('mask')
     expect(materialAlphaMode('skin.shpk', face)).toBe('mask')
     expect(materialAlphaMode('skin.shpk', '/mt_c0101b0001_a.mtrl')).toBe('opaque')
     expect(materialAlphaMode('character.shpk', '/mt_w2101b0062_a.mtrl', 0x10)).toBe('blend')
@@ -186,7 +187,7 @@ describe('character colorset baking', () => {
   })
 
   it('uses the soft hair-card cutoff only for masked hair with a diffuse texture', () => {
-    expect(materialAlphaCutoff('hair.shpk', 'mask', true)).toBe(0.34)
+    expect(materialAlphaCutoff('hair.shpk', 'mask', true)).toBe(0.15)
     expect(materialAlphaCutoff('hair.shpk', 'blend', true)).toBe(0)
     expect(materialAlphaCutoff('character.shpk', 'mask', true)).toBe(0.46)
   })

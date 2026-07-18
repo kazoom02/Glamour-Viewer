@@ -152,11 +152,11 @@ export function isDualWieldJobs(jobCodes: Iterable<string>): boolean {
   return false
 }
 
-/** Jobs whose weapon ModelSub is a held utility device rather than a hip sheath. */
-const HELD_SUB_WEAPON_JOBS = new Set(['MCH'])
+/** Jobs whose weapon ModelSub is a compact hip device rather than a long sheath. */
+const COMPACT_HIP_SUB_WEAPON_JOBS = new Set(['MCH'])
 
-export function isHeldSubWeaponJobs(jobCodes: Iterable<string>): boolean {
-  for (const code of jobCodes) if (HELD_SUB_WEAPON_JOBS.has(code)) return true
+export function isCompactHipSubWeaponJobs(jobCodes: Iterable<string>): boolean {
+  for (const code of jobCodes) if (COMPACT_HIP_SUB_WEAPON_JOBS.has(code)) return true
   return false
 }
 
