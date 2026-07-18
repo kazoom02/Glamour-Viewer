@@ -54,8 +54,10 @@ describe('character asset planning', () => {
     ])
   })
 
-  it('uses the Sage resident idle whose four attachment bones fly around the character', () => {
+  it('prefers the Sage battle-pose loop whose attachment bones animate the drawn formation', () => {
     expect(idleAnimationCandidates('c0201', 'bt_jst_sld')).toEqual([
+      'chara/human/c0201/animation/a0001/bt_jst_sld/emote/b_pose01_loop.pap',
+      'chara/human/c0101/animation/a0001/bt_jst_sld/emote/b_pose01_loop.pap',
       'chara/human/c0201/animation/a0001/bt_jst_sld/resident/idle.pap',
       'chara/human/c0101/animation/a0001/bt_jst_sld/resident/idle.pap',
       'chara/human/c0201/animation/a0001/bt_common/resident/idle.pap',
