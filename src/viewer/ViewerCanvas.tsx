@@ -886,10 +886,10 @@ function syncSageWeaponIdle(
     const localAxis = localAxes.get(weaponName)
     if (localAxis) {
       const currentWorldAxis = localAxis.clone().applyQuaternion(sourceWorldRotation).normalize()
-      // Character +Z is forward. Use the same directed target for every piece
-      // instead of choosing the nearest horizontal direction, which made half
-      // of the nouliths face left and the other half face right.
-      const forwardWorldAxis = new THREE.Vector3(0, 0, 1).applyQuaternion(rootRotation).normalize()
+      // Character +Z is forward, but the geometry-derived principal axis points
+      // from the noulith's tip toward its rear housing. Negate the target so the
+      // pointed end of all four pieces faces forward like the in-game formation.
+      const forwardWorldAxis = new THREE.Vector3(0, 0, -1).applyQuaternion(rootRotation).normalize()
       const forwardCorrection = new THREE.Quaternion().setFromUnitVectors(currentWorldAxis, forwardWorldAxis)
       sourceWorldRotation.premultiply(forwardCorrection).normalize()
     }
@@ -1528,6 +1528,10 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           let mainHandUsesLeftHand = Boolean(idleWeapon && /\b(?:AST|Astrologian)\b/i.test(idleWeapon.jobs))
           let mainHandUsesSageFormation = Boolean(idleWeapon && /\b(?:SGE|Sage)\b/i.test(idleWeapon.jobs))
           let subWeaponUsesCompactHip = Boolean(idleWeapon && /\b(?:MCH|Machinist)\b/i.test(idleWeapon.jobs))
+          // Local installs must not depend on XIVAPI being reachable to select
+          // Sage's authored cbbm_id0 combat idle. The item job text is already
+          // sufficient to identify both the formation and its animation class.
+          if (mainHandUsesSageFormation) idleWeaponClass = 'bt_jst_sld'
           if (idleWeapon?.classJobCategoryId) {
             try {
               const jobs = (await getClassJobCategories()).get(idleWeapon.classJobCategoryId)
@@ -1540,7 +1544,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
                 mainHandUsesSageFormation ||= idleWeaponClass === 'bt_jst_sld'
               }
             } catch {
-              // XIVAPI unavailable — keep the unarmed idle and no off-hand weapon.
+              // Keep any class identified directly from the item's local job text.
             }
           }
           idleWeaponClassRef.current = idleWeaponClass
