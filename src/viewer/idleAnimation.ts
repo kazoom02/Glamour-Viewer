@@ -78,7 +78,8 @@ export function animationClipFromDecoded(
     // Emotes often contain baked garbage tracks for hair/cloth bones from the animator's reference rig.
     // In-game, Havok physics overrides these. In our viewer, applying them causes hair to explode or
     // stick straight up. We explicitly ignore hair bones so they stay in their stable bind pose.
-    if (bone && (bone.name.includes('kami') || bone.name.includes('skirt') || bone.name.includes('sode') || bone.name.includes('manto'))) {
+    const lowerBoneName = bone?.name.toLowerCase() ?? ''
+    if (bone && (lowerBoneName.includes('kami') || lowerBoneName.includes('hair') || lowerBoneName.includes('skirt') || lowerBoneName.includes('sode') || lowerBoneName.includes('manto'))) {
       bone = undefined
     }
 

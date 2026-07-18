@@ -53,6 +53,7 @@ import { animationClipFromDecoded } from './idleAnimation'
 import AnimationPicker from './AnimationPicker'
 import { createAvfxRuntime, type AvfxRuntime } from './avfxRuntime'
 import { subdivideCurvedMesh } from './geometryQuality'
+import { remapSkinIndices } from './skinBinding'
 import {
   applyBustDeformation,
   bustWeightSummary,
@@ -370,10 +371,14 @@ function addDecodedModel(
   for (const [index, part] of model.meshes.entries()) {
     if (slot && attributeMask !== undefined && !isVisibleEquipmentPart(part.attributes, slot, attributeMask)) continue
     if (label === 'character-face' && customization && !faceFeatureVisible(part.attributes, faceFeatureMask(customization))) continue
-    const renderPart = refineCurvature ? subdivideCurvedMesh(part) : part
     const materialPath = model.materialPaths[part.materialIndex]?.toLowerCase() ?? ''
     const decodedMaterial = decodedMaterials[materialPath.replaceAll('\\', '/')]
     const shaderPackage = decodedMaterial?.shaderPackage.toLowerCase() ?? ''
+    const isHairMaterial = /_hir_[a-z]\.mtrl$/.test(materialPath) || shaderPackage === 'hair.shpk'
+    // Hair cards also occur inside face/scalp models. Curving those thin,
+    // overlapping planes exposes their rectangular edges and makes the bangs
+    // look doubled, so preserve authored geometry regardless of model label.
+    const renderPart = refineCurvature && !isHairMaterial ? subdivideCurvedMesh(part) : part
     // The game's eye-occlusion shader is a multiply/shadow pass. Rendering it as
     // an opaque standard material covers the correctly textured iris in white.
     if (shaderPackage === 'characterocclusion.shpk') continue
@@ -404,7 +409,7 @@ function addDecodedModel(
     let tintKind: 'iris' | 'hair' | 'faceOverlay' | 'skin' | 'none' = 'none'
     if (customization) {
       if (isIris) tintKind = 'iris'
-      else if (/_hir_[a-z]\.mtrl$/.test(materialPath) || shaderPackage === 'hair.shpk') tintKind = 'hair'
+      else if (isHairMaterial) tintKind = 'hair'
       else if (shaderPackage.includes('tattoo') || /_etc_[a-z]\.mtrl$/.test(materialPath)) tintKind = 'faceOverlay'
       else if (shaderPackage === 'skin.shpk' || /b0001_[a-z]\.mtrl$/.test(materialPath) || isFaceMaterial) tintKind = 'skin'
     }
@@ -504,7 +509,7 @@ function addDecodedModel(
       ior: isGearShader ? 2.0 : 1.45,
       clearcoat: 0,
       sheen: 0,
-      alphaTest: diffuse && alphaMode === 'mask' ? (shaderPackage === 'hair.shpk' ? 0.34 : 0.46) : 0,
+      alphaTest: diffuse && alphaMode === 'mask' ? (shaderPackage === 'hair.shpk' ? 0.5 : 0.46) : 0,
       transparent: alphaMode === 'blend',
       depthWrite: alphaMode !== 'blend',
       side: decodedMaterial?.renderBackfaces ?? (alphaMode !== 'opaque' || shaderPackage === 'hair.shpk')
@@ -577,9 +582,18 @@ function addDecodedModel(
     }
     let skinIndices = renderPart.skinIndices
     if (skinIndices && rig) {
-      skinIndices = new Uint16Array(skinIndices).map((globalIndex) => (
-        rig.boneIndex.get(model.boneNames[globalIndex] ?? '') ?? 0
-      ))
+      const hairBinding = label === 'character-hair' || isHairMaterial
+      const remapped = remapSkinIndices(
+        skinIndices,
+        model.boneNames,
+        rig.boneIndex,
+        hairBinding ? 'j_kao' : undefined,
+      )
+      skinIndices = remapped.indices
+      if (remapped.missingBoneNames.length) {
+        geometry.userData.missingSkinBones = remapped.missingBoneNames
+        geometry.userData.skinFallbackBone = hairBinding ? 'j_kao' : 'n_root'
+      }
     }
     if (skinIndices) geometry.setAttribute('skinIndex', new THREE.BufferAttribute(skinIndices, 4))
     if (renderPart.skinWeights) geometry.setAttribute('skinWeight', new THREE.BufferAttribute(renderPart.skinWeights, 4))

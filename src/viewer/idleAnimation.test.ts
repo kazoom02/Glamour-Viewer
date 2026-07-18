@@ -86,4 +86,19 @@ describe('idle animation clip', () => {
     expect(boundTracks).toBe(1)
     expect(unboundTracks).toBe(1)
   })
+
+  it('drops named secondary-hair tracks regardless of name casing', () => {
+    const root = new THREE.Bone(); root.name = 'n_root'
+    const hair = new THREE.Bone(); hair.name = 'J_KAMI_A'
+    const { clip, boundTracks, unboundTracks } = animationClipFromDecoded(
+      animation('normal', [
+        track({ boneIndex: 0, boneName: 'n_root' }),
+        track({ boneIndex: 1, boneName: 'J_KAMI_A' }),
+      ]),
+      new THREE.Skeleton([root, hair]),
+    )
+    expect(clip.tracks.some((candidate) => candidate.name.startsWith('J_KAMI_A.'))).toBe(false)
+    expect(boundTracks).toBe(1)
+    expect(unboundTracks).toBe(1)
+  })
 })
