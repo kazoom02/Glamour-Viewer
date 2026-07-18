@@ -55,7 +55,7 @@ import AnimationPicker from './AnimationPicker'
 import { createAvfxRuntime, type AvfxRuntime } from './avfxRuntime'
 import { subdivideCurvedMesh } from './geometryQuality'
 import { remapSkinIndices } from './skinBinding'
-import { SAGE_WEAPON_BONE_MAP } from './sageWeapon'
+import { SAGE_WEAPON_FORMATION } from './sageWeapon'
 import {
   applyBustDeformation,
   bustWeightSummary,
@@ -773,6 +773,73 @@ function sageWeaponTarget(
   }
 }
 
+/** Finds each independently skinned noulith's principal axis in its bone space. */
+function sageWeaponLocalAxes(model: DecodedModel, rig: CharacterRig): Map<string, THREE.Vector3> {
+  const points = new Map<string, THREE.Vector3[]>()
+  const formationBones = new Set(Object.keys(SAGE_WEAPON_FORMATION))
+  for (const part of model.meshes) {
+    if (!part.skinIndices || !part.skinWeights) continue
+    const vertexCount = part.positions.length / 3
+    for (let vertex = 0; vertex < vertexCount; vertex += 1) {
+      let strongestComponent = 0
+      for (let component = 1; component < 4; component += 1) {
+        if (part.skinWeights[vertex * 4 + component]! > part.skinWeights[vertex * 4 + strongestComponent]!) {
+          strongestComponent = component
+        }
+      }
+      if (part.skinWeights[vertex * 4 + strongestComponent]! < 0.5) continue
+      const modelBoneIndex = part.skinIndices[vertex * 4 + strongestComponent]!
+      const boneName = model.boneNames[modelBoneIndex]
+      if (!boneName || !formationBones.has(boneName)) continue
+      const rigIndex = rig.boneIndex.get(boneName)
+      const inverseBind = rigIndex === undefined ? undefined : rig.skeleton.boneInverses[rigIndex]
+      if (!inverseBind) continue
+      const point = new THREE.Vector3(
+        part.positions[vertex * 3]!,
+        part.positions[vertex * 3 + 1]!,
+        part.positions[vertex * 3 + 2]!,
+      ).applyMatrix4(inverseBind)
+      const samples = points.get(boneName) ?? []
+      samples.push(point)
+      points.set(boneName, samples)
+    }
+  }
+
+  const axes = new Map<string, THREE.Vector3>()
+  for (const [boneName, samples] of points) {
+    if (samples.length < 3) continue
+    const center = samples.reduce((sum, point) => sum.add(point), new THREE.Vector3()).multiplyScalar(1 / samples.length)
+    const bounds = new THREE.Box3().setFromPoints(samples)
+    const size = bounds.getSize(new THREE.Vector3())
+    let axis = size.x >= size.y && size.x >= size.z
+      ? new THREE.Vector3(1, 0, 0)
+      : size.y >= size.z
+        ? new THREE.Vector3(0, 1, 0)
+        : new THREE.Vector3(0, 0, 1)
+    let xx = 0; let xy = 0; let xz = 0; let yy = 0; let yz = 0; let zz = 0
+    for (const point of samples) {
+      const x = point.x - center.x
+      const y = point.y - center.y
+      const z = point.z - center.z
+      xx += x * x; xy += x * y; xz += x * z
+      yy += y * y; yz += y * z; zz += z * z
+    }
+    // Power iteration yields the principal component without assuming that a
+    // particular noulith design was authored along X, Y, or Z.
+    for (let iteration = 0; iteration < 12; iteration += 1) {
+      const next = new THREE.Vector3(
+        xx * axis.x + xy * axis.y + xz * axis.z,
+        xy * axis.x + yy * axis.y + yz * axis.z,
+        xz * axis.x + yz * axis.y + zz * axis.z,
+      )
+      if (next.lengthSq() < 1e-12) break
+      axis = next.normalize()
+    }
+    axes.set(boneName, axis)
+  }
+  return axes
+}
+
 /**
  * The Sage PAP animates four character attachment bones, while the weapon model
  * calls its four weighted bones n_hara/n_haraB/n_haraC/n_haraD. Copy the animated
@@ -784,18 +851,48 @@ function sageWeaponTarget(
 function syncSageWeaponIdle(
   weaponRig: CharacterRig,
   characterRig: CharacterRig,
+  localAxes: ReadonlyMap<string, THREE.Vector3>,
 ): void {
   const characterBones = new Map(characterRig.skeleton.bones.map((bone) => [bone.name, bone]))
   const weaponBones = new Map(weaponRig.skeleton.bones.map((bone) => [bone.name, bone]))
-  for (const [weaponName, characterName] of Object.entries(SAGE_WEAPON_BONE_MAP)) {
-    const source = characterBones.get(characterName)
+  const hips = characterBones.get('n_hara')
+  const head = characterBones.get('j_kao')
+  const root = characterBones.get('n_root')
+  hips?.updateWorldMatrix(true, false)
+  head?.updateWorldMatrix(true, false)
+  root?.updateWorldMatrix(true, false)
+  const torsoLength = hips && head
+    ? THREE.MathUtils.clamp(
+        hips.getWorldPosition(new THREE.Vector3()).distanceTo(head.getWorldPosition(new THREE.Vector3())),
+        0.3,
+        1,
+      )
+    : 0.65
+  const rootRotation = root?.getWorldQuaternion(new THREE.Quaternion()) ?? new THREE.Quaternion()
+  for (const [weaponName, formation] of Object.entries(SAGE_WEAPON_FORMATION)) {
+    const source = characterBones.get(formation.characterBone)
     const target = weaponBones.get(weaponName)
     const parent = target?.parent
     if (!source || !target || !parent) continue
     source.updateWorldMatrix(true, false)
     parent.updateWorldMatrix(true, false)
-    target.position.copy(parent.worldToLocal(source.getWorldPosition(new THREE.Vector3())))
+    const desiredPosition = source.getWorldPosition(new THREE.Vector3())
+    const formationOffset = new THREE.Vector3(...formation.offset)
+      .multiplyScalar(torsoLength)
+      .applyQuaternion(rootRotation)
+    desiredPosition.add(formationOffset)
+    target.position.copy(parent.worldToLocal(desiredPosition))
     const sourceWorldRotation = source.getWorldQuaternion(new THREE.Quaternion())
+    const localAxis = localAxes.get(weaponName)
+    if (localAxis) {
+      const currentWorldAxis = localAxis.clone().applyQuaternion(sourceWorldRotation).normalize()
+      const horizontalWorldAxis = new THREE.Vector3(1, 0, 0).applyQuaternion(rootRotation).normalize()
+      // A principal axis has no direction; choose the sign requiring the smaller
+      // correction so the noulith does not flip end-for-end between frames.
+      if (currentWorldAxis.dot(horizontalWorldAxis) < 0) horizontalWorldAxis.negate()
+      const horizontalCorrection = new THREE.Quaternion().setFromUnitVectors(currentWorldAxis, horizontalWorldAxis)
+      sourceWorldRotation.premultiply(horizontalCorrection).normalize()
+    }
     const parentWorldRotation = parent.getWorldQuaternion(new THREE.Quaternion())
     target.quaternion.copy(parentWorldRotation.invert().multiply(sourceWorldRotation)).normalize()
   }
@@ -1632,7 +1729,9 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
                 if (rig) {
                   const sageRig = weaponRig
                   const characterRig = rig
-                  syncSageWeapon = () => syncSageWeaponIdle(sageRig, characterRig)
+                  const localAxes = sageWeaponLocalAxes(result.model, sageRig)
+                  diagnostics.push(`sage weapon axes: ${[...localAxes].map(([bone, axis]) => `${bone}=${formatVector(axis.toArray(), 3)}`).join(' ') || 'unavailable'}`)
+                  syncSageWeapon = () => syncSageWeaponIdle(sageRig, characterRig, localAxes)
                   syncSageWeapon()
                 }
               }
