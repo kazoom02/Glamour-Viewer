@@ -86,7 +86,7 @@ describe('idle weapon class resolution', () => {
     expect(idleWeaponClassForJobs(new Set(['ROG', 'NIN']))).toBe('bt_dgr_dgr')
     expect(idleWeaponClassForJobs(new Set(['DRK']))).toBe('bt_2sw_emp')
     expect(idleWeaponClassForJobs(new Set(['GLA', 'PLD']))).toBe('bt_swd_sld')
-    expect(idleWeaponClassForJobs(new Set(['VPR']))).toBe('bt_2ff_emp')
+    expect(idleWeaponClassForJobs(new Set(['VPR']))).toBe('bt_bld_bld')
     expect(idleWeaponClassForJobs(new Set(['PCT']))).toBe('bt_brs_plt')
   })
 
