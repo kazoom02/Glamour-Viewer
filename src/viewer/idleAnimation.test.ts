@@ -46,6 +46,14 @@ describe('idle animation clip', () => {
     expect(Array.from(position.values)).toEqual(Array.from(track().translations))
   })
 
+  it('retains translations for the second pair of Sage weapon mounts', () => {
+    const mount = new THREE.Bone()
+    mount.name = 'j_buki2_kosi_l'
+    const { clip } = animationClipFromDecoded(animation(), new THREE.Skeleton([mount]))
+    const position = clip.tracks.find((candidate) => candidate.name === 'j_buki2_kosi_l.position')
+    expect(Array.from(position!.values)).toEqual(Array.from(track().translations))
+  })
+
   it('refuses additive clips instead of applying deltas as absolute transforms', () => {
     const root = new THREE.Bone()
     root.name = 'n_hara'

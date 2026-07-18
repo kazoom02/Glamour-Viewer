@@ -102,7 +102,7 @@ export function animationClipFromDecoded(
       const allowTranslation =
         ROOT_TRANSLATION_BONES.has(bone.name) ||
         bone.name === 'n_hara' ||
-        bone.name.startsWith('j_buki_') ||
+        bone.name.startsWith('j_buki') ||
         bone.name.startsWith('n_buki_') ||
         bone.name.startsWith('ik_') ||
         bone.name.startsWith('iv_') ||

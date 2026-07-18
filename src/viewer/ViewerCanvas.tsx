@@ -761,63 +761,48 @@ function equipmentTarget(
  */
 function sageWeaponTarget(
   character: THREE.Group,
-  rig: CharacterRig | undefined,
   weaponScale: number,
 ): EquipmentAttachment {
-  character.updateMatrixWorld(true)
-  const anchorBoneNames = ['j_kao', 'j_sebo_c', 'j_sebo_b']
-  const anchorBone = anchorBoneNames
-    .map((name) => rig?.skeleton.bones.find((bone) => bone.name === name))
-    .find(Boolean)
-  const anchor = anchorBone
-    ? anchorBone.getWorldPosition(new THREE.Vector3())
-    : new THREE.Vector3(0, 1.55, 0)
-  anchor.add(new THREE.Vector3(0, 0, -0.08))
-
   const mount = new THREE.Group()
-  mount.name = 'mainHand-sage-idle-root'
+  mount.name = 'mainHand-sage-animated-root'
   character.add(mount)
-  mount.position.copy(character.worldToLocal(anchor.clone()))
   return {
     target: mount,
-    diagnostic: `placement=sage-idle bone=${anchorBone?.name ?? 'character-root'} anchor=${formatVector(anchor.toArray())} weaponScale=${weaponScale.toFixed(3)}`,
+    diagnostic: `placement=sage-animated sourceBones=j_buki_kosi_l/r,j_buki2_kosi_l/r weaponScale=${weaponScale.toFixed(3)}`,
   }
 }
 
 /**
- * The weapon SKLB bind pose is the compact X-shaped storage layout. The drawn
- * Sage idle instead uses two parallel nouliths above the head and two wider ones
- * beside the hips. Posing the four weighted bones keeps this generic across all
- * w2702 weapon bodies while preserving each model's authored size and materials.
+ * The Sage PAP animates four character attachment bones, while the weapon model
+ * calls its four weighted bones n_hara/n_haraB/n_haraC/n_haraD. Copy the animated
+ * world transforms into the weapon-local skeleton every frame. This is the game
+ * data that provides the horizontal formation and its subtle hovering loop.
  */
-function poseSageWeaponIdle(
+function syncSageWeaponIdle(
   weaponRig: CharacterRig,
-  characterRig: CharacterRig | undefined,
-  weaponScale: number,
+  characterRig: CharacterRig,
 ): void {
-  const head = characterRig?.skeleton.bones.find((bone) => bone.name === 'j_kao')
-  const hip = ['j_kosi', 'n_hara', 'j_sebo_a']
-    .map((name) => characterRig?.skeleton.bones.find((bone) => bone.name === name))
-    .find(Boolean)
-  const headY = head?.getWorldPosition(new THREE.Vector3()).y ?? 1.55
-  const hipY = hip?.getWorldPosition(new THREE.Vector3()).y ?? 0.95
-  const safeScale = Math.max(weaponScale, 0.01)
-  const lowerY = (hipY - headY + 0.05) / safeScale
-  const poses: Record<string, readonly [number, number, number]> = {
-    n_hara: [-0.28 / safeScale, 0.35 / safeScale, 0.05 / safeScale],
-    n_haraB: [0.28 / safeScale, 0.35 / safeScale, 0.05 / safeScale],
-    n_haraC: [-0.52 / safeScale, lowerY, 0.05 / safeScale],
-    n_haraD: [0.52 / safeScale, lowerY, 0.05 / safeScale],
+  const boneMap: Record<string, string> = {
+    n_hara: 'j_buki_kosi_l',
+    n_haraB: 'j_buki_kosi_r',
+    n_haraC: 'j_buki2_kosi_l',
+    n_haraD: 'j_buki2_kosi_r',
   }
-  for (const [name, position] of Object.entries(poses)) {
-    const bone = weaponRig.skeleton.bones.find((candidate) => candidate.name === name)
-    if (!bone) continue
-    bone.position.fromArray(position)
-    // Every noulith is parallel in the drawn idle reference. The four different
-    // bind rotations are what produced the compact X in the previous result.
-    bone.quaternion.identity()
+  const characterBones = new Map(characterRig.skeleton.bones.map((bone) => [bone.name, bone]))
+  const weaponBones = new Map(weaponRig.skeleton.bones.map((bone) => [bone.name, bone]))
+  for (const [weaponName, characterName] of Object.entries(boneMap)) {
+    const source = characterBones.get(characterName)
+    const target = weaponBones.get(weaponName)
+    const parent = target?.parent
+    if (!source || !target || !parent) continue
+    source.updateWorldMatrix(true, false)
+    parent.updateWorldMatrix(true, false)
+    target.position.copy(parent.worldToLocal(source.getWorldPosition(new THREE.Vector3())))
+    const sourceWorldRotation = source.getWorldQuaternion(new THREE.Quaternion())
+    const parentWorldRotation = parent.getWorldQuaternion(new THREE.Quaternion())
+    target.quaternion.copy(parentWorldRotation.invert().multiply(sourceWorldRotation)).normalize()
   }
-  weaponRig.skeleton.bones.forEach((bone) => bone.updateWorldMatrix(true, false))
+  weaponRig.skeleton.bones.forEach((bone) => bone.updateWorldMatrix(false, true))
   weaponRig.skeleton.update()
 }
 
@@ -1272,6 +1257,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
     scene.add(characterGroup)
     characterGroupRef.current = characterGroup
     let activeIdleMixer: THREE.AnimationMixer | undefined
+    let syncSageWeapon: (() => void) | undefined
     const animatedMaterials: AnimatedMaterial[] = []
     const avfxRuntimes: AvfxRuntime[] = []
     // Rebuilt below as character materials are created; the color effect reads this.
@@ -1618,7 +1604,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             const attachment = !weapon
               ? { target: characterGroup, diagnostic: '' }
               : plan.sageMount && sageWeaponSkeleton
-                ? sageWeaponTarget(characterGroup, rig, weaponScale)
+                ? sageWeaponTarget(characterGroup, weaponScale)
               : plan.compactHipMount
                 ? compactHipWeaponTarget(characterGroup, rig, result.model)
                 : plan.hipMount
@@ -1646,7 +1632,12 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               renderTarget = mount
               if (plan.sageMount && sageWeaponSkeleton) {
                 weaponRig = addCharacterRig(mount, sageWeaponSkeleton)
-                poseSageWeaponIdle(weaponRig, rig, weaponScale)
+                if (rig) {
+                  const sageRig = weaponRig
+                  const characterRig = rig
+                  syncSageWeapon = () => syncSageWeaponIdle(sageRig, characterRig)
+                  syncSageWeapon()
+                }
               }
             }
             addDecodedModel(
@@ -1965,6 +1956,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       const delta = Math.min(clock.getDelta(), 0.1)
       elapsed += delta
       activeIdleMixer?.update(delta)
+      syncSageWeapon?.()
       animatedMaterials.forEach(({ material, animation, track, color }) => {
         sampleMaterialAnimationTrack(animation, track, elapsed, color)
         material.emissive.setRGB(
