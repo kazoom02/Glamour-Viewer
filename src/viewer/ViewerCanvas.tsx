@@ -756,8 +756,8 @@ function equipmentTarget(
 
 /**
  * Sage nouliths are one skinned weapon model driven by a weapon-local four-bone
- * skeleton. Their idle root floats just above and behind the head instead of
- * following either hand; the authored skeleton fans the four pieces out from it.
+ * skeleton. Their idle root follows the character rather than either hand; the
+ * four weapon bones are posed separately below to match the drawn idle layout.
  */
 function sageWeaponTarget(
   character: THREE.Group,
@@ -772,7 +772,7 @@ function sageWeaponTarget(
   const anchor = anchorBone
     ? anchorBone.getWorldPosition(new THREE.Vector3())
     : new THREE.Vector3(0, 1.55, 0)
-  anchor.add(new THREE.Vector3(0, Math.max(0.1, 0.16 * weaponScale), -0.08))
+  anchor.add(new THREE.Vector3(0, 0, -0.08))
 
   const mount = new THREE.Group()
   mount.name = 'mainHand-sage-idle-root'
@@ -782,6 +782,43 @@ function sageWeaponTarget(
     target: mount,
     diagnostic: `placement=sage-idle bone=${anchorBone?.name ?? 'character-root'} anchor=${formatVector(anchor.toArray())} weaponScale=${weaponScale.toFixed(3)}`,
   }
+}
+
+/**
+ * The weapon SKLB bind pose is the compact X-shaped storage layout. The drawn
+ * Sage idle instead uses two parallel nouliths above the head and two wider ones
+ * beside the hips. Posing the four weighted bones keeps this generic across all
+ * w2702 weapon bodies while preserving each model's authored size and materials.
+ */
+function poseSageWeaponIdle(
+  weaponRig: CharacterRig,
+  characterRig: CharacterRig | undefined,
+  weaponScale: number,
+): void {
+  const head = characterRig?.skeleton.bones.find((bone) => bone.name === 'j_kao')
+  const hip = ['j_kosi', 'n_hara', 'j_sebo_a']
+    .map((name) => characterRig?.skeleton.bones.find((bone) => bone.name === name))
+    .find(Boolean)
+  const headY = head?.getWorldPosition(new THREE.Vector3()).y ?? 1.55
+  const hipY = hip?.getWorldPosition(new THREE.Vector3()).y ?? 0.95
+  const safeScale = Math.max(weaponScale, 0.01)
+  const lowerY = (hipY - headY + 0.05) / safeScale
+  const poses: Record<string, readonly [number, number, number]> = {
+    n_hara: [-0.28 / safeScale, 0.35 / safeScale, 0.05 / safeScale],
+    n_haraB: [0.28 / safeScale, 0.35 / safeScale, 0.05 / safeScale],
+    n_haraC: [-0.52 / safeScale, lowerY, 0.05 / safeScale],
+    n_haraD: [0.52 / safeScale, lowerY, 0.05 / safeScale],
+  }
+  for (const [name, position] of Object.entries(poses)) {
+    const bone = weaponRig.skeleton.bones.find((candidate) => candidate.name === name)
+    if (!bone) continue
+    bone.position.fromArray(position)
+    // Every noulith is parallel in the drawn idle reference. The four different
+    // bind rotations are what produced the compact X in the previous result.
+    bone.quaternion.identity()
+  }
+  weaponRig.skeleton.bones.forEach((bone) => bone.updateWorldMatrix(true, false))
+  weaponRig.skeleton.update()
 }
 
 // Left-hip scabbard placement for a single weapon's sheath (a Samurai katana's saya
@@ -1609,6 +1646,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               renderTarget = mount
               if (plan.sageMount && sageWeaponSkeleton) {
                 weaponRig = addCharacterRig(mount, sageWeaponSkeleton)
+                poseSageWeaponIdle(weaponRig, rig, weaponScale)
               }
             }
             addDecodedModel(
