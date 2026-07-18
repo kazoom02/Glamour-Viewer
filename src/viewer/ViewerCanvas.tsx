@@ -699,6 +699,48 @@ function equipmentTarget(
     : handWeaponTarget(character, rig, slot)
 }
 
+// Left-hip scabbard placement for a single weapon's sheath (a Samurai katana's saya
+// and similar), worn diagonally with the hilt forward. FIRST-PASS values — if the
+// scabbard sits on the wrong side/height/angle, tune these against the "weapon
+// attachment" diagnostic (left hip is +X with the character facing the camera; flip
+// the X sign of OFFSET/DIRECTION if it lands on the right).
+const HIP_SCABBARD_BONES = ['j_kosi', 'n_hara', 'j_sebo_a']
+const HIP_SCABBARD_OFFSET: readonly [number, number, number] = [0.1, -0.02, 0.05]
+const HIP_SCABBARD_DIRECTION: readonly [number, number, number] = [0.12, -0.18, -0.98]
+
+function hipWeaponTarget(character: THREE.Group, rig: CharacterRig | undefined, model: DecodedModel): EquipmentAttachment {
+  if (!rig) return { target: character, diagnostic: 'placement=hip bone=unavailable fallback=character-root' }
+  character.updateMatrixWorld(true)
+  const hip = HIP_SCABBARD_BONES.map((name) => rig.skeleton.bones.find((bone) => bone.name === name)).find(Boolean)
+  const anchor = hip ? hip.getWorldPosition(new THREE.Vector3()) : new THREE.Vector3(0, 0.95, 0)
+  anchor.add(new THREE.Vector3(...HIP_SCABBARD_OFFSET))
+  const size = new THREE.Vector3(
+    model.bounds.max[0] - model.bounds.min[0],
+    model.bounds.max[1] - model.bounds.min[1],
+    model.bounds.max[2] - model.bounds.min[2],
+  )
+  const longestAxisIndex = size.x >= size.y && size.x >= size.z ? 0 : size.y >= size.z ? 1 : 2
+  const longestAxis = new THREE.Vector3(longestAxisIndex === 0 ? 1 : 0, longestAxisIndex === 1 ? 1 : 0, longestAxisIndex === 2 ? 1 : 0)
+  const desiredDirection = new THREE.Vector3(...HIP_SCABBARD_DIRECTION).normalize()
+  const orientation = new THREE.Quaternion().setFromUnitVectors(longestAxis, desiredDirection)
+  const center = new THREE.Vector3(
+    (model.bounds.min[0] + model.bounds.max[0]) / 2,
+    (model.bounds.min[1] + model.bounds.max[1]) / 2,
+    (model.bounds.min[2] + model.bounds.max[2]) / 2,
+  )
+  const mount = new THREE.Group()
+  mount.name = 'offHand-hip-mount'
+  mount.quaternion.copy(orientation)
+  mount.position.copy(anchor).sub(center.applyQuaternion(orientation))
+  character.add(mount)
+  character.updateMatrixWorld(true)
+  if (hip) hip.attach(mount)
+  return {
+    target: mount,
+    diagnostic: `placement=hip bone=${hip?.name ?? 'character-root'} longestModelAxis=${['x', 'y', 'z'][longestAxisIndex]} anchor=${formatVector(anchor.toArray())} diagonal=${formatVector(desiredDirection.toArray())} fallback=${!hip}`,
+  }
+}
+
 // Builds the framing box from the wearer's body and worn armor, deliberately
 // excluding hand/back weapon reach and the volatile AVFX particle cloud. This
 // keeps the character centered in the preview panel when a large weapon or an
@@ -1101,11 +1143,12 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       asset: equipmentAssetPlan(item, raceCode),
       candidates: equipmentModelCandidates(item, raceCode),
       imcOptional: false,
+      hipMount: false,
     }))
-    // A main-hand weapon's ModelSub is added to the off hand only for true dual-wield
-    // jobs (resolved from the equip jobs below); for single-weapon jobs it is a
-    // scabbard, not a second weapon. Kept as a helper so the gated call reads clearly.
-    const addDualWieldOffHand = () => {
+    // A main-hand weapon's ModelSub becomes a second held off-hand weapon for true
+    // dual-wield jobs, or a left-hip scabbard (hipMount) for single-weapon jobs like
+    // Samurai. `hipMount` is decided by the caller from the resolved equip jobs.
+    const addSubWeaponOffHand = (hipMount: boolean) => {
       const mainHand = equipped.mainHand
       if (!mainHand?.weaponSubModel || equipped.offHand) return
       const sub = mainHand.weaponSubModel
@@ -1125,6 +1168,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
         // The sub-model set (e.g. w1851) frequently ships no IMC of its own and
         // reuses the main set's material, so a missing IMC here isn't a failure.
         imcOptional: true,
+        hipMount,
       })
     }
     const characterPlans = allCharacterPlans.filter((plan) => !plan.coveredBy || !equipped[plan.coveredBy])
@@ -1215,11 +1259,10 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             }
           }
           idleWeaponClassRef.current = idleWeaponClass
-          // Place the second weapon in the off hand only for dual-wield jobs; a
-          // single-weapon job's ModelSub (e.g. a Samurai scabbard) is not a held
-          // weapon and is left off the hand.
-          if (mainHandDualWield) addDualWieldOffHand()
-          diagnostics.push(`off-hand weapon: dualWield=${mainHandDualWield} sub=${idleWeapon?.weaponSubModel ? `${idleWeapon.weaponSubModel.set}/${idleWeapon.weaponSubModel.base}` : 'none'}`)
+          // Dual-wield jobs get the second weapon in the off hand; single-weapon jobs
+          // (e.g. Samurai) get their ModelSub as a left-hip scabbard instead.
+          addSubWeaponOffHand(!mainHandDualWield)
+          diagnostics.push(`off-hand weapon: dualWield=${mainHandDualWield} placement=${mainHandDualWield ? 'hand' : 'hip'} sub=${idleWeapon?.weaponSubModel ? `${idleWeapon.weaponSubModel.set}/${idleWeapon.weaponSubModel.base}` : 'none'}`)
           // Sheathed rests on the unarmed idle; drawn rests on the weapon idle. The
           // draw state survives customization rebuilds (weaponDrawnRef).
           const restingClass = weaponDrawnRef.current && idleWeaponClass !== 'bt_common' ? idleWeaponClass : 'bt_common'
@@ -1349,9 +1392,11 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             const materialResult = materialsByModel.get(result.path)
             const weapon = isWeaponSlot(plan.slot)
             const animatedMaterialCount = animatedMaterials.length
-            const attachment = weapon
-              ? equipmentTarget(characterGroup, rig, plan.slot, plan.item.weaponPlacement ?? 'hand', result.model)
-              : { target: characterGroup, diagnostic: '' }
+            const attachment = !weapon
+              ? { target: characterGroup, diagnostic: '' }
+              : plan.hipMount
+                ? hipWeaponTarget(characterGroup, rig, result.model)
+                : equipmentTarget(characterGroup, rig, plan.slot, plan.item.weaponPlacement ?? 'hand', result.model)
             // FFXIV sizes a weapon to the wielder's race. Wrap the weapon mesh and
             // its VFX in one named mount group under the attach point so race
             // scaling stays proportional AND the display toggle hides the whole
