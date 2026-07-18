@@ -16,7 +16,7 @@ import {
   type CharacterRaceCode,
 } from '../asset-source/characterPlan'
 import { loadLocalAnimation, loadLocalIdleAnimation, type DecodedAnimation } from '../asset-source/animationLoader'
-import { catalogAnimationCandidates, idleWeaponClassForJobs, toCatalogAnimation, type CatalogAnimation } from '../asset-source/animationCatalog'
+import { catalogAnimationCandidates, idleWeaponClassForJobs, isDualWieldJobs, toCatalogAnimation, type CatalogAnimation } from '../asset-source/animationCatalog'
 import { getClassJobCategories } from '../catalog/catalogCache'
 import { createLocalAssetReader } from '../asset-source/sqpack'
 import { HUMAN_CMP_PATH, loadLocalBustScale, type BustScale } from '../asset-source/cmp'
@@ -1102,11 +1102,12 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       candidates: equipmentModelCandidates(item, raceCode),
       imcOptional: false,
     }))
-    // A dual-wield main-hand weapon (Rogue/Ninja daggers, Viper twinblades) carries
-    // a second blade in ModelSub that the game renders in the left hand. Synthesize
-    // an off-hand plan for it unless the off-hand slot already holds an item.
-    const mainHand = equipped.mainHand
-    if (mainHand?.weaponSubModel && !equipped.offHand) {
+    // A main-hand weapon's ModelSub is added to the off hand only for true dual-wield
+    // jobs (resolved from the equip jobs below); for single-weapon jobs it is a
+    // scabbard, not a second weapon. Kept as a helper so the gated call reads clearly.
+    const addDualWieldOffHand = () => {
+      const mainHand = equipped.mainHand
+      if (!mainHand?.weaponSubModel || equipped.offHand) return
       const sub = mainHand.weaponSubModel
       const offHandItem: ArmorItem = {
         ...mainHand,
@@ -1197,20 +1198,28 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           }
           rig = addCharacterRig(characterGroup, combinedSkeleton, bustScale)
           diagnostics.push(bustRigDiagnostic(rig, 'after CMP bind', bustScale))
-          // Resolve the weapon's animation class from its job(s) — used both for the
-          // resting idle when drawn and for the draw/sheath button. Anything unmapped
-          // stays on the unarmed idle.
+          // Resolve the weapon's equip jobs once — they drive both the idle class and
+          // whether the ModelSub is a second held weapon (dual-wield) or a scabbard.
           let idleWeaponClass = 'bt_common'
+          let mainHandDualWield = false
           const idleWeapon = equipped.mainHand
           if (idleWeapon?.classJobCategoryId) {
             try {
               const jobs = (await getClassJobCategories()).get(idleWeapon.classJobCategoryId)
-              if (jobs) idleWeaponClass = idleWeaponClassForJobs(jobs) ?? 'bt_common'
+              if (jobs) {
+                idleWeaponClass = idleWeaponClassForJobs(jobs) ?? 'bt_common'
+                mainHandDualWield = isDualWieldJobs(jobs)
+              }
             } catch {
-              // XIVAPI unavailable — keep the unarmed idle.
+              // XIVAPI unavailable — keep the unarmed idle and no off-hand weapon.
             }
           }
           idleWeaponClassRef.current = idleWeaponClass
+          // Place the second weapon in the off hand only for dual-wield jobs; a
+          // single-weapon job's ModelSub (e.g. a Samurai scabbard) is not a held
+          // weapon and is left off the hand.
+          if (mainHandDualWield) addDualWieldOffHand()
+          diagnostics.push(`off-hand weapon: dualWield=${mainHandDualWield} sub=${idleWeapon?.weaponSubModel ? `${idleWeapon.weaponSubModel.set}/${idleWeapon.weaponSubModel.base}` : 'none'}`)
           // Sheathed rests on the unarmed idle; drawn rests on the weapon idle. The
           // draw state survives customization rebuilds (weaponDrawnRef).
           const restingClass = weaponDrawnRef.current && idleWeaponClass !== 'bt_common' ? idleWeaponClass : 'bt_common'
@@ -1471,8 +1480,9 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           const animationBustScale = bustScale
           const localSource = source
           // Swaps a clip onto the character mixer (reused idle mixer) and plays it.
-          // A one-shot clip (draw/sheath) plays once and holds its final frame.
-          const playClipOnRig = (clip: THREE.AnimationClip, label: string, blendHint?: 'normal' | 'additive', once = false) => {
+          // A one-shot clip (draw/sheath) plays once and holds its final frame;
+          // `timeScale` < 1 slows it down (used to ease the draw/sheath transitions).
+          const playClipOnRig = (clip: THREE.AnimationClip, label: string, blendHint?: 'normal' | 'additive', once = false, timeScale = 1) => {
             let mixer = idleMixer.current
             if (!mixer) {
               mixer = new THREE.AnimationMixer(characterGroup)
@@ -1491,7 +1501,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             action.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, once ? 1 : Infinity)
             action.clampWhenFinished = once
             action.setEffectiveWeight(1)
-            action.setEffectiveTimeScale(1)
+            action.setEffectiveTimeScale(timeScale)
             action.play()
             idleAction.current = action
             setIdleLabel(label)
@@ -1540,8 +1550,9 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             const transitionClip = animationClipFromDecoded(transitionDecoded, animationRig.skeleton, animationBustScale).clip
             const restingClip = animationClipFromDecoded(restingDecoded, animationRig.skeleton, animationBustScale).clip
             const restingLabel = restingDecoded.name || (drawing ? 'Weapon idle' : 'Idle')
-            // Play the transition once, then loop into the resting idle when it ends.
-            playClipOnRig(transitionClip, drawing ? 'Draw weapon' : 'Sheathe weapon', transitionDecoded.blendHint, true)
+            // Play the transition once at 0.7× (slightly slower for readability), then
+            // loop into the resting idle at normal speed when it ends.
+            playClipOnRig(transitionClip, drawing ? 'Draw weapon' : 'Sheathe weapon', transitionDecoded.blendHint, true, 0.7)
             const mixer = idleMixer.current
             const transitionAction = idleAction.current
             weaponTransitionCleanup.current?.()

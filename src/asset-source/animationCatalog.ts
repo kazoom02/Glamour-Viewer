@@ -125,6 +125,28 @@ export function idleWeaponClassForJobs(jobCodes: Iterable<string>): string | und
   return undefined
 }
 
+/**
+ * Jobs that wield a genuine second weapon in the off hand (daggers, twinblades,
+ * sword+shield, rapier+focus, chakrams, fists, brush+palette). For every other job
+ * a weapon's `ModelSub` is a scabbard/sheath worn on the body, not a held weapon,
+ * so it must not be placed in the hand.
+ */
+const DUAL_WIELD_JOBS = new Set([
+  'NIN', 'ROG', // daggers
+  'VPR',        // viper twinblades
+  'PLD', 'GLA', // sword & shield
+  'RDM',        // rapier + focus
+  'DNC',        // chakrams
+  'MNK', 'PGL', // fist weapons
+  'PCT',        // pictomancer brush + palette
+])
+
+/** True when any of the weapon's equip jobs actually dual-wields. */
+export function isDualWieldJobs(jobCodes: Iterable<string>): boolean {
+  for (const code of jobCodes) if (DUAL_WIELD_JOBS.has(code)) return true
+  return false
+}
+
 interface ParsedAnimationId {
   weaponClass: string
   sub: string
