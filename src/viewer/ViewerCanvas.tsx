@@ -634,22 +634,44 @@ interface EquipmentAttachment {
   diagnostic: string
 }
 
+const SHIELD_ARM_NUDGE = 0.035
+
 function handWeaponTarget(
   character: THREE.Group,
   rig: CharacterRig | undefined,
   slot: EquipmentSlot,
   shield = false,
+  forceLeftHand = false,
 ): EquipmentAttachment {
   if (!rig || !isWeaponSlot(slot)) return { target: character, diagnostic: 'placement=hand bone=unavailable fallback=character-root' }
-  const names = slot === 'mainHand'
+  const names = slot === 'mainHand' && !forceLeftHand
     ? ['j_buki_r', 'n_buki_r', 'j_te_r', 'j_hand_r']
     : shield
       ? ['n_buki_tate_l', 'j_buki_l', 'n_buki_l', 'j_te_l', 'j_hand_l']
       : ['j_buki_l', 'n_buki_l', 'j_te_l', 'j_hand_l']
   const bone = names.map((name) => rig.skeleton.bones.find((candidate) => candidate.name === name)).find(Boolean)
+  if (bone && shield) {
+    // n_buki_tate_l carries the authored shield orientation but intentionally
+    // sits just off the arm. Nudge its child mount toward the forearm so the
+    // shield reads as strapped to it without changing the animation bone.
+    character.updateMatrixWorld(true)
+    const armNames = ['n_hijisoubi_l', 'j_ude_b_l', 'n_hhiji_l', 'j_te_l']
+    const arm = armNames.map((name) => rig.skeleton.bones.find((candidate) => candidate.name === name)).find(Boolean)
+    const mount = new THREE.Group()
+    mount.name = 'offHand-shield-arm-mount'
+    if (arm) {
+      const armInShieldSpace = bone.worldToLocal(arm.getWorldPosition(new THREE.Vector3()))
+      if (armInShieldSpace.lengthSq() > 1e-8) mount.position.copy(armInShieldSpace.normalize().multiplyScalar(SHIELD_ARM_NUDGE))
+    }
+    bone.add(mount)
+    return {
+      target: mount,
+      diagnostic: `placement=shield bone=${bone.name} arm=${arm?.name ?? 'unavailable'} nudge=${SHIELD_ARM_NUDGE.toFixed(3)} fallback=${bone.name !== names[0] || !arm}`,
+    }
+  }
   return bone
-    ? { target: bone, diagnostic: `placement=${shield ? 'shield' : 'hand'} bone=${bone.name} fallback=${bone.name !== names[0]}` }
-    : { target: character, diagnostic: `placement=${shield ? 'shield' : 'hand'} bone=unavailable candidates=${names.join(',')} fallback=character-root` }
+    ? { target: bone, diagnostic: `placement=${shield ? 'shield' : forceLeftHand ? 'left-hand' : 'hand'} bone=${bone.name} fallback=${bone.name !== names[0]}` }
+    : { target: character, diagnostic: `placement=${shield ? 'shield' : forceLeftHand ? 'left-hand' : 'hand'} bone=unavailable candidates=${names.join(',')} fallback=character-root` }
 }
 
 function backWeaponTarget(
@@ -705,10 +727,11 @@ function equipmentTarget(
   placement: WeaponPlacement,
   model: DecodedModel,
   shield = false,
+  forceLeftHand = false,
 ): EquipmentAttachment {
   return placement === 'back'
     ? backWeaponTarget(character, rig, slot, model)
-    : handWeaponTarget(character, rig, slot, shield)
+    : handWeaponTarget(character, rig, slot, shield, forceLeftHand)
 }
 
 // Left-hip scabbard placement for a single weapon's sheath (a Samurai katana's saya
@@ -1176,6 +1199,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       imcOptional: false,
       hipMount: false,
       shieldMount: false,
+      leftHandMount: false,
     }))
     // A main-hand weapon's ModelSub becomes a second held off-hand weapon for true
     // dual-wield jobs, or a left-hip scabbard (hipMount) for single-weapon jobs like
@@ -1202,6 +1226,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
         imcOptional: true,
         hipMount,
         shieldMount,
+        leftHandMount: false,
       })
     }
     const characterPlans = allCharacterPlans.filter((plan) => !plan.coveredBy || !equipped[plan.coveredBy])
@@ -1281,6 +1306,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           let mainHandDualWield = false
           const idleWeapon = equipped.mainHand
           let mainHandUsesShield = Boolean(idleWeapon && /\b(?:GLA|PLD|Gladiator|Paladin)\b/i.test(idleWeapon.jobs))
+          let mainHandUsesLeftHand = Boolean(idleWeapon && /\b(?:AST|Astrologian)\b/i.test(idleWeapon.jobs))
           if (idleWeapon?.classJobCategoryId) {
             try {
               const jobs = (await getClassJobCategories()).get(idleWeapon.classJobCategoryId)
@@ -1288,6 +1314,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
                 idleWeaponClass = idleWeaponClassForJobs(jobs) ?? 'bt_common'
                 mainHandDualWield = isDualWieldJobs(jobs)
                 mainHandUsesShield ||= idleWeaponClass === 'bt_swd_sld'
+                mainHandUsesLeftHand ||= idleWeaponClass === 'bt_2gl_emp'
               }
             } catch {
               // XIVAPI unavailable — keep the unarmed idle and no off-hand weapon.
@@ -1298,8 +1325,10 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           // (e.g. Samurai) get their ModelSub as a left-hip scabbard instead.
           for (const plan of equipmentPlans) {
             if (plan.slot === 'offHand' && mainHandUsesShield) plan.shieldMount = true
+            if (plan.slot === 'mainHand' && mainHandUsesLeftHand) plan.leftHandMount = true
           }
           addSubWeaponOffHand(!mainHandDualWield, mainHandUsesShield)
+          diagnostics.push(`weapon handedness: class=${idleWeaponClass} forceMainLeft=${mainHandUsesLeftHand}`)
           diagnostics.push(`off-hand weapon: dualWield=${mainHandDualWield} shield=${mainHandUsesShield} placement=${mainHandUsesShield ? 'shield' : mainHandDualWield ? 'hand' : 'hip'} sub=${idleWeapon?.weaponSubModel ? `${idleWeapon.weaponSubModel.set}/${idleWeapon.weaponSubModel.base}` : 'none'}`)
           // Sheathed rests on the unarmed idle; drawn rests on the weapon idle. The
           // draw state survives customization rebuilds (weaponDrawnRef).
@@ -1406,7 +1435,9 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               rig,
               maxAnisotropy,
               customization,
-              true,
+              // Hair is authored as layered alpha-cutout cards. Subdivision
+              // warps those overlapping cards and makes the style look doubled.
+              plan.part !== 'hair',
               undefined,
               animatedMaterials,
               plan.part === 'face' ? materialResult?.facePaintTexture : undefined,
@@ -1422,7 +1453,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           }
         }
         if (characterModels.length) {
-          diagnostics.push('character render refinement: all organic parts curved subdivision level=1 triangles=4x corners=preserved skinWeights=interpolated uint32=dense-mesh-enabled')
+          diagnostics.push('character render refinement: solid organic parts curved subdivision level=1; hair=authored alpha-card geometry')
         }
         for (const plan of equipmentPlans) {
           const result = plan.candidates.map((path) => byPath.get(path)).find((candidate) => candidate?.model)
@@ -1434,7 +1465,15 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               ? { target: characterGroup, diagnostic: '' }
               : plan.hipMount
                 ? hipWeaponTarget(characterGroup, rig, result.model)
-                : equipmentTarget(characterGroup, rig, plan.slot, plan.item.weaponPlacement ?? 'hand', result.model, plan.shieldMount)
+                : equipmentTarget(
+                    characterGroup,
+                    rig,
+                    plan.slot,
+                    plan.item.weaponPlacement ?? 'hand',
+                    result.model,
+                    plan.shieldMount,
+                    plan.leftHandMount,
+                  )
             // FFXIV sizes a weapon to the wielder's race. Wrap the weapon mesh and
             // its VFX in one named mount group under the attach point so race
             // scaling stays proportional AND the display toggle hides the whole
