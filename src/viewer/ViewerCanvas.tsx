@@ -768,7 +768,7 @@ function sageWeaponTarget(
   character.add(mount)
   return {
     target: mount,
-    diagnostic: `placement=sage-animated sourceBones=j_buki_kosi_l/r,j_buki2_kosi_l/r weaponScale=${weaponScale.toFixed(3)}`,
+    diagnostic: `placement=sage-animated upper=j_buki_sebo_l/r lower=j_buki_kosi_l/r weaponScale=${weaponScale.toFixed(3)}`,
   }
 }
 
@@ -783,10 +783,10 @@ function syncSageWeaponIdle(
   characterRig: CharacterRig,
 ): void {
   const boneMap: Record<string, string> = {
-    n_hara: 'j_buki_kosi_l',
-    n_haraB: 'j_buki_kosi_r',
-    n_haraC: 'j_buki2_kosi_l',
-    n_haraD: 'j_buki2_kosi_r',
+    n_hara: 'j_buki_sebo_l',
+    n_haraB: 'j_buki_sebo_r',
+    n_haraC: 'j_buki_kosi_l',
+    n_haraD: 'j_buki_kosi_r',
   }
   const characterBones = new Map(characterRig.skeleton.bones.map((bone) => [bone.name, bone]))
   const weaponBones = new Map(weaponRig.skeleton.bones.map((bone) => [bone.name, bone]))
