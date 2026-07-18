@@ -703,7 +703,7 @@ function equipmentTarget(
 // and similar). The blade's long axis is aimed along DIRECTION (world space, character
 // facing +Z toward the camera: +X = left, +Y = up, +Z = forward), then ROLL_DEG spins
 // it around that axis to sit flat against the hip; OFFSET nudges it off the hip bone.
-// A point 10% along the model's length is placed on that anchor so the scabbard
+// A point 20% along the model's length is placed on that anchor so the scabbard
 // starts at the belt and extends down/back from it like it does in game.
 // TUNABLE — adjust from the "weapon attachment … placement=hip" diagnostic:
 //   • wrong side → flip the X sign of OFFSET (and small X of DIRECTION)
@@ -714,7 +714,7 @@ const HIP_SCABBARD_BONES = ['j_kosi', 'n_hara', 'j_sebo_a']
 // first section of the scabbard does not intersect the character mesh.
 const HIP_SCABBARD_OFFSET: readonly [number, number, number] = [0.19, -0.12, -0.04]
 const HIP_SCABBARD_DIRECTION: readonly [number, number, number] = [0.08, -0.62, -0.78]
-const HIP_SCABBARD_PIVOT_FRACTION = 0.1
+const HIP_SCABBARD_PIVOT_FRACTION = 0.2
 const HIP_SCABBARD_ROLL_DEG = 90
 
 function hipWeaponTarget(character: THREE.Group, rig: CharacterRig | undefined, model: DecodedModel): EquipmentAttachment {
@@ -741,8 +741,8 @@ function hipWeaponTarget(character: THREE.Group, rig: CharacterRig | undefined, 
     (model.bounds.min[2] + model.bounds.max[2]) / 2,
   )
   // setFromUnitVectors maps the positive longest axis onto desiredDirection.
-  // Pin a point 10% in from the minimum endpoint to the hip, leaving a short
-  // section above the belt while most of the model grows away from it.
+  // Pin a point 20% in from the minimum endpoint to the hip, matching the
+  // attachment point measured from the in-game reference.
   pivot.setComponent(
     longestAxisIndex,
     model.bounds.min[longestAxisIndex] + size.getComponent(longestAxisIndex) * HIP_SCABBARD_PIVOT_FRACTION,
