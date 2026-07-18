@@ -55,6 +55,7 @@ import AnimationPicker from './AnimationPicker'
 import { createAvfxRuntime, type AvfxRuntime } from './avfxRuntime'
 import { subdivideCurvedMesh } from './geometryQuality'
 import { remapSkinIndices } from './skinBinding'
+import { SAGE_WEAPON_BONE_MAP } from './sageWeapon'
 import {
   applyBustDeformation,
   bustWeightSummary,
@@ -768,31 +769,25 @@ function sageWeaponTarget(
   character.add(mount)
   return {
     target: mount,
-    diagnostic: `placement=sage-animated mounts=j_buki2_kosi_l/r+j_buki_kosi_l/r weaponScale=${weaponScale.toFixed(3)}`,
+    diagnostic: `placement=sage-animated upper=j_buki_sebo_l/r lower=j_buki_kosi_l/r weaponScale=${weaponScale.toFixed(3)}`,
   }
 }
 
 /**
  * The Sage PAP animates four character attachment bones, while the weapon model
  * calls its four weighted bones n_hara/n_haraB/n_haraC/n_haraD. Copy the animated
- * world transforms into the weapon-local skeleton every frame. The `buki2_kosi`
- * pair was previously mistaken for the unrelated back-weapon (`sebo`) pair; all
- * four hip mounts are what spread the nouliths around the character and animate
- * their flying resident-idle loop.
+ * world transforms into the weapon-local skeleton every frame. The `sebo` pair
+ * occupies the animated upper/shoulder positions and the `kosi` pair occupies
+ * the lower/hip positions; `buki2_kosi` is a compact waist pair and must not be
+ * used or the upper nouliths collapse into the character.
  */
 function syncSageWeaponIdle(
   weaponRig: CharacterRig,
   characterRig: CharacterRig,
 ): void {
-  const boneMap: Record<string, string> = {
-    n_hara: 'j_buki2_kosi_l',
-    n_haraB: 'j_buki2_kosi_r',
-    n_haraC: 'j_buki_kosi_l',
-    n_haraD: 'j_buki_kosi_r',
-  }
   const characterBones = new Map(characterRig.skeleton.bones.map((bone) => [bone.name, bone]))
   const weaponBones = new Map(weaponRig.skeleton.bones.map((bone) => [bone.name, bone]))
-  for (const [weaponName, characterName] of Object.entries(boneMap)) {
+  for (const [weaponName, characterName] of Object.entries(SAGE_WEAPON_BONE_MAP)) {
     const source = characterBones.get(characterName)
     const target = weaponBones.get(weaponName)
     const parent = target?.parent
