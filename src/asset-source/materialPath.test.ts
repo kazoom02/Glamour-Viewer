@@ -66,4 +66,15 @@ describe('MDL material path resolution', () => {
       'chara/weapon/w2901/obj/body/b0001/material/v0003/mt_w2901b0001_a.mtrl',
     )
   })
+
+  it('resolves a dual-wield off-hand blade that references the main set material', () => {
+    // The off-hand model lives in a sub set (w1851) but references the main set's
+    // material (mt_w1801…); resolve from the filename, not the model folder.
+    expect(materialCandidates({
+      modelPath: 'chara/weapon/w1851/obj/body/b0074/model/w1851b0074.mdl',
+      materialPaths: [],
+    }, '/mt_w1801b0074_a.mtrl', 2)[0]).toBe(
+      'chara/weapon/w1801/obj/body/b0074/material/v0002/mt_w1801b0074_a.mtrl',
+    )
+  })
 })

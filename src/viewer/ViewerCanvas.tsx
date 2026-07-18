@@ -1047,6 +1047,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       item,
       asset: equipmentAssetPlan(item, raceCode),
       candidates: equipmentModelCandidates(item, raceCode),
+      imcOptional: false,
     }))
     // A dual-wield main-hand weapon (Rogue/Ninja daggers, Viper twinblades) carries
     // a second blade in ModelSub that the game renders in the left hand. Synthesize
@@ -1067,6 +1068,9 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
         item: offHandItem,
         asset: equipmentAssetPlan(offHandItem, raceCode),
         candidates: equipmentModelCandidates(offHandItem, raceCode),
+        // The sub-model set (e.g. w1851) frequently ships no IMC of its own and
+        // reuses the main set's material, so a missing IMC here isn't a failure.
+        imcOptional: true,
       })
     }
     const characterPlans = allCharacterPlans.filter((plan) => !plan.coveredBy || !equipped[plan.coveredBy])
@@ -1197,6 +1201,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             modelPath: result.path,
             materialPaths: result.model.materialPaths,
             imcPath: plan.asset.imcPath,
+            imcOptional: plan.imcOptional,
             slot: plan.slot,
             variant: plan.asset.variant,
             stains: [plan.item.dyes?.[0]?.id ?? 0, plan.item.dyes?.[1]?.id ?? 0] as [number, number],

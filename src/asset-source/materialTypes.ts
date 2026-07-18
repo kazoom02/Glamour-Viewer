@@ -8,6 +8,12 @@ export interface MaterialLoadRequest {
   modelPath: string
   materialPaths: string[]
   imcPath?: string
+  /**
+   * When true, a missing/unreadable IMC is a soft diagnostic rather than a hard
+   * error. Set for a dual-wield off-hand, whose sub-model set often ships no IMC
+   * of its own and reuses the main set's material variant.
+   */
+  imcOptional?: boolean
   slot?: EquipmentSlot
   variant?: number
   /** In-game Stain row IDs for dye channels 1 and 2. */

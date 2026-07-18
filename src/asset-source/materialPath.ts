@@ -53,6 +53,17 @@ export function materialCandidates(request: MaterialLoadRequest, reference: stri
     }
   }
 
+  // Weapon materials name their own set/base (mt_w{set}b{base}). Resolve from the
+  // filename, not the model folder: the off-hand blade of a dual-wield weapon is a
+  // separate model set that references the MAIN set's material (e.g. w1851 model →
+  // mt_w1801… material), so the model-relative folder would miss it.
+  const weaponNamed = /^mt_w(\d{4})b(\d{4})/i.exec(filename)
+  if (weaponNamed) {
+    const [, set, base] = weaponNamed
+    const root = `chara/weapon/w${set}/obj/body/b${base}/material`
+    candidates.push(`${root}/${variantDirectory(materialId)}/${filename}`, `${root}/v0001/${filename}`)
+  }
+
   // Keep the model-relative paths as fallbacks for uncommon monster and demi-human materials.
   const modelRoot = request.modelPath.replace(/\/model\/[^/]+$/i, '')
   if (/^chara\/equipment\/e\d{4}$/i.test(modelRoot)) {

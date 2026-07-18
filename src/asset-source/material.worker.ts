@@ -198,7 +198,9 @@ async function loadRequest(
         `equipment IMC effects: vfxId=${vfxId} materialAnimationId=${materialAnimationId}`,
       )
     } catch (error) {
-      errors.push(`[imc] ${request.imcPath}: ${error instanceof Error ? error.message : String(error)}`)
+      const message = `[imc] ${request.imcPath}: ${error instanceof Error ? error.message : String(error)}`
+      if (request.imcOptional) diagnostics.push(message)
+      else errors.push(message)
     }
   }
   if (request.slot === 'head' && request.equipmentSetId !== undefined) {
