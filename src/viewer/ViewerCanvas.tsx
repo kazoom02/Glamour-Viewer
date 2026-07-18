@@ -768,23 +768,25 @@ function sageWeaponTarget(
   character.add(mount)
   return {
     target: mount,
-    diagnostic: `placement=sage-animated upper=j_buki_sebo_l/r lower=j_buki_kosi_l/r weaponScale=${weaponScale.toFixed(3)}`,
+    diagnostic: `placement=sage-animated mounts=j_buki2_kosi_l/r+j_buki_kosi_l/r weaponScale=${weaponScale.toFixed(3)}`,
   }
 }
 
 /**
  * The Sage PAP animates four character attachment bones, while the weapon model
  * calls its four weighted bones n_hara/n_haraB/n_haraC/n_haraD. Copy the animated
- * world transforms into the weapon-local skeleton every frame. This is the game
- * data that provides the horizontal formation and its subtle hovering loop.
+ * world transforms into the weapon-local skeleton every frame. The `buki2_kosi`
+ * pair was previously mistaken for the unrelated back-weapon (`sebo`) pair; all
+ * four hip mounts are what spread the nouliths around the character and animate
+ * their flying resident-idle loop.
  */
 function syncSageWeaponIdle(
   weaponRig: CharacterRig,
   characterRig: CharacterRig,
 ): void {
   const boneMap: Record<string, string> = {
-    n_hara: 'j_buki_sebo_l',
-    n_haraB: 'j_buki_sebo_r',
+    n_hara: 'j_buki2_kosi_l',
+    n_haraB: 'j_buki2_kosi_r',
     n_haraC: 'j_buki_kosi_l',
     n_haraD: 'j_buki_kosi_r',
   }

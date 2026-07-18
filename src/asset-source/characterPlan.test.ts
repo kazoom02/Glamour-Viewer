@@ -54,10 +54,8 @@ describe('character asset planning', () => {
     ])
   })
 
-  it('prefers the Sage looping battle pose that animates all four noulith mounts', () => {
+  it('uses the Sage resident idle whose four attachment bones fly around the character', () => {
     expect(idleAnimationCandidates('c0201', 'bt_jst_sld')).toEqual([
-      'chara/human/c0201/animation/a0001/bt_jst_sld/emote/b_pose01_loop.pap',
-      'chara/human/c0101/animation/a0001/bt_jst_sld/emote/b_pose01_loop.pap',
       'chara/human/c0201/animation/a0001/bt_jst_sld/resident/idle.pap',
       'chara/human/c0101/animation/a0001/bt_jst_sld/resident/idle.pap',
       'chara/human/c0201/animation/a0001/bt_common/resident/idle.pap',

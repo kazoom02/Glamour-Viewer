@@ -157,17 +157,6 @@ export function animationPapCandidates(
 export function idleAnimationCandidates(raceCode: CharacterRaceCode, weaponClass = 'bt_common'): string[] {
   const weaponIdle = animationPapCandidates(raceCode, weaponClass, 'resident', 'idle')
   if (weaponClass === 'bt_common') return weaponIdle
-  // Sage's recognizable drawn idle is the looping battle-pose clip. Besides
-  // the body stance it animates the four j_buki*_kosi attachment bones that
-  // make the nouliths hover. The resident idle remains a safe game-authored
-  // fallback for installs where the pose clip cannot be resolved.
-  if (weaponClass === 'bt_jst_sld') {
-    return [
-      ...animationPapCandidates(raceCode, weaponClass, 'emote', 'b_pose01_loop'),
-      ...weaponIdle,
-      ...animationPapCandidates(raceCode, 'bt_common', 'resident', 'idle'),
-    ]
-  }
   return [...weaponIdle, ...animationPapCandidates(raceCode, 'bt_common', 'resident', 'idle')]
 }
 
