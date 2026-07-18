@@ -67,6 +67,12 @@ export interface ArmorItem {
   headHairVisibility?: HairVisibility
   /** Viewer placement for equipped main-hand and off-hand models. */
   weaponPlacement?: WeaponPlacement
+  /**
+   * Off-hand model (FFXIV `ModelSub`) for dual-wield main-hand weapons such as
+   * Rogue/Ninja daggers or Viper twinblades, which carry a second blade the game
+   * renders in the left hand. Absent for single weapons and non-weapon items.
+   */
+  weaponSubModel?: { set: number; base: number; variant: number }
 }
 
 export interface EquipmentDye {

@@ -155,6 +155,11 @@ async function fetchArmorPage(url: URL, selectedSlot: EquipmentSlot, signal?: Ab
 
     const model = decodeEquipmentModel(modelValue, selectedSlot)
     if (!model.set) return []
+    // Dual-wield weapons (Rogue/Ninja daggers, Viper twinblades) store their
+    // off-hand blade in ModelSub; the game renders it in the left hand.
+    const subModel = isWeaponSlot(selectedSlot) && fields.ModelSub
+      ? decodeEquipmentModel(fields.ModelSub, selectedSlot)
+      : undefined
     return [{
       id,
       name: fields.Name,
@@ -169,6 +174,7 @@ async function fetchArmorPage(url: URL, selectedSlot: EquipmentSlot, signal?: Ab
       itemLevel: fields.LevelItem?.value ?? 0,
       jobs: fields.ClassJobCategory?.fields?.Name ?? 'All classes',
       classJobCategoryId: fields.ClassJobCategory?.value ?? 0,
+      ...(subModel?.set ? { weaponSubModel: subModel } : {}),
     }]
   })
 

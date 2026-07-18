@@ -41,6 +41,7 @@ import { attachSkeleton } from '../asset-source/sklb'
 import {
   EQUIPMENT_SLOTS,
   isWeaponSlot,
+  type ArmorItem,
   type EquipmentSlot,
   type EquippedArmor,
   type WeaponPlacement,
@@ -1047,6 +1048,27 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       asset: equipmentAssetPlan(item, raceCode),
       candidates: equipmentModelCandidates(item, raceCode),
     }))
+    // A dual-wield main-hand weapon (Rogue/Ninja daggers, Viper twinblades) carries
+    // a second blade in ModelSub that the game renders in the left hand. Synthesize
+    // an off-hand plan for it unless the off-hand slot already holds an item.
+    const mainHand = equipped.mainHand
+    if (mainHand?.weaponSubModel && !equipped.offHand) {
+      const sub = mainHand.weaponSubModel
+      const offHandItem: ArmorItem = {
+        ...mainHand,
+        slot: 'offHand',
+        modelSet: sub.set,
+        modelBase: sub.base,
+        modelVariant: sub.variant,
+        weaponSubModel: undefined,
+      }
+      equipmentPlans.push({
+        slot: 'offHand',
+        item: offHandItem,
+        asset: equipmentAssetPlan(offHandItem, raceCode),
+        candidates: equipmentModelCandidates(offHandItem, raceCode),
+      })
+    }
     const characterPlans = allCharacterPlans.filter((plan) => !plan.coveredBy || !equipped[plan.coveredBy])
     const headHairVisibility = equipped.head?.headHairVisibility ?? 'auto'
     let hairHidden = headHairVisibility === 'hide'

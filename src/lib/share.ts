@@ -49,6 +49,17 @@ function decodeDye(value: unknown): EquipmentDye | null | false {
   return { id, name: candidate.name.trim().slice(0, 100), color }
 }
 
+function decodeWeaponSubModel(value: unknown): ArmorItem['weaponSubModel'] | false {
+  if (value === undefined) return undefined
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<{ set: number; base: number; variant: number }>
+  const set = integer(candidate.set, 1)
+  const base = integer(candidate.base)
+  const variant = integer(candidate.variant)
+  if (set === undefined || base === undefined || variant === undefined) return false
+  return { set, base, variant }
+}
+
 function decodeSharedItem(value: unknown): ArmorItem | null {
   if (!value || typeof value !== 'object') return null
   const candidate = value as Partial<ArmorItem>
@@ -77,6 +88,9 @@ function decodeSharedItem(value: unknown): ArmorItem | null {
   const weaponPlacement = candidate.weaponPlacement
   if (weaponPlacement !== undefined && !WEAPON_PLACEMENT.has(weaponPlacement)) return null
   if (weaponPlacement !== undefined && !isWeaponSlot(candidate.slot as EquipmentSlot)) return null
+  const weaponSubModel = decodeWeaponSubModel(candidate.weaponSubModel)
+  if (weaponSubModel === false) return null
+  if (weaponSubModel && !isWeaponSlot(candidate.slot as EquipmentSlot)) return null
 
   return {
     id: candidate.id!,
@@ -93,6 +107,7 @@ function decodeSharedItem(value: unknown): ArmorItem | null {
     ...(dyes ? { dyes } : {}),
     ...(headHairVisibility ? { headHairVisibility } : {}),
     ...(weaponPlacement ? { weaponPlacement } : {}),
+    ...(weaponSubModel ? { weaponSubModel } : {}),
   }
 }
 
