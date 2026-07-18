@@ -20,7 +20,7 @@ import { catalogAnimationCandidates, idleWeaponClassForJobs, isCompactHipSubWeap
 import { getClassJobCategories } from '../catalog/catalogCache'
 import { createLocalAssetReader } from '../asset-source/sqpack'
 import { HUMAN_CMP_PATH, loadLocalBustScale, type BustScale } from '../asset-source/cmp'
-import { equipmentAssetPlan } from '../asset-source/equipmentPlan'
+import { equipmentAssetPlan, weaponSkeletonPath } from '../asset-source/equipmentPlan'
 import {
   loadLocalMaterials,
   type DecodedMaterialAnimation,
@@ -754,6 +754,36 @@ function equipmentTarget(
     : handWeaponTarget(character, rig, slot, shield, forceLeftHand)
 }
 
+/**
+ * Sage nouliths are one skinned weapon model driven by a weapon-local four-bone
+ * skeleton. Their idle root floats just above and behind the head instead of
+ * following either hand; the authored skeleton fans the four pieces out from it.
+ */
+function sageWeaponTarget(
+  character: THREE.Group,
+  rig: CharacterRig | undefined,
+  weaponScale: number,
+): EquipmentAttachment {
+  character.updateMatrixWorld(true)
+  const anchorBoneNames = ['j_kao', 'j_sebo_c', 'j_sebo_b']
+  const anchorBone = anchorBoneNames
+    .map((name) => rig?.skeleton.bones.find((bone) => bone.name === name))
+    .find(Boolean)
+  const anchor = anchorBone
+    ? anchorBone.getWorldPosition(new THREE.Vector3())
+    : new THREE.Vector3(0, 1.55, 0)
+  anchor.add(new THREE.Vector3(0, Math.max(0.1, 0.16 * weaponScale), -0.08))
+
+  const mount = new THREE.Group()
+  mount.name = 'mainHand-sage-idle-root'
+  character.add(mount)
+  mount.position.copy(character.worldToLocal(anchor.clone()))
+  return {
+    target: mount,
+    diagnostic: `placement=sage-idle bone=${anchorBone?.name ?? 'character-root'} anchor=${formatVector(anchor.toArray())} weaponScale=${weaponScale.toFixed(3)}`,
+  }
+}
+
 // Left-hip scabbard placement for a single weapon's sheath (a Samurai katana's saya
 // and similar). The blade's long axis is aimed along DIRECTION (world space, character
 // facing +Z toward the camera: +X = left, +Y = up, +Z = forward), then ROLL_DEG spins
@@ -1268,6 +1298,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       compactHipMount: false,
       shieldMount: false,
       leftHandMount: false,
+      sageMount: false,
     }))
     // A main-hand weapon's ModelSub becomes a second held off-hand weapon for true
     // dual-wield jobs, a compact hip device (Machinist), or a long left-hip
@@ -1296,6 +1327,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
         compactHipMount,
         shieldMount,
         leftHandMount: false,
+        sageMount: false,
       })
     }
     const characterPlans = allCharacterPlans.filter((plan) => !plan.coveredBy || !equipped[plan.coveredBy])
@@ -1315,6 +1347,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       let equippedItems = 0
       let rig: CharacterRig | undefined
       let decodedSkeleton: DecodedSkeleton | undefined
+      let sageWeaponSkeleton: DecodedSkeleton | undefined
       let bustScale: BustScale = [1, 1, 1]
       let baseIdleClip: THREE.AnimationClip | undefined
       let idleAnimationPromise: Promise<DecodedAnimation> | undefined
@@ -1376,6 +1409,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           const idleWeapon = equipped.mainHand
           let mainHandUsesShield = Boolean(idleWeapon && /\b(?:GLA|PLD|Gladiator|Paladin)\b/i.test(idleWeapon.jobs))
           let mainHandUsesLeftHand = Boolean(idleWeapon && /\b(?:AST|Astrologian)\b/i.test(idleWeapon.jobs))
+          let mainHandUsesSageFormation = Boolean(idleWeapon && /\b(?:SGE|Sage)\b/i.test(idleWeapon.jobs))
           let subWeaponUsesCompactHip = Boolean(idleWeapon && /\b(?:MCH|Machinist)\b/i.test(idleWeapon.jobs))
           if (idleWeapon?.classJobCategoryId) {
             try {
@@ -1386,6 +1420,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
                 subWeaponUsesCompactHip ||= isCompactHipSubWeaponJobs(jobs)
                 mainHandUsesShield ||= idleWeaponClass === 'bt_swd_sld'
                 mainHandUsesLeftHand ||= idleWeaponClass === 'bt_2gl_emp'
+                mainHandUsesSageFormation ||= idleWeaponClass === 'bt_jst_sld'
               }
             } catch {
               // XIVAPI unavailable — keep the unarmed idle and no off-hand weapon.
@@ -1397,9 +1432,19 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           for (const plan of equipmentPlans) {
             if (plan.slot === 'offHand' && mainHandUsesShield) plan.shieldMount = true
             if (plan.slot === 'mainHand' && mainHandUsesLeftHand) plan.leftHandMount = true
+            if (plan.slot === 'mainHand' && mainHandUsesSageFormation) plan.sageMount = true
+          }
+          if (mainHandUsesSageFormation && idleWeapon) {
+            const path = weaponSkeletonPath(idleWeapon.modelSet)
+            try {
+              sageWeaponSkeleton = await loadLocalSkeleton(source, path)
+              diagnostics.push(`sage weapon skeleton: ${path} bones=${sageWeaponSkeleton.bones.length}`)
+            } catch (reason) {
+              failures.push(`sage weapon skeleton: ${reason instanceof Error ? reason.message : String(reason)}`)
+            }
           }
           addSubWeaponOffHand(!mainHandDualWield && !subWeaponUsesCompactHip, subWeaponUsesCompactHip, mainHandUsesShield)
-          diagnostics.push(`weapon handedness: class=${idleWeaponClass} forceMainLeft=${mainHandUsesLeftHand}`)
+          diagnostics.push(`weapon handedness: class=${idleWeaponClass} forceMainLeft=${mainHandUsesLeftHand} sageFormation=${mainHandUsesSageFormation}`)
           diagnostics.push(`off-hand weapon: dualWield=${mainHandDualWield} compactHipSub=${subWeaponUsesCompactHip} shield=${mainHandUsesShield} placement=${mainHandUsesShield ? 'shield' : mainHandDualWield ? 'hand' : subWeaponUsesCompactHip ? 'compact-hip' : 'hip'} sub=${idleWeapon?.weaponSubModel ? `${idleWeapon.weaponSubModel.set}/${idleWeapon.weaponSubModel.base}` : 'none'}`)
           // Sheathed rests on the unarmed idle; drawn rests on the weapon idle. The
           // draw state survives customization rebuilds (weaponDrawnRef).
@@ -1532,8 +1577,11 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             const materialResult = materialsByModel.get(result.path)
             const weapon = isWeaponSlot(plan.slot)
             const animatedMaterialCount = animatedMaterials.length
+            const weaponScale = weapon ? weaponRaceScale(raceCode) : 1
             const attachment = !weapon
               ? { target: characterGroup, diagnostic: '' }
+              : plan.sageMount && sageWeaponSkeleton
+                ? sageWeaponTarget(characterGroup, rig, weaponScale)
               : plan.compactHipMount
                 ? compactHipWeaponTarget(characterGroup, rig, result.model)
                 : plan.hipMount
@@ -1551,14 +1599,17 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             // its VFX in one named mount group under the attach point so race
             // scaling stays proportional AND the display toggle hides the whole
             // weapon (blade + glow) at once rather than leaving orphaned VFX.
-            const weaponScale = weapon ? weaponRaceScale(raceCode) : 1
             let renderTarget = attachment.target
+            let weaponRig: CharacterRig | undefined
             if (weapon) {
               const mount = new THREE.Group()
               mount.name = `equipment-${plan.slot}-mount`
               if (weaponScale !== 1) mount.scale.setScalar(weaponScale)
               attachment.target.add(mount)
               renderTarget = mount
+              if (plan.sageMount && sageWeaponSkeleton) {
+                weaponRig = addCharacterRig(mount, sageWeaponSkeleton)
+              }
             }
             addDecodedModel(
               renderTarget,
@@ -1568,7 +1619,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               materialResult?.materials,
               materialResult?.attributeMask,
               plan.slot,
-              weapon ? undefined : rig,
+              weapon ? weaponRig : rig,
               maxAnisotropy,
               customization,
               false,

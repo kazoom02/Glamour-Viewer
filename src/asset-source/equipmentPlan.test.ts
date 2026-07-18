@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ArmorItem } from '../catalog/types'
-import { equipmentAssetPlan } from './equipmentPlan'
+import { equipmentAssetPlan, weaponSkeletonPath } from './equipmentPlan'
 
 const item: ArmorItem = {
   id: 8619,
@@ -16,6 +16,10 @@ const item: ArmorItem = {
 }
 
 describe('equipmentAssetPlan', () => {
+  it('resolves the weapon-local skeleton shared by all bodies in a weapon set', () => {
+    expect(weaponSkeletonPath(2702)).toBe('chara/weapon/w2702/skeleton/base/b0001/skl_w2702b0001.sklb')
+  })
+
   it('resolves deterministic equipment paths for a race model', () => {
     expect(equipmentAssetPlan(item, 'c0201')).toEqual({
       itemId: 8619,

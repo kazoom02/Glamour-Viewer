@@ -38,6 +38,12 @@ function pad(value: number): string {
   return Math.max(0, value).toString().padStart(4, '0')
 }
 
+/** Weapon-local skeleton used by articulated arms such as Sage nouliths. */
+export function weaponSkeletonPath(modelSet: number): string {
+  const set = pad(modelSet)
+  return `chara/weapon/w${set}/skeleton/base/b0001/skl_w${set}b0001.sklb`
+}
+
 export function equipmentAssetPlan(item: ArmorItem, raceCode = 'c0201'): EquipmentAssetPlan {
   if (!/^c\d{4}$/.test(raceCode)) throw new Error('Invalid FFXIV character race code.')
   const set = pad(item.modelSet)
