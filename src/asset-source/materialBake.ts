@@ -64,6 +64,27 @@ export function materialAlphaMode(shaderPackage: string, materialReference: stri
   return 'opaque'
 }
 
+/** Hair is assembled from open cards whose reverse faces remain visible in-game. */
+export function materialRendersBackfaces(
+  shaderPackage: string,
+  materialReference: string,
+  authoredRenderBackfaces: boolean | undefined,
+  alphaMode: MaterialAlphaMode,
+): boolean {
+  const hair = shaderPackage.toLowerCase() === 'hair.shpk' || /_hir_[a-z]\.mtrl$/i.test(materialReference)
+  return hair || (authoredRenderBackfaces ?? alphaMode !== 'opaque')
+}
+
+/** Preserves the soft overlap between layered hair cards without exposing their full rectangles. */
+export function materialAlphaCutoff(
+  shaderPackage: string,
+  alphaMode: MaterialAlphaMode,
+  hasDiffuse: boolean,
+): number {
+  if (!hasDiffuse || alphaMode !== 'mask') return 0
+  return shaderPackage.toLowerCase() === 'hair.shpk' ? 0.34 : 0.46
+}
+
 /** Only gear-style shaders interpret a MTRL color table as the character PBR lookup. */
 export function usesCharacterColorTable(shaderPackage: string): boolean {
   const shader = shaderPackage.toLowerCase()

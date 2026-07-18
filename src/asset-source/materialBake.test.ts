@@ -7,6 +7,8 @@ import {
   extractSkinColorMask,
   extractSkinLipMask,
   materialAlphaMode,
+  materialAlphaCutoff,
+  materialRendersBackfaces,
   usesCharacterColorTable,
 } from './materialBake'
 import type { MaterialColorTable } from './mtrl'
@@ -176,6 +178,17 @@ describe('character colorset baking', () => {
     expect(materialAlphaMode('skin.shpk', face)).toBe('mask')
     expect(materialAlphaMode('skin.shpk', '/mt_c0101b0001_a.mtrl')).toBe('opaque')
     expect(materialAlphaMode('character.shpk', '/mt_w2101b0062_a.mtrl', 0x10)).toBe('blend')
+  })
+
+  it('keeps open hair cards double-sided even when the authored flag hides generic backfaces', () => {
+    expect(materialRendersBackfaces('hair.shpk', '/mt_c0201h0001_hir_a.mtrl', false, 'mask')).toBe(true)
+    expect(materialRendersBackfaces('skin.shpk', '/mt_c0201f0001_fac_a.mtrl', false, 'opaque')).toBe(false)
+  })
+
+  it('uses the soft hair-card cutoff only for masked hair with a diffuse texture', () => {
+    expect(materialAlphaCutoff('hair.shpk', 'mask', true)).toBe(0.34)
+    expect(materialAlphaCutoff('hair.shpk', 'blend', true)).toBe(0)
+    expect(materialAlphaCutoff('character.shpk', 'mask', true)).toBe(0.46)
   })
 
   it('does not apply the gear colorset baker to iris materials', () => {

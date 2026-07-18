@@ -16,7 +16,7 @@ import {
   type CharacterRaceCode,
 } from '../asset-source/characterPlan'
 import { loadLocalAnimation, loadLocalIdleAnimation, type DecodedAnimation } from '../asset-source/animationLoader'
-import { catalogAnimationCandidates, idleWeaponClassForJobs, isDualWieldJobs, toCatalogAnimation, type CatalogAnimation } from '../asset-source/animationCatalog'
+import { catalogAnimationCandidates, idleWeaponClassForJobs, isDualWieldJobs, isHeldSubWeaponJobs, toCatalogAnimation, type CatalogAnimation } from '../asset-source/animationCatalog'
 import { getClassJobCategories } from '../catalog/catalogCache'
 import { createLocalAssetReader } from '../asset-source/sqpack'
 import { HUMAN_CMP_PATH, loadLocalBustScale, type BustScale } from '../asset-source/cmp'
@@ -30,6 +30,7 @@ import {
   type MaterialLoadResult,
 } from '../asset-source/materialLoader'
 import { materialAnimationTrack, sampleMaterialAnimationTrack } from '../asset-source/materialAnimation'
+import { materialAlphaCutoff, materialRendersBackfaces } from '../asset-source/materialBake'
 import { loadLocalModels, type ModelLoadResult } from '../asset-source/modelLoader'
 import type { DecodedModel } from '../asset-source/mdl'
 import {
@@ -509,10 +510,10 @@ function addDecodedModel(
       ior: isGearShader ? 2.0 : 1.45,
       clearcoat: 0,
       sheen: 0,
-      alphaTest: diffuse && alphaMode === 'mask' ? (shaderPackage === 'hair.shpk' ? 0.5 : 0.46) : 0,
+      alphaTest: materialAlphaCutoff(shaderPackage, alphaMode, Boolean(diffuse)),
       transparent: alphaMode === 'blend',
       depthWrite: alphaMode !== 'blend',
-      side: decodedMaterial?.renderBackfaces ?? (alphaMode !== 'opaque' || shaderPackage === 'hair.shpk')
+      side: materialRendersBackfaces(shaderPackage, materialPath, decodedMaterial?.renderBackfaces, alphaMode)
         ? THREE.DoubleSide
         : THREE.FrontSide,
       dithering: true,
@@ -1216,9 +1217,9 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       leftHandMount: false,
     }))
     // A main-hand weapon's ModelSub becomes a second held off-hand weapon for true
-    // dual-wield jobs, or a left-hip scabbard (hipMount) for single-weapon jobs like
-    // Samurai. `hipMount` is decided by the caller from the resolved equip jobs.
-    const addSubWeaponOffHand = (hipMount: boolean, shieldMount: boolean) => {
+    // dual-wield jobs, a held utility device (Machinist), or a left-hip scabbard
+    // (Samurai). The caller resolves the appropriate mount from the equip jobs.
+    const addSubWeaponOffHand = (hipMount: boolean, shieldMount: boolean, leftHandMount: boolean) => {
       const mainHand = equipped.mainHand
       if (!mainHand?.weaponSubModel || equipped.offHand) return
       const sub = mainHand.weaponSubModel
@@ -1240,7 +1241,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
         imcOptional: true,
         hipMount,
         shieldMount,
-        leftHandMount: false,
+        leftHandMount,
       })
     }
     const characterPlans = allCharacterPlans.filter((plan) => !plan.coveredBy || !equipped[plan.coveredBy])
@@ -1321,12 +1322,14 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           const idleWeapon = equipped.mainHand
           let mainHandUsesShield = Boolean(idleWeapon && /\b(?:GLA|PLD|Gladiator|Paladin)\b/i.test(idleWeapon.jobs))
           let mainHandUsesLeftHand = Boolean(idleWeapon && /\b(?:AST|Astrologian)\b/i.test(idleWeapon.jobs))
+          let subWeaponUsesLeftHand = Boolean(idleWeapon && /\b(?:MCH|Machinist)\b/i.test(idleWeapon.jobs))
           if (idleWeapon?.classJobCategoryId) {
             try {
               const jobs = (await getClassJobCategories()).get(idleWeapon.classJobCategoryId)
               if (jobs) {
                 idleWeaponClass = idleWeaponClassForJobs(jobs) ?? 'bt_common'
                 mainHandDualWield = isDualWieldJobs(jobs)
+                subWeaponUsesLeftHand ||= isHeldSubWeaponJobs(jobs)
                 mainHandUsesShield ||= idleWeaponClass === 'bt_swd_sld'
                 mainHandUsesLeftHand ||= idleWeaponClass === 'bt_2gl_emp'
               }
@@ -1341,9 +1344,9 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             if (plan.slot === 'offHand' && mainHandUsesShield) plan.shieldMount = true
             if (plan.slot === 'mainHand' && mainHandUsesLeftHand) plan.leftHandMount = true
           }
-          addSubWeaponOffHand(!mainHandDualWield, mainHandUsesShield)
+          addSubWeaponOffHand(!mainHandDualWield && !subWeaponUsesLeftHand, mainHandUsesShield, subWeaponUsesLeftHand)
           diagnostics.push(`weapon handedness: class=${idleWeaponClass} forceMainLeft=${mainHandUsesLeftHand}`)
-          diagnostics.push(`off-hand weapon: dualWield=${mainHandDualWield} shield=${mainHandUsesShield} placement=${mainHandUsesShield ? 'shield' : mainHandDualWield ? 'hand' : 'hip'} sub=${idleWeapon?.weaponSubModel ? `${idleWeapon.weaponSubModel.set}/${idleWeapon.weaponSubModel.base}` : 'none'}`)
+          diagnostics.push(`off-hand weapon: dualWield=${mainHandDualWield} heldSub=${subWeaponUsesLeftHand} shield=${mainHandUsesShield} placement=${mainHandUsesShield ? 'shield' : mainHandDualWield || subWeaponUsesLeftHand ? 'hand' : 'hip'} sub=${idleWeapon?.weaponSubModel ? `${idleWeapon.weaponSubModel.set}/${idleWeapon.weaponSubModel.base}` : 'none'}`)
           // Sheathed rests on the unarmed idle; drawn rests on the weapon idle. The
           // draw state survives customization rebuilds (weaponDrawnRef).
           const restingClass = weaponDrawnRef.current && idleWeaponClass !== 'bt_common' ? idleWeaponClass : 'bt_common'
