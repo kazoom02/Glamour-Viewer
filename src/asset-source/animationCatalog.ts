@@ -55,6 +55,7 @@ const WEAPON_CLASS_LABELS: Record<string, string> = {
   bt_2ax_emp: 'Greataxe',
   bt_2bk_emp: 'Grimoire',
   bt_2bw_emp: 'Bow',
+  bt_2ff_emp: 'Viper twinblades',
   bt_2gb_emp: 'Gunblade',
   bt_2gl_emp: 'Star globe',
   bt_2gn_emp: 'Firearm',
@@ -62,6 +63,7 @@ const WEAPON_CLASS_LABELS: Record<string, string> = {
   bt_2rp_emp: 'Rapier',
   bt_2sp_emp: 'Polearm',
   bt_2sw_emp: 'Greatsword',
+  bt_brs_plt: 'Brush & palette',
   bt_clw_clw: 'Fist weapons',
   bt_dgr_dgr: 'Daggers',
   bt_nin_nin: 'Ninja blades',
@@ -89,8 +91,8 @@ export function weaponClassLabel(weaponClass: string): string {
 /**
  * FFXIV job/class codes → the weapon animation class whose standing `resident/idle`
  * loop the job uses. Only classes that actually ship a `{class}/resident/idle.pap`
- * are listed; jobs whose weapon has no authored resident idle (Sage, Reaper, Viper,
- * Pictomancer, crafters, non-fisher gatherers…) are omitted and fall back to the
+ * are listed; jobs whose weapon has no authored resident idle (Sage, Reaper,
+ * crafters, non-fisher gatherers…) are omitted and fall back to the
  * unarmed `bt_common` idle.
  */
 const JOB_IDLE_WEAPON_CLASS: Record<string, string> = {
@@ -104,11 +106,13 @@ const JOB_IDLE_WEAPON_CLASS: Record<string, string> = {
   PGL: 'bt_clw_clw', MNK: 'bt_clw_clw',
   LNC: 'bt_2sp_emp', DRG: 'bt_2sp_emp',
   ROG: 'bt_dgr_dgr', NIN: 'bt_dgr_dgr',
+  VPR: 'bt_2ff_emp',
   SAM: 'bt_2kt_emp',
   RDM: 'bt_2rp_emp',
   ARC: 'bt_2bw_emp', BRD: 'bt_2bw_emp',
   MCH: 'bt_2gn_emp',
   DNC: 'bt_chk_chk',
+  PCT: 'bt_brs_plt',
   FSH: 'bt_rod_emp',
 }
 

@@ -76,6 +76,7 @@ describe('weapon class labels', () => {
   it('labels known classes and falls back to the raw code', () => {
     expect(weaponClassLabel('bt_common')).toBe('Common (no weapon)')
     expect(weaponClassLabel('bt_2kt_emp')).toBe('Katana')
+    expect(weaponClassLabel('bt_brs_plt')).toBe('Brush & palette')
     expect(weaponClassLabel('bt_zzz_zzz')).toBe('bt_zzz_zzz')
   })
 })
@@ -85,6 +86,8 @@ describe('idle weapon class resolution', () => {
     expect(idleWeaponClassForJobs(new Set(['ROG', 'NIN']))).toBe('bt_dgr_dgr')
     expect(idleWeaponClassForJobs(new Set(['DRK']))).toBe('bt_2sw_emp')
     expect(idleWeaponClassForJobs(new Set(['GLA', 'PLD']))).toBe('bt_swd_sld')
+    expect(idleWeaponClassForJobs(new Set(['VPR']))).toBe('bt_2ff_emp')
+    expect(idleWeaponClassForJobs(new Set(['PCT']))).toBe('bt_brs_plt')
   })
 
   it('returns undefined when no job has an authored resident idle', () => {
