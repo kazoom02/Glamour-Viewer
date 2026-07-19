@@ -4,6 +4,9 @@ export interface SageWeaponFormationPart {
   offset: readonly [lateral: number, vertical: number, forward: number]
 }
 
+/** Shared articulated skeleton used by the four nouliths during Sage idles. */
+export const SAGE_IDLE_WEAPON_SKELETON_PATH = 'chara/weapon/w2702/skeleton/base/b0001/skl_w2702b0001.sklb'
+
 /**
  * The PAP supplies the per-frame hover/rotation at compact equipment mounts.
  * The game then spreads the articulated weapon into its drawn combat formation.

@@ -11,6 +11,8 @@ interface Request {
   paths: string[]
   // Optional internal track name for catalog animations; omitted for idle.
   preferName?: string
+  // Optional base skeleton used to retarget decoded transform indices by name.
+  skeletonPathOverride?: string
 }
 
 function transferBuffers(animation: DecodedAnimation): ArrayBuffer[] {
@@ -24,7 +26,7 @@ function transferBuffers(animation: DecodedAnimation): ArrayBuffer[] {
 }
 
 self.onmessage = (event: MessageEvent<Request>) => {
-  const { id, source, paths, preferName } = event.data
+  const { id, source, paths, preferName, skeletonPathOverride } = event.data
   void (async () => {
     const reader = createLocalAssetReader(source)
     const errors: string[] = []
@@ -32,9 +34,10 @@ self.onmessage = (event: MessageEvent<Request>) => {
       try {
         let boneNamesOverride: string[] | undefined
         const match = path.match(/chara\/human\/(c\d{4})\//)
-        if (match) {
-          const raceCode = match[1]
-          const sklbPath = `chara/human/${raceCode}/skeleton/base/b0001/skl_${raceCode}b0001.sklb`
+        if (skeletonPathOverride || match) {
+          const raceCode = match?.[1]
+          const sklbPath = skeletonPathOverride
+            ?? `chara/human/${raceCode}/skeleton/base/b0001/skl_${raceCode}b0001.sklb`
           try {
             const sklbBytes = await reader.read(sklbPath)
             const decodedSklb = decodeSklb(sklbBytes)
@@ -44,6 +47,11 @@ self.onmessage = (event: MessageEvent<Request>) => {
           }
         }
         const animation = decodePap(await reader.read(path), path, 30, preferName, boneNamesOverride)
+        if (skeletonPathOverride && boneNamesOverride) {
+          for (const track of animation.tracks) {
+            track.boneName = boneNamesOverride[track.boneIndex] ?? track.boneName
+          }
+        }
         self.postMessage({ id, animation }, { transfer: transferBuffers(animation) })
         return
       } catch (error) {
@@ -55,4 +63,3 @@ self.onmessage = (event: MessageEvent<Request>) => {
     self.postMessage({ id, error: error instanceof Error ? error.message : 'The animation worker failed.' })
   })
 }
-

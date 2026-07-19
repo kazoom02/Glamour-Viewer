@@ -19,6 +19,7 @@ export function loadLocalAnimation(
   source: Extract<AssetSource, { kind: 'local' }>,
   paths: string[],
   preferName?: string,
+  skeletonPathOverride?: string,
 ): Promise<DecodedAnimation> {
   const worker = new Worker(new URL('./animation.worker.ts', import.meta.url), { type: 'module' })
   const id = ++requestId
@@ -33,7 +34,7 @@ export function loadLocalAnimation(
       worker.terminate()
       reject(new Error(event.message || 'The animation worker failed.'))
     }
-    worker.postMessage({ id, source, paths, preferName })
+    worker.postMessage({ id, source, paths, preferName, skeletonPathOverride })
   })
 }
 
@@ -41,9 +42,9 @@ export function loadLocalAnimation(
 export function loadLocalIdleAnimation(
   source: Extract<AssetSource, { kind: 'local' }>,
   paths: string[],
+  skeletonPathOverride?: string,
 ): Promise<DecodedAnimation> {
-  return loadLocalAnimation(source, paths)
+  return loadLocalAnimation(source, paths, undefined, skeletonPathOverride)
 }
 
 export type { DecodedAnimation, DecodedAnimationTrack } from './pap'
-

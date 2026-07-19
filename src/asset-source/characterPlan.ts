@@ -105,6 +105,16 @@ export function skeletonPath(raceCode: CharacterRaceCode): string {
   return `chara/human/${raceCode}/skeleton/base/b0001/skl_${raceCode}b0001.sklb`
 }
 
+/** Base skeleton family used to map Sage idle PAP transform indices to bone names. */
+export function sageIdleSkeletonPath(raceCode: CharacterRaceCode): string {
+  const skeletonRace: CharacterRaceCode = raceCode === 'c1101' || raceCode === 'c1201'
+    ? 'c1101'
+    : raceCode === 'c1501' || raceCode === 'c1601'
+      ? 'c1501'
+      : 'c0101'
+  return skeletonPath(skeletonRace)
+}
+
 // FFXIV renders one weapon model at a size that depends on the wielder's race:
 // the same greatsword is tiny on a Lalafell and huge on a Roegadyn. Weapon MDLs
 // are authored for Hyur proportions, so those stay at 1.0 (no change to the

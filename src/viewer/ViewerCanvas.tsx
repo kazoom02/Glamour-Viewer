@@ -11,6 +11,7 @@ import {
   faceSkeletonCandidates,
   animationPapCandidates,
   idleAnimationCandidates,
+  sageIdleSkeletonPath,
   skeletonPath,
   weaponRaceScale,
   type CharacterPart,
@@ -21,7 +22,7 @@ import { catalogAnimationCandidates, idleWeaponClassForJobs, isCompactHipSubWeap
 import { getClassJobCategories } from '../catalog/catalogCache'
 import { createLocalAssetReader } from '../asset-source/sqpack'
 import { HUMAN_CMP_PATH, loadLocalBustScale, type BustScale } from '../asset-source/cmp'
-import { equipmentAssetPlan, weaponSkeletonPath } from '../asset-source/equipmentPlan'
+import { equipmentAssetPlan } from '../asset-source/equipmentPlan'
 import {
   loadLocalMaterials,
   type DecodedMaterialAnimation,
@@ -56,7 +57,7 @@ import AnimationPicker from './AnimationPicker'
 import { createAvfxRuntime, type AvfxRuntime } from './avfxRuntime'
 import { subdivideCurvedMesh } from './geometryQuality'
 import { remapSkinIndices } from './skinBinding'
-import { SAGE_WEAPON_FORMATION } from './sageWeapon'
+import { SAGE_IDLE_WEAPON_SKELETON_PATH, SAGE_WEAPON_FORMATION } from './sageWeapon'
 import {
   applyBustDeformation,
   bustWeightSummary,
@@ -1480,7 +1481,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             if (plan.slot === 'mainHand' && mainHandUsesSageFormation) plan.sageMount = true
           }
           if (mainHandUsesSageFormation && idleWeapon) {
-            const path = weaponSkeletonPath(idleWeapon.modelSet)
+            const path = SAGE_IDLE_WEAPON_SKELETON_PATH
             try {
               sageWeaponSkeleton = await loadLocalSkeleton(source, path)
               diagnostics.push(`sage weapon skeleton: ${path} bones=${sageWeaponSkeleton.bones.length}`)
@@ -1495,11 +1496,17 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           // draw state survives customization rebuilds (weaponDrawnRef).
           const restingClass = weaponDrawnRef.current && idleWeaponClass !== 'bt_common' ? idleWeaponClass : 'bt_common'
           diagnostics.push(`idle: weaponClass=${idleWeaponClass} drawn=${weaponDrawnRef.current} resting=${restingClass} (mainHand=${idleWeapon?.name ?? 'none'})`)
-          idleAnimationPromise = loadLocalIdleAnimation(source, idleAnimationCandidates(raceCode, restingClass))
+          const sageSkeletonOverride = restingClass === 'bt_jst_sld' ? sageIdleSkeletonPath(raceCode) : undefined
+          idleAnimationPromise = loadLocalIdleAnimation(
+            source,
+            idleAnimationCandidates(raceCode, restingClass),
+            sageSkeletonOverride,
+          )
           if (restingClass === 'bt_jst_sld') {
             sageResidentIdlePromise = loadLocalIdleAnimation(
               source,
               animationPapCandidates(raceCode, 'bt_jst_sld', 'resident', 'idle'),
+              sageSkeletonOverride,
             )
           }
         } catch (reason) {
@@ -1858,12 +1865,17 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             const transitionEntry = toCatalogAnimation(`${weaponClass}-resident-sub-${drawing ? 'cbbp_a_activ' : 'cbbp_a_deact'}`)
             // Drawing settles into the weapon idle; sheathing into the unarmed idle.
             const restingClass = drawing ? weaponClass : 'bt_common'
+            const sageSkeletonOverride = restingClass === 'bt_jst_sld' ? sageIdleSkeletonPath(raceCode) : undefined
             const sageResidentPromise = restingClass === 'bt_jst_sld'
-              ? loadLocalIdleAnimation(localSource, animationPapCandidates(raceCode, 'bt_jst_sld', 'resident', 'idle'))
+              ? loadLocalIdleAnimation(
+                  localSource,
+                  animationPapCandidates(raceCode, 'bt_jst_sld', 'resident', 'idle'),
+                  sageSkeletonOverride,
+                )
               : undefined
             const [transitionDecoded, restingDecoded, sageResidentDecoded] = await Promise.all([
               loadLocalAnimation(localSource, catalogAnimationCandidates(transitionEntry, raceCode), transitionEntry.internal || undefined),
-              loadLocalIdleAnimation(localSource, idleAnimationCandidates(raceCode, restingClass)),
+              loadLocalIdleAnimation(localSource, idleAnimationCandidates(raceCode, restingClass), sageSkeletonOverride),
               sageResidentPromise,
             ])
             if (disposed) return

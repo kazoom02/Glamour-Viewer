@@ -10,6 +10,7 @@ import {
   faceSkeletonPath,
   hairSkeletonPath,
   idleAnimationCandidates,
+  sageIdleSkeletonPath,
   skeletonPath,
 } from './characterPlan'
 
@@ -72,6 +73,15 @@ describe('character asset planning', () => {
       'chara/human/c0801/animation/a0001/bt_jst_sld/emote/b_pose01_loop.pap',
       'chara/human/c0101/animation/a0001/bt_jst_sld/emote/b_pose01_loop.pap',
     ])
+  })
+
+  it('uses the correct Sage idle skeleton family', () => {
+    expect(sageIdleSkeletonPath('c0201')).toBe('chara/human/c0101/skeleton/base/b0001/skl_c0101b0001.sklb')
+    expect(sageIdleSkeletonPath('c1101')).toBe('chara/human/c1101/skeleton/base/b0001/skl_c1101b0001.sklb')
+    expect(sageIdleSkeletonPath('c1201')).toBe('chara/human/c1101/skeleton/base/b0001/skl_c1101b0001.sklb')
+    expect(sageIdleSkeletonPath('c1501')).toBe('chara/human/c1501/skeleton/base/b0001/skl_c1501b0001.sklb')
+    expect(sageIdleSkeletonPath('c1601')).toBe('chara/human/c1501/skeleton/base/b0001/skl_c1501b0001.sklb')
+    expect(sageIdleSkeletonPath('c1801')).toBe('chara/human/c0101/skeleton/base/b0001/skl_c0101b0001.sklb')
   })
 
   it('adds the male Midlander equipment fallback', () => {
