@@ -9,8 +9,9 @@ import {
   characterModelPlan,
   equipmentModelCandidates,
   faceSkeletonCandidates,
-  animationPapCandidates,
   idleAnimationCandidates,
+  SAGE_IDLE_ANIMATION_NAME,
+  sageIdleAnimationPath,
   sageIdleSkeletonPath,
   skeletonPath,
   weaponRaceScale,
@@ -1408,9 +1409,9 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           let mainHandUsesLeftHand = Boolean(idleWeapon && /\b(?:AST|Astrologian)\b/i.test(idleWeapon.jobs))
           let mainHandUsesSageFormation = Boolean(idleWeapon && /\b(?:SGE|Sage)\b/i.test(idleWeapon.jobs))
           let subWeaponUsesCompactHip = Boolean(idleWeapon && /\b(?:MCH|Machinist)\b/i.test(idleWeapon.jobs))
-          // Local installs must not depend on XIVAPI being reachable to select
-          // Sage's authored cbbm_id0 combat idle. The item job text is already
-          // sufficient to identify both the formation and its animation class.
+          // Local installs must not depend on XIVAPI being reachable to identify
+          // Sage. The item job text is sufficient to select both the formation
+          // and the special race-family cbbm_id0 idle loaded below.
           if (mainHandUsesSageFormation) idleWeaponClass = 'bt_jst_sld'
           if (idleWeapon?.classJobCategoryId) {
             try {
@@ -1461,8 +1462,8 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           idleAnimationPromise = restingClass === 'bt_jst_sld'
             ? loadLocalAnimation(
                 source,
-                animationPapCandidates(raceCode, 'bt_jst_sld', 'resident', 'idle'),
-                'cbbm_id0',
+                [sageIdleAnimationPath(raceCode)],
+                SAGE_IDLE_ANIMATION_NAME,
                 sageSkeletonOverride,
               )
             : loadLocalIdleAnimation(source, idleAnimationCandidates(raceCode, restingClass))
@@ -1826,8 +1827,8 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             const restingPromise = restingClass === 'bt_jst_sld'
               ? loadLocalAnimation(
                   localSource,
-                  animationPapCandidates(raceCode, 'bt_jst_sld', 'resident', 'idle'),
-                  'cbbm_id0',
+                  [sageIdleAnimationPath(raceCode)],
+                  SAGE_IDLE_ANIMATION_NAME,
                   sageSkeletonOverride,
                 )
               : loadLocalIdleAnimation(localSource, idleAnimationCandidates(raceCode, restingClass))

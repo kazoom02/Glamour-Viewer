@@ -10,6 +10,8 @@ import {
   faceSkeletonPath,
   hairSkeletonPath,
   idleAnimationCandidates,
+  SAGE_IDLE_ANIMATION_NAME,
+  sageIdleAnimationPath,
   sageIdleSkeletonPath,
   skeletonPath,
 } from './characterPlan'
@@ -55,7 +57,7 @@ describe('character asset planning', () => {
     ])
   })
 
-  it('uses the Sage resident idle before the unarmed fallback', () => {
+  it('resolves a regular weapon resident idle before the unarmed fallback', () => {
     expect(idleAnimationCandidates('c0201', 'bt_jst_sld')).toEqual([
       'chara/human/c0201/animation/a0001/bt_jst_sld/resident/idle.pap',
       'chara/human/c0101/animation/a0001/bt_jst_sld/resident/idle.pap',
@@ -64,7 +66,14 @@ describe('character asset planning', () => {
     ])
   })
 
-  it('uses the correct Sage idle skeleton family', () => {
+  it('uses the exact Sage idle and skeleton for each authored race family', () => {
+    expect(SAGE_IDLE_ANIMATION_NAME).toBe('cbbm_id0')
+    expect(sageIdleAnimationPath('c0201')).toBe('chara/human/c0101/animation/a0001/bt_2ff_emp/resident/idle.pap')
+    expect(sageIdleAnimationPath('c1101')).toBe('chara/human/c1101/animation/a0001/bt_2ff_emp/resident/idle.pap')
+    expect(sageIdleAnimationPath('c1201')).toBe('chara/human/c1101/animation/a0001/bt_2ff_emp/resident/idle.pap')
+    expect(sageIdleAnimationPath('c1501')).toBe('chara/human/c1501/animation/a0001/bt_2ff_emp/resident/idle.pap')
+    expect(sageIdleAnimationPath('c1601')).toBe('chara/human/c1501/animation/a0001/bt_2ff_emp/resident/idle.pap')
+    expect(sageIdleAnimationPath('c1801')).toBe('chara/human/c0101/animation/a0001/bt_2ff_emp/resident/idle.pap')
     expect(sageIdleSkeletonPath('c0201')).toBe('chara/human/c0101/skeleton/base/b0001/skl_c0101b0001.sklb')
     expect(sageIdleSkeletonPath('c1101')).toBe('chara/human/c1101/skeleton/base/b0001/skl_c1101b0001.sklb')
     expect(sageIdleSkeletonPath('c1201')).toBe('chara/human/c1101/skeleton/base/b0001/skl_c1101b0001.sklb')

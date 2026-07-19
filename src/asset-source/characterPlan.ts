@@ -105,14 +105,26 @@ export function skeletonPath(raceCode: CharacterRaceCode): string {
   return `chara/human/${raceCode}/skeleton/base/b0001/skl_${raceCode}b0001.sklb`
 }
 
-/** Base skeleton family used to map Sage idle PAP transform indices to bone names. */
-export function sageIdleSkeletonPath(raceCode: CharacterRaceCode): string {
-  const skeletonRace: CharacterRaceCode = raceCode === 'c1101' || raceCode === 'c1201'
+/** Race family that authors the Sage character idle and its transform indices. */
+function sageIdleRaceCode(raceCode: CharacterRaceCode): CharacterRaceCode {
+  return raceCode === 'c1101' || raceCode === 'c1201'
     ? 'c1101'
     : raceCode === 'c1501' || raceCode === 'c1601'
       ? 'c1501'
       : 'c0101'
-  return skeletonPath(skeletonRace)
+}
+
+/** Exact game-authored Sage character idle for the selected race family. */
+export const SAGE_IDLE_ANIMATION_NAME = 'cbbm_id0'
+
+export function sageIdleAnimationPath(raceCode: CharacterRaceCode): string {
+  const animationRace = sageIdleRaceCode(raceCode)
+  return `chara/human/${animationRace}/animation/a0001/bt_2ff_emp/resident/idle.pap`
+}
+
+/** Base skeleton used to map the Sage idle PAP transform indices to bone names. */
+export function sageIdleSkeletonPath(raceCode: CharacterRaceCode): string {
+  return skeletonPath(sageIdleRaceCode(raceCode))
 }
 
 // FFXIV renders one weapon model at a size that depends on the wielder's race:
