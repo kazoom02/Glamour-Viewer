@@ -59,11 +59,17 @@ import { createAvfxRuntime, type AvfxRuntime } from './avfxRuntime'
 import { subdivideCurvedMesh } from './geometryQuality'
 import { remapSkinIndices } from './skinBinding'
 import {
+  SAGE_CHARACTER_ACTIVATE_ANIMATION_NAME,
+  SAGE_CHARACTER_DEACTIVATE_ANIMATION_NAME,
+  SAGE_CHARACTER_TRANSITION_ANIMATION_PATH,
+  SAGE_CHARACTER_TRANSITION_SKELETON_PATH,
   SAGE_IDLE_WEAPON_ANIMATION_NAME,
   SAGE_IDLE_WEAPON_ANIMATION_PATH,
   SAGE_IDLE_WEAPON_SKELETON_PATH,
   SAGE_IDLE_WEAPON_VERTICAL_OFFSET,
   SAGE_IDLE_WEAPON_YAW,
+  SAGE_WEAPON_ACTIVATE_ANIMATION_NAME,
+  SAGE_WEAPON_DEACTIVATE_ANIMATION_NAME,
 } from './sageWeapon'
 import {
   applyBustDeformation,
@@ -1237,6 +1243,12 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
     characterGroupRef.current = characterGroup
     let activeIdleMixer: THREE.AnimationMixer | undefined
     let activeSageWeaponMixer: THREE.AnimationMixer | undefined
+    let sageWeaponRuntime: {
+      mixer: THREE.AnimationMixer
+      idle: THREE.AnimationClip
+      activate: THREE.AnimationClip
+      deactivate: THREE.AnimationClip
+    } | undefined
     const animatedMaterials: AnimatedMaterial[] = []
     const avfxRuntimes: AvfxRuntime[] = []
     // Rebuilt below as character materials are created; the color effect reads this.
@@ -1353,7 +1365,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       let bustScale: BustScale = [1, 1, 1]
       let baseIdleClip: THREE.AnimationClip | undefined
       let idleAnimationPromise: Promise<DecodedAnimation> | undefined
-      let sageWeaponAnimationPromise: Promise<DecodedAnimation> | undefined
+      let sageWeaponAnimationsPromise: Promise<readonly [DecodedAnimation, DecodedAnimation, DecodedAnimation]> | undefined
       let idleReady = false
       if (source.kind === 'local') {
         try {
@@ -1445,12 +1457,11 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             const path = SAGE_IDLE_WEAPON_SKELETON_PATH
             try {
               sageWeaponSkeleton = await loadLocalSkeleton(source, path)
-              sageWeaponAnimationPromise = loadLocalAnimation(
-                source,
-                [SAGE_IDLE_WEAPON_ANIMATION_PATH],
-                SAGE_IDLE_WEAPON_ANIMATION_NAME,
-                path,
-              )
+              sageWeaponAnimationsPromise = Promise.all([
+                loadLocalAnimation(source, [SAGE_IDLE_WEAPON_ANIMATION_PATH], SAGE_IDLE_WEAPON_ANIMATION_NAME, path),
+                loadLocalAnimation(source, [SAGE_IDLE_WEAPON_ANIMATION_PATH], SAGE_WEAPON_ACTIVATE_ANIMATION_NAME, path),
+                loadLocalAnimation(source, [SAGE_IDLE_WEAPON_ANIMATION_PATH], SAGE_WEAPON_DEACTIVATE_ANIMATION_NAME, path),
+              ] as const)
               diagnostics.push(`sage weapon skeleton: ${path} bones=${sageWeaponSkeleton.bones.length}`)
             } catch (reason) {
               failures.push(`sage weapon skeleton: ${reason instanceof Error ? reason.message : String(reason)}`)
@@ -1647,20 +1658,33 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               materialResult?.materialAnimation,
               animatedMaterials,
             )
-            if (plan.sageMount && weaponRig && sageWeaponAnimationPromise) {
+            if (plan.sageMount && weaponRig && sageWeaponAnimationsPromise) {
               try {
-                const decodedWeaponAnimation = await sageWeaponAnimationPromise
+                const [decodedIdle, decodedActivate, decodedDeactivate] = await sageWeaponAnimationsPromise
                 if (disposed) return
-                const weaponClip = animationClipFromDecoded(decodedWeaponAnimation, weaponRig.skeleton)
+                const idleClip = animationClipFromDecoded(decodedIdle, weaponRig.skeleton)
+                const activateClip = animationClipFromDecoded(decodedActivate, weaponRig.skeleton)
+                const deactivateClip = animationClipFromDecoded(decodedDeactivate, weaponRig.skeleton)
                 activeSageWeaponMixer?.stopAllAction()
                 activeSageWeaponMixer = new THREE.AnimationMixer(renderTarget)
-                const weaponAction = activeSageWeaponMixer.clipAction(weaponClip.clip)
-                weaponAction.setLoop(THREE.LoopRepeat, Infinity)
-                weaponAction.clampWhenFinished = false
+                sageWeaponRuntime = {
+                  mixer: activeSageWeaponMixer,
+                  idle: idleClip.clip,
+                  activate: activateClip.clip,
+                  deactivate: deactivateClip.clip,
+                }
+                const initialClip = weaponDrawnRef.current ? idleClip.clip : deactivateClip.clip
+                const weaponAction = activeSageWeaponMixer.clipAction(initialClip)
+                weaponAction.setLoop(weaponDrawnRef.current ? THREE.LoopRepeat : THREE.LoopOnce, weaponDrawnRef.current ? Infinity : 1)
+                weaponAction.clampWhenFinished = !weaponDrawnRef.current
                 weaponAction.play()
+                if (!weaponDrawnRef.current) {
+                  weaponAction.time = initialClip.duration
+                  weaponAction.paused = true
+                }
                 activeSageWeaponMixer.update(0)
                 diagnostics.push(
-                  `sage weapon animation: ${decodedWeaponAnimation.path} name=${decodedWeaponAnimation.name} duration=${decodedWeaponAnimation.duration.toFixed(3)}s bound=${weaponClip.boundTracks}/${weaponClip.totalTracks} channels=${weaponClip.channels}`,
+                  `sage weapon animations: path=${decodedIdle.path} idle=${decodedIdle.name}/${idleClip.clip.duration.toFixed(3)}s activate=${decodedActivate.name}/${activateClip.clip.duration.toFixed(3)}s deactivate=${decodedDeactivate.name}/${deactivateClip.clip.duration.toFixed(3)}s`,
                 )
               } catch (reason) {
                 failures.push(`sage weapon animation: ${reason instanceof Error ? reason.message : String(reason)}`)
@@ -1824,8 +1848,36 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             setAnimDiag(diag)
             playClipOnRig(clip, entry.label, decoded.blendHint, options?.once)
           }
+          const playSageWeaponClip = (clip: THREE.AnimationClip, once: boolean, timeScale = 1): THREE.AnimationAction | undefined => {
+            const runtime = sageWeaponRuntime
+            if (!runtime) return undefined
+            runtime.mixer.stopAllAction()
+            const action = runtime.mixer.clipAction(clip)
+            action.reset()
+            action.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, once ? 1 : Infinity)
+            action.clampWhenFinished = once
+            action.setEffectiveWeight(1)
+            action.setEffectiveTimeScale(timeScale)
+            action.play()
+            return action
+          }
+          const settleSageWeapon = (drawing: boolean) => {
+            const runtime = sageWeaponRuntime
+            if (!runtime) return
+            if (drawing) {
+              playSageWeaponClip(runtime.idle, false)
+              return
+            }
+            const action = playSageWeaponClip(runtime.deactivate, true)
+            if (!action) return
+            action.time = runtime.deactivate.duration
+            action.paused = true
+            runtime.mixer.update(0)
+          }
           playWeaponTransition.current = async (weaponClass: string, drawing: boolean) => {
-            const transitionEntry = toCatalogAnimation(`${weaponClass}-resident-sub-${drawing ? 'cbbp_a_activ' : 'cbbp_a_deact'}`)
+            const sageTransition = weaponClass === 'bt_jst_sld' ? sageWeaponRuntime : undefined
+            const transitionName = drawing ? 'cbbp_a_activ' : 'cbbp_a_deact'
+            const transitionEntry = toCatalogAnimation(`${weaponClass}-resident-sub-${transitionName}`)
             // Drawing settles into the weapon idle; sheathing into the unarmed idle.
             const restingClass = drawing ? weaponClass : 'bt_common'
             const sageSkeletonOverride = restingClass === 'bt_jst_sld' ? sageIdleSkeletonPath(raceCode) : undefined
@@ -1837,32 +1889,69 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
                   sageSkeletonOverride,
                 )
               : loadLocalIdleAnimation(localSource, idleAnimationCandidates(raceCode, restingClass))
+            const characterTransitionPromise = sageTransition
+              ? loadLocalAnimation(
+                  localSource,
+                  [SAGE_CHARACTER_TRANSITION_ANIMATION_PATH],
+                  drawing ? SAGE_CHARACTER_ACTIVATE_ANIMATION_NAME : SAGE_CHARACTER_DEACTIVATE_ANIMATION_NAME,
+                  SAGE_CHARACTER_TRANSITION_SKELETON_PATH,
+                )
+              : loadLocalAnimation(
+                  localSource,
+                  catalogAnimationCandidates(transitionEntry, raceCode),
+                  transitionEntry.internal || undefined,
+                )
             const [transitionDecoded, restingDecoded] = await Promise.all([
-              loadLocalAnimation(localSource, catalogAnimationCandidates(transitionEntry, raceCode), transitionEntry.internal || undefined),
+              characterTransitionPromise,
               restingPromise,
             ])
             if (disposed) return
             const transitionClip = animationClipFromDecoded(transitionDecoded, animationRig.skeleton, animationBustScale).clip
             const restingClip = animationClipFromDecoded(restingDecoded, animationRig.skeleton, animationBustScale).clip
             const restingLabel = restingDecoded.name || (drawing ? 'Weapon idle' : 'Idle')
-            // Play the transition once at 0.7× (slightly slower for readability), then
-            // loop into the resting idle at normal speed when it ends.
-            playClipOnRig(transitionClip, drawing ? 'Draw weapon' : 'Sheathe weapon', transitionDecoded.blendHint, true, 0.7)
+            // Non-Sage jobs retain the slightly slower transition; Sage instead
+            // synchronizes the character and noulith clips below.
+            const sageWeaponClip = sageTransition
+              ? drawing ? sageTransition.activate : sageTransition.deactivate
+              : undefined
+            const sharedDuration = sageWeaponClip
+              ? Math.max(transitionClip.duration, sageWeaponClip.duration)
+              : transitionClip.duration / 0.7
+            if (sageWeaponClip) {
+              playSageWeaponClip(sageWeaponClip, true, sageWeaponClip.duration / sharedDuration)
+            }
+            // Normalize both Sage clips to one duration so the character and
+            // noulith transitions begin and settle on the same rendered frame.
+            playClipOnRig(
+              transitionClip,
+              drawing ? 'Draw weapon' : 'Sheathe weapon',
+              transitionDecoded.blendHint,
+              true,
+              transitionClip.duration / sharedDuration,
+            )
             const mixer = idleMixer.current
             const transitionAction = idleAction.current
             weaponTransitionCleanup.current?.()
             weaponTransitionCleanup.current = null
             if (!mixer || !transitionAction) return
-            const onFinished = (event: { action: THREE.AnimationAction }) => {
-              if (event.action !== transitionAction) return
-              mixer.removeEventListener('finished', onFinished)
-              weaponTransitionCleanup.current = null
-              // Skip if the rig was torn down or another clip took over meanwhile.
-              if (disposed || idleAction.current !== transitionAction) return
-              playClipOnRig(restingClip, restingLabel, restingDecoded.blendHint, false)
-            }
-            mixer.addEventListener('finished', onFinished)
-            weaponTransitionCleanup.current = () => mixer.removeEventListener('finished', onFinished)
+            await new Promise<void>((resolve) => {
+              const finish = () => {
+                mixer.removeEventListener('finished', onFinished)
+                weaponTransitionCleanup.current = null
+                resolve()
+              }
+              const onFinished = (event: { action: THREE.AnimationAction }) => {
+                if (event.action !== transitionAction) return
+                // Skip if the rig was torn down or another clip took over meanwhile.
+                if (!disposed && idleAction.current === transitionAction) {
+                  playClipOnRig(restingClip, restingLabel, restingDecoded.blendHint, false)
+                  if (sageTransition) settleSageWeapon(drawing)
+                }
+                finish()
+              }
+              mixer.addEventListener('finished', onFinished)
+              weaponTransitionCleanup.current = finish
+            })
           }
           playExternalMotion.current = async (data: ArrayBuffer, label: string) => {
             const { GLTFLoader } = await import('three/examples/jsm/loaders/GLTFLoader.js')

@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import {
+  SAGE_CHARACTER_ACTIVATE_ANIMATION_NAME,
+  SAGE_CHARACTER_DEACTIVATE_ANIMATION_NAME,
+  SAGE_CHARACTER_TRANSITION_ANIMATION_PATH,
+  SAGE_CHARACTER_TRANSITION_SKELETON_PATH,
   SAGE_IDLE_WEAPON_ANIMATION_NAME,
   SAGE_IDLE_WEAPON_ANIMATION_PATH,
   SAGE_IDLE_WEAPON_SKELETON_PATH,
   SAGE_IDLE_WEAPON_VERTICAL_OFFSET,
   SAGE_IDLE_WEAPON_YAW,
+  SAGE_WEAPON_ACTIVATE_ANIMATION_NAME,
+  SAGE_WEAPON_DEACTIVATE_ANIMATION_NAME,
 } from './sageWeapon'
 
 describe('Sage noulith attachment mapping', () => {
@@ -19,6 +25,19 @@ describe('Sage noulith attachment mapping', () => {
       'chara/weapon/w2702/animation/a0001/wp_common/resident/weapon.pap',
     )
     expect(SAGE_IDLE_WEAPON_ANIMATION_NAME).toBe('cbbw_2fa_2lp')
+    expect(SAGE_WEAPON_ACTIVATE_ANIMATION_NAME).toBe('cbbw_activ')
+    expect(SAGE_WEAPON_DEACTIVATE_ANIMATION_NAME).toBe('cbbw_deact')
+  })
+
+  it('uses the shared Sage character skeleton for draw and sheath transitions', () => {
+    expect(SAGE_CHARACTER_TRANSITION_SKELETON_PATH).toBe(
+      'chara/human/c0101/skeleton/base/b0001/skl_c0101b0001.sklb',
+    )
+    expect(SAGE_CHARACTER_TRANSITION_ANIMATION_PATH).toBe(
+      'chara/human/c0101/animation/a0001/bt_2ff_emp/resident/sub.pap',
+    )
+    expect(SAGE_CHARACTER_ACTIVATE_ANIMATION_NAME).toBe('cbbp_a_activ')
+    expect(SAGE_CHARACTER_DEACTIVATE_ANIMATION_NAME).toBe('cbbp_a_deact')
   })
 
   it('lifts and reverses the complete authored formation', () => {
