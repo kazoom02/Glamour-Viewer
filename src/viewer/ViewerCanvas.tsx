@@ -62,6 +62,7 @@ import {
   SAGE_IDLE_WEAPON_ANIMATION_NAME,
   SAGE_IDLE_WEAPON_ANIMATION_PATH,
   SAGE_IDLE_WEAPON_SKELETON_PATH,
+  SAGE_IDLE_WEAPON_VERTICAL_OFFSET,
 } from './sageWeapon'
 import {
   applyBustDeformation,
@@ -773,10 +774,12 @@ function sageWeaponTarget(
 ): EquipmentAttachment {
   const mount = new THREE.Group()
   mount.name = 'mainHand-sage-animated-root'
+  const verticalOffset = SAGE_IDLE_WEAPON_VERTICAL_OFFSET * weaponScale
+  mount.position.y = verticalOffset
   character.add(mount)
   return {
     target: mount,
-    diagnostic: `placement=sage-authored-w2702 weaponScale=${weaponScale.toFixed(3)}`,
+    diagnostic: `placement=sage-authored-w2702 weaponScale=${weaponScale.toFixed(3)} verticalOffset=${verticalOffset.toFixed(3)}`,
   }
 }
 
