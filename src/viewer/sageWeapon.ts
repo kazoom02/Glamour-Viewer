@@ -6,7 +6,7 @@ export const SAGE_IDLE_WEAPON_ANIMATION_PATH = 'chara/weapon/w2702/animation/a00
 export const SAGE_IDLE_WEAPON_ANIMATION_NAME = 'cbbw_2fa_2lp'
 
 /** Midlander-space lift applied to the complete authored formation. */
-export const SAGE_IDLE_WEAPON_VERTICAL_OFFSET = 0.95
+export const SAGE_IDLE_WEAPON_VERTICAL_OFFSET = 1.20
 
 /** Turns the complete authored formation so every noulith points the other way. */
 export const SAGE_IDLE_WEAPON_YAW = Math.PI

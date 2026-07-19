@@ -22,7 +22,7 @@ describe('Sage noulith attachment mapping', () => {
   })
 
   it('lifts and reverses the complete authored formation', () => {
-    expect(SAGE_IDLE_WEAPON_VERTICAL_OFFSET).toBe(0.95)
+    expect(SAGE_IDLE_WEAPON_VERTICAL_OFFSET).toBe(1.20)
     expect(SAGE_IDLE_WEAPON_YAW).toBe(Math.PI)
   })
 })
