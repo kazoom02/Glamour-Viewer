@@ -4,6 +4,7 @@ import {
   SAGE_CHARACTER_DEACTIVATE_ANIMATION_NAME,
   SAGE_CHARACTER_TRANSITION_ANIMATION_PATH,
   SAGE_CHARACTER_TRANSITION_SKELETON_PATH,
+  SAGE_DRAW_ANIMATION_TIME_SCALE,
   SAGE_IDLE_WEAPON_ANIMATION_NAME,
   SAGE_IDLE_WEAPON_ANIMATION_PATH,
   SAGE_IDLE_WEAPON_SKELETON_PATH,
@@ -38,6 +39,7 @@ describe('Sage noulith attachment mapping', () => {
     )
     expect(SAGE_CHARACTER_ACTIVATE_ANIMATION_NAME).toBe('cbbp_a_activ')
     expect(SAGE_CHARACTER_DEACTIVATE_ANIMATION_NAME).toBe('cbbp_a_deact')
+    expect(SAGE_DRAW_ANIMATION_TIME_SCALE).toBe(1.25)
   })
 
   it('lifts and reverses the complete authored formation', () => {

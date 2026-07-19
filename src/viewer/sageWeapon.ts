@@ -13,6 +13,9 @@ export const SAGE_CHARACTER_TRANSITION_ANIMATION_PATH = 'chara/human/c0101/anima
 export const SAGE_CHARACTER_ACTIVATE_ANIMATION_NAME = 'cbbp_a_activ'
 export const SAGE_CHARACTER_DEACTIVATE_ANIMATION_NAME = 'cbbp_a_deact'
 
+/** Shortens the Sage draw transition while preserving the authored motion. */
+export const SAGE_DRAW_ANIMATION_TIME_SCALE = 1.25
+
 /** Midlander-space lift applied to the complete authored formation. */
 export const SAGE_IDLE_WEAPON_VERTICAL_OFFSET = 1.20
 

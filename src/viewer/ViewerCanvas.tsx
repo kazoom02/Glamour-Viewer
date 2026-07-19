@@ -63,6 +63,7 @@ import {
   SAGE_CHARACTER_DEACTIVATE_ANIMATION_NAME,
   SAGE_CHARACTER_TRANSITION_ANIMATION_PATH,
   SAGE_CHARACTER_TRANSITION_SKELETON_PATH,
+  SAGE_DRAW_ANIMATION_TIME_SCALE,
   SAGE_IDLE_WEAPON_ANIMATION_NAME,
   SAGE_IDLE_WEAPON_ANIMATION_PATH,
   SAGE_IDLE_WEAPON_SKELETON_PATH,
@@ -1912,16 +1913,20 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             const sageWeaponClip = sageTransition
               ? drawing ? sageTransition.activate : sageTransition.deactivate
               : undefined
+            const transitionTimeScale = sageTransition && drawing
+              ? SAGE_DRAW_ANIMATION_TIME_SCALE
+              : 1
             const sageWeaponAction = sageWeaponClip
-              ? playSageWeaponClip(sageWeaponClip, true)
+              ? playSageWeaponClip(sageWeaponClip, true, transitionTimeScale)
               : undefined
-            // Play every draw/sheath clip at its authored speed. Sage waits for
-            // both independent mixers before switching to the resting idles.
+            // Keep the Sage character and noulith draw clips at the same faster
+            // rate, then wait for both mixers before switching to resting idles.
             playClipOnRig(
               transitionClip,
               drawing ? 'Draw weapon' : 'Sheathe weapon',
               transitionDecoded.blendHint,
               true,
+              transitionTimeScale,
             )
             const mixer = idleMixer.current
             const transitionAction = idleAction.current
