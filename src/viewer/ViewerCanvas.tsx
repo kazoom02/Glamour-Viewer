@@ -1909,25 +1909,19 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             const transitionClip = animationClipFromDecoded(transitionDecoded, animationRig.skeleton, animationBustScale).clip
             const restingClip = animationClipFromDecoded(restingDecoded, animationRig.skeleton, animationBustScale).clip
             const restingLabel = restingDecoded.name || (drawing ? 'Weapon idle' : 'Idle')
-            // Non-Sage jobs retain the slightly slower transition; Sage instead
-            // synchronizes the character and noulith clips below.
             const sageWeaponClip = sageTransition
               ? drawing ? sageTransition.activate : sageTransition.deactivate
               : undefined
-            const sharedDuration = sageWeaponClip
-              ? Math.max(transitionClip.duration, sageWeaponClip.duration)
-              : transitionClip.duration / 0.7
-            if (sageWeaponClip) {
-              playSageWeaponClip(sageWeaponClip, true, sageWeaponClip.duration / sharedDuration)
-            }
-            // Normalize both Sage clips to one duration so the character and
-            // noulith transitions begin and settle on the same rendered frame.
+            const sageWeaponAction = sageWeaponClip
+              ? playSageWeaponClip(sageWeaponClip, true)
+              : undefined
+            // Play every draw/sheath clip at its authored speed. Sage waits for
+            // both independent mixers before switching to the resting idles.
             playClipOnRig(
               transitionClip,
               drawing ? 'Draw weapon' : 'Sheathe weapon',
               transitionDecoded.blendHint,
               true,
-              transitionClip.duration / sharedDuration,
             )
             const mixer = idleMixer.current
             const transitionAction = idleAction.current
@@ -1935,13 +1929,17 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             weaponTransitionCleanup.current = null
             if (!mixer || !transitionAction) return
             await new Promise<void>((resolve) => {
+              const weaponMixer = sageTransition?.mixer
+              let characterFinished = false
+              let weaponFinished = !sageWeaponAction || !weaponMixer
               const finish = () => {
-                mixer.removeEventListener('finished', onFinished)
+                mixer.removeEventListener('finished', onCharacterFinished)
+                weaponMixer?.removeEventListener('finished', onWeaponFinished)
                 weaponTransitionCleanup.current = null
                 resolve()
               }
-              const onFinished = (event: { action: THREE.AnimationAction }) => {
-                if (event.action !== transitionAction) return
+              const settleWhenReady = () => {
+                if (!characterFinished || !weaponFinished) return
                 // Skip if the rig was torn down or another clip took over meanwhile.
                 if (!disposed && idleAction.current === transitionAction) {
                   playClipOnRig(restingClip, restingLabel, restingDecoded.blendHint, false)
@@ -1949,7 +1947,20 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
                 }
                 finish()
               }
-              mixer.addEventListener('finished', onFinished)
+              const onCharacterFinished = (event: { action: THREE.AnimationAction }) => {
+                if (event.action !== transitionAction) return
+                characterFinished = true
+                settleWhenReady()
+              }
+              const onWeaponFinished = (event: { action: THREE.AnimationAction }) => {
+                if (event.action !== sageWeaponAction) return
+                weaponFinished = true
+                settleWhenReady()
+              }
+              mixer.addEventListener('finished', onCharacterFinished)
+              if (sageWeaponAction && weaponMixer) {
+                weaponMixer.addEventListener('finished', onWeaponFinished)
+              }
               weaponTransitionCleanup.current = finish
             })
           }
