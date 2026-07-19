@@ -167,20 +167,6 @@ export function animationPapCandidates(
 export function idleAnimationCandidates(raceCode: CharacterRaceCode, weaponClass = 'bt_common'): string[] {
   const weaponIdle = animationPapCandidates(raceCode, weaponClass, 'resident', 'idle')
   if (weaponClass === 'bt_common') return weaponIdle
-  if (weaponClass === 'bt_jst_sld') {
-    // Sage's relaxed drawn stance is the looping battle-pose motion. It also
-    // contains the per-frame translations and rotations for every noulith mount.
-    // Female Midlander ships no job-specific loop; the female Miqo'te override
-    // has the same lowered-hand stance before the generic male fallback.
-    const sagePoseRaces = [...new Set([raceCode, 'c0801' as CharacterRaceCode, ...raceAnimationFallbacks(raceCode)])]
-    return [
-      ...sagePoseRaces.map((candidate) => (
-        `chara/human/${candidate}/animation/a0001/${weaponClass}/emote/b_pose01_loop.pap`
-      )),
-      ...weaponIdle,
-      ...animationPapCandidates(raceCode, 'bt_common', 'resident', 'idle'),
-    ]
-  }
   return [...weaponIdle, ...animationPapCandidates(raceCode, 'bt_common', 'resident', 'idle')]
 }
 

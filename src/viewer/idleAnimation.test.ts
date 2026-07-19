@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
-import { animationClipFromDecoded, blendLoopingAnimationClips } from './idleAnimation'
+import { animationClipFromDecoded } from './idleAnimation'
 import type { DecodedAnimation, DecodedAnimationTrack } from '../asset-source/animationLoader'
 
 function track(overrides: Partial<DecodedAnimationTrack> = {}): DecodedAnimationTrack {
@@ -28,37 +28,6 @@ function animation(blendHint: DecodedAnimation['blendHint'] = 'normal', tracks =
 }
 
 describe('idle animation clip', () => {
-  it('blends two looping clips at the requested weight', () => {
-    const primary = new THREE.AnimationClip('pose', 2, [
-      new THREE.VectorKeyframeTrack('j_te_l.position', [0, 2], [0, 0, 0, 0, 0, 0]),
-    ])
-    const secondary = new THREE.AnimationClip('combat', 1, [
-      new THREE.VectorKeyframeTrack('j_te_l.position', [0, 1], [10, 5, -5, 10, 5, -5]),
-    ])
-    const blended = blendLoopingAnimationClips(primary, secondary, 0.4, 'Sage idle')
-    const position = blended.tracks[0]!
-    expect(blended.name).toBe('Sage idle')
-    expect(blended.duration).toBeCloseTo(2)
-    expect(Array.from(position.values.slice(0, 3))).toEqual([4, 2, -2])
-  })
-
-  it('uses spherical interpolation for blended bone rotations', () => {
-    const primary = new THREE.AnimationClip('pose', 1, [
-      new THREE.QuaternionKeyframeTrack('j_ude_a_l.quaternion', [0, 1], [0, 0, 0, 1, 0, 0, 0, 1]),
-    ])
-    const secondaryRotation = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI)
-    const secondary = new THREE.AnimationClip('combat', 1, [
-      new THREE.QuaternionKeyframeTrack('j_ude_a_l.quaternion', [0, 1], [
-        ...secondaryRotation.toArray(), ...secondaryRotation.toArray(),
-      ]),
-    ])
-    const blended = blendLoopingAnimationClips(primary, secondary, 0.5, 'Sage idle')
-    const rotation = blended.tracks[0]!.values.slice(0, 4)
-    expect(Math.hypot(...rotation)).toBeCloseTo(1)
-    expect(Math.abs(rotation[1]!)).toBeCloseTo(Math.SQRT1_2)
-    expect(Math.abs(rotation[3]!)).toBeCloseTo(Math.SQRT1_2)
-  })
-
   it('keeps the character root planted while retaining rotation motion', () => {
     const root = new THREE.Bone()
     root.name = 'n_root'
@@ -83,6 +52,17 @@ describe('idle animation clip', () => {
     const { clip } = animationClipFromDecoded(animation(), new THREE.Skeleton([mount]))
     const position = clip.tracks.find((candidate) => candidate.name === 'j_buki2_kosi_l.position')
     expect(Array.from(position!.values)).toEqual(Array.from(track().translations))
+  })
+
+  it('retains authored translations for all four w2702 noulith roots', () => {
+    for (const name of ['n_hara', 'n_haraB', 'n_haraC', 'n_haraD']) {
+      const bone = new THREE.Bone()
+      bone.name = name
+      const { clip } = animationClipFromDecoded(animation(), new THREE.Skeleton([bone]))
+      const position = clip.tracks.find((candidate) => candidate.name === `${name}.position`)
+      expect(position, name).toBeDefined()
+      expect(Array.from(position!.values), name).toEqual(Array.from(track().translations))
+    }
   })
 
   it('refuses additive clips instead of applying deltas as absolute transforms', () => {

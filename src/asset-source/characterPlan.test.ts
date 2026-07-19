@@ -55,23 +55,12 @@ describe('character asset planning', () => {
     ])
   })
 
-  it('prefers the Sage battle-pose loop whose attachment bones animate the drawn formation', () => {
+  it('uses the Sage resident idle before the unarmed fallback', () => {
     expect(idleAnimationCandidates('c0201', 'bt_jst_sld')).toEqual([
-      'chara/human/c0201/animation/a0001/bt_jst_sld/emote/b_pose01_loop.pap',
-      'chara/human/c0801/animation/a0001/bt_jst_sld/emote/b_pose01_loop.pap',
-      'chara/human/c0101/animation/a0001/bt_jst_sld/emote/b_pose01_loop.pap',
       'chara/human/c0201/animation/a0001/bt_jst_sld/resident/idle.pap',
       'chara/human/c0101/animation/a0001/bt_jst_sld/resident/idle.pap',
       'chara/human/c0201/animation/a0001/bt_common/resident/idle.pap',
       'chara/human/c0101/animation/a0001/bt_common/resident/idle.pap',
-    ])
-  })
-
-  it('keeps a race-authored Sage pose ahead of the shared lowered-hand fallback', () => {
-    expect(idleAnimationCandidates('c1101', 'bt_jst_sld').slice(0, 3)).toEqual([
-      'chara/human/c1101/animation/a0001/bt_jst_sld/emote/b_pose01_loop.pap',
-      'chara/human/c0801/animation/a0001/bt_jst_sld/emote/b_pose01_loop.pap',
-      'chara/human/c0101/animation/a0001/bt_jst_sld/emote/b_pose01_loop.pap',
     ])
   })
 

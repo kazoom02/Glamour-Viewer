@@ -52,12 +52,16 @@ import {
 } from '../catalog/types'
 import type { CharacterCustomization } from '../customization/types'
 import { activeFaceShapes, faceFeatureMask, faceFeatureVisible } from '../customization/faceShapes'
-import { animationClipFromDecoded, blendLoopingAnimationClips } from './idleAnimation'
+import { animationClipFromDecoded } from './idleAnimation'
 import AnimationPicker from './AnimationPicker'
 import { createAvfxRuntime, type AvfxRuntime } from './avfxRuntime'
 import { subdivideCurvedMesh } from './geometryQuality'
 import { remapSkinIndices } from './skinBinding'
-import { SAGE_IDLE_WEAPON_SKELETON_PATH, SAGE_WEAPON_FORMATION } from './sageWeapon'
+import {
+  SAGE_IDLE_WEAPON_ANIMATION_NAME,
+  SAGE_IDLE_WEAPON_ANIMATION_PATH,
+  SAGE_IDLE_WEAPON_SKELETON_PATH,
+} from './sageWeapon'
 import {
   applyBustDeformation,
   bustWeightSummary,
@@ -759,8 +763,8 @@ function equipmentTarget(
 
 /**
  * Sage nouliths are one skinned weapon model driven by a weapon-local four-bone
- * skeleton. Their idle root follows the character rather than either hand; the
- * four weapon bones are posed separately below to match the drawn idle layout.
+ * skeleton. Its authored n_root bind pose and cbbw loop are character-local, so
+ * the rig belongs at the character root rather than either hand.
  */
 function sageWeaponTarget(
   character: THREE.Group,
@@ -771,57 +775,8 @@ function sageWeaponTarget(
   character.add(mount)
   return {
     target: mount,
-    diagnostic: `placement=sage-animated upper=j_buki_sebo_l/r lower=j_buki_kosi_l/r weaponScale=${weaponScale.toFixed(3)}`,
+    diagnostic: `placement=sage-authored-w2702 weaponScale=${weaponScale.toFixed(3)}`,
   }
-}
-
-/**
- * The Sage PAP animates four character attachment bones, while the weapon model
- * calls its four weighted bones n_hara/n_haraB/n_haraC/n_haraD. Copy the animated
- * world transforms into the weapon-local skeleton every frame. The `sebo` pair
- * occupies the animated upper/shoulder positions and the `kosi` pair occupies
- * the lower/hip positions; `buki2_kosi` is a compact waist pair and must not be
- * used or the upper nouliths collapse into the character.
- */
-function syncSageWeaponIdle(
-  weaponRig: CharacterRig,
-  characterRig: CharacterRig,
-): void {
-  const characterBones = new Map(characterRig.skeleton.bones.map((bone) => [bone.name, bone]))
-  const weaponBones = new Map(weaponRig.skeleton.bones.map((bone) => [bone.name, bone]))
-  const hips = characterBones.get('n_hara')
-  const head = characterBones.get('j_kao')
-  const root = characterBones.get('n_root')
-  hips?.updateWorldMatrix(true, false)
-  head?.updateWorldMatrix(true, false)
-  root?.updateWorldMatrix(true, false)
-  const torsoLength = hips && head
-    ? THREE.MathUtils.clamp(
-        hips.getWorldPosition(new THREE.Vector3()).distanceTo(head.getWorldPosition(new THREE.Vector3())),
-        0.3,
-        1,
-      )
-    : 0.65
-  const rootRotation = root?.getWorldQuaternion(new THREE.Quaternion()) ?? new THREE.Quaternion()
-  for (const [weaponName, formation] of Object.entries(SAGE_WEAPON_FORMATION)) {
-    const source = characterBones.get(formation.characterBone)
-    const target = weaponBones.get(weaponName)
-    const parent = target?.parent
-    if (!source || !target || !parent) continue
-    source.updateWorldMatrix(true, false)
-    parent.updateWorldMatrix(true, false)
-    const desiredPosition = source.getWorldPosition(new THREE.Vector3())
-    const formationOffset = new THREE.Vector3(...formation.offset)
-      .multiplyScalar(torsoLength)
-      .applyQuaternion(rootRotation)
-    desiredPosition.add(formationOffset)
-    target.position.copy(parent.worldToLocal(desiredPosition))
-    const sourceWorldRotation = source.getWorldQuaternion(new THREE.Quaternion())
-    const parentWorldRotation = parent.getWorldQuaternion(new THREE.Quaternion())
-    target.quaternion.copy(parentWorldRotation.invert().multiply(sourceWorldRotation)).normalize()
-  }
-  weaponRig.skeleton.bones.forEach((bone) => bone.updateWorldMatrix(false, true))
-  weaponRig.skeleton.update()
 }
 
 // Left-hip scabbard placement for a single weapon's sheath (a Samurai katana's saya
@@ -1275,7 +1230,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
     scene.add(characterGroup)
     characterGroupRef.current = characterGroup
     let activeIdleMixer: THREE.AnimationMixer | undefined
-    let syncSageWeapon: (() => void) | undefined
+    let activeSageWeaponMixer: THREE.AnimationMixer | undefined
     const animatedMaterials: AnimatedMaterial[] = []
     const avfxRuntimes: AvfxRuntime[] = []
     // Rebuilt below as character materials are created; the color effect reads this.
@@ -1392,7 +1347,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       let bustScale: BustScale = [1, 1, 1]
       let baseIdleClip: THREE.AnimationClip | undefined
       let idleAnimationPromise: Promise<DecodedAnimation> | undefined
-      let sageResidentIdlePromise: Promise<DecodedAnimation> | undefined
+      let sageWeaponAnimationPromise: Promise<DecodedAnimation> | undefined
       let idleReady = false
       if (source.kind === 'local') {
         try {
@@ -1484,6 +1439,12 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             const path = SAGE_IDLE_WEAPON_SKELETON_PATH
             try {
               sageWeaponSkeleton = await loadLocalSkeleton(source, path)
+              sageWeaponAnimationPromise = loadLocalAnimation(
+                source,
+                [SAGE_IDLE_WEAPON_ANIMATION_PATH],
+                SAGE_IDLE_WEAPON_ANIMATION_NAME,
+                path,
+              )
               diagnostics.push(`sage weapon skeleton: ${path} bones=${sageWeaponSkeleton.bones.length}`)
             } catch (reason) {
               failures.push(`sage weapon skeleton: ${reason instanceof Error ? reason.message : String(reason)}`)
@@ -1497,18 +1458,14 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           const restingClass = weaponDrawnRef.current && idleWeaponClass !== 'bt_common' ? idleWeaponClass : 'bt_common'
           diagnostics.push(`idle: weaponClass=${idleWeaponClass} drawn=${weaponDrawnRef.current} resting=${restingClass} (mainHand=${idleWeapon?.name ?? 'none'})`)
           const sageSkeletonOverride = restingClass === 'bt_jst_sld' ? sageIdleSkeletonPath(raceCode) : undefined
-          idleAnimationPromise = loadLocalIdleAnimation(
-            source,
-            idleAnimationCandidates(raceCode, restingClass),
-            sageSkeletonOverride,
-          )
-          if (restingClass === 'bt_jst_sld') {
-            sageResidentIdlePromise = loadLocalIdleAnimation(
-              source,
-              animationPapCandidates(raceCode, 'bt_jst_sld', 'resident', 'idle'),
-              sageSkeletonOverride,
-            )
-          }
+          idleAnimationPromise = restingClass === 'bt_jst_sld'
+            ? loadLocalAnimation(
+                source,
+                animationPapCandidates(raceCode, 'bt_jst_sld', 'resident', 'idle'),
+                'cbbm_id0',
+                sageSkeletonOverride,
+              )
+            : loadLocalIdleAnimation(source, idleAnimationCandidates(raceCode, restingClass))
         } catch (reason) {
           failures.push(`base skeleton: ${reason instanceof Error ? reason.message : String(reason)}`)
           setIdleState('unavailable')
@@ -1667,12 +1624,6 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               renderTarget = mount
               if (plan.sageMount && sageWeaponSkeleton) {
                 weaponRig = addCharacterRig(mount, sageWeaponSkeleton)
-                if (rig) {
-                  const sageRig = weaponRig
-                  const characterRig = rig
-                  syncSageWeapon = () => syncSageWeaponIdle(sageRig, characterRig)
-                  syncSageWeapon()
-                }
               }
             }
             addDecodedModel(
@@ -1690,6 +1641,25 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               materialResult?.materialAnimation,
               animatedMaterials,
             )
+            if (plan.sageMount && weaponRig && sageWeaponAnimationPromise) {
+              try {
+                const decodedWeaponAnimation = await sageWeaponAnimationPromise
+                if (disposed) return
+                const weaponClip = animationClipFromDecoded(decodedWeaponAnimation, weaponRig.skeleton)
+                activeSageWeaponMixer?.stopAllAction()
+                activeSageWeaponMixer = new THREE.AnimationMixer(renderTarget)
+                const weaponAction = activeSageWeaponMixer.clipAction(weaponClip.clip)
+                weaponAction.setLoop(THREE.LoopRepeat, Infinity)
+                weaponAction.clampWhenFinished = false
+                weaponAction.play()
+                activeSageWeaponMixer.update(0)
+                diagnostics.push(
+                  `sage weapon animation: ${decodedWeaponAnimation.path} name=${decodedWeaponAnimation.name} duration=${decodedWeaponAnimation.duration.toFixed(3)}s bound=${weaponClip.boundTracks}/${weaponClip.totalTracks} channels=${weaponClip.channels}`,
+                )
+              } catch (reason) {
+                failures.push(`sage weapon animation: ${reason instanceof Error ? reason.message : String(reason)}`)
+              }
+            }
             // Activate whenever the AVFX resolved, not only when it ships
             // separate ATEX textures: many weapon/relic effects draw embedded
             // model geometry with baked vertex colors and no texture layers.
@@ -1750,19 +1720,9 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
         if (idleAnimationPromise && rig) {
           try {
             setStatus(`Preparing ${raceCode} idle animation…`)
-            const [decodedAnimation, sageResidentAnimation] = await Promise.all([
-              idleAnimationPromise,
-              sageResidentIdlePromise,
-            ])
+            const decodedAnimation = await idleAnimationPromise
             if (disposed) return
-            const primaryResult = animationClipFromDecoded(decodedAnimation, rig.skeleton)
-            const residentResult = sageResidentAnimation
-              ? animationClipFromDecoded(sageResidentAnimation, rig.skeleton)
-              : undefined
-            const clip = residentResult
-              ? blendLoopingAnimationClips(primaryResult.clip, residentResult.clip, 0.4, 'Sage idle')
-              : primaryResult.clip
-            const { boundTracks, totalTracks, channels } = primaryResult
+            const { clip, boundTracks, totalTracks, channels } = animationClipFromDecoded(decodedAnimation, rig.skeleton)
             baseIdleClip = clip
             activeIdleMixer = new THREE.AnimationMixer(characterGroup)
             const action = activeIdleMixer.clipAction(clip)
@@ -1781,14 +1741,11 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             idleMixer.current = activeIdleMixer
             idleAction.current = action
             idleReady = true
-            setIdleLabel(residentResult ? 'Sage idle' : decodedAnimation.name || 'Idle')
+            setIdleLabel(decodedAnimation.name || 'Idle')
             setIdleState('playing')
             diagnostics.push(
               `idle animation: ${decodedAnimation.path} name=${decodedAnimation.name} blend=${decodedAnimation.blendHint} duration=${decodedAnimation.duration.toFixed(3)}s frames=${decodedAnimation.times.length} tracks=${decodedAnimation.tracks.length} bound=${boundTracks}/${totalTracks} channels=${channels} rootTranslation=stabilized`,
             )
-            if (sageResidentAnimation) {
-              diagnostics.push(`sage idle blend: pose=${decodedAnimation.path} resident=${sageResidentAnimation.path} weights=0.60/0.40 output=${clip.duration.toFixed(3)}s`)
-            }
           } catch (reason) {
             const detail = reason instanceof Error ? reason.message : String(reason)
             failures.push(`idle animation: ${detail}`)
@@ -1866,30 +1823,22 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             // Drawing settles into the weapon idle; sheathing into the unarmed idle.
             const restingClass = drawing ? weaponClass : 'bt_common'
             const sageSkeletonOverride = restingClass === 'bt_jst_sld' ? sageIdleSkeletonPath(raceCode) : undefined
-            const sageResidentPromise = restingClass === 'bt_jst_sld'
-              ? loadLocalIdleAnimation(
+            const restingPromise = restingClass === 'bt_jst_sld'
+              ? loadLocalAnimation(
                   localSource,
                   animationPapCandidates(raceCode, 'bt_jst_sld', 'resident', 'idle'),
+                  'cbbm_id0',
                   sageSkeletonOverride,
                 )
-              : undefined
-            const [transitionDecoded, restingDecoded, sageResidentDecoded] = await Promise.all([
+              : loadLocalIdleAnimation(localSource, idleAnimationCandidates(raceCode, restingClass))
+            const [transitionDecoded, restingDecoded] = await Promise.all([
               loadLocalAnimation(localSource, catalogAnimationCandidates(transitionEntry, raceCode), transitionEntry.internal || undefined),
-              loadLocalIdleAnimation(localSource, idleAnimationCandidates(raceCode, restingClass), sageSkeletonOverride),
-              sageResidentPromise,
+              restingPromise,
             ])
             if (disposed) return
             const transitionClip = animationClipFromDecoded(transitionDecoded, animationRig.skeleton, animationBustScale).clip
-            const restingPoseClip = animationClipFromDecoded(restingDecoded, animationRig.skeleton, animationBustScale).clip
-            const restingClip = sageResidentDecoded
-              ? blendLoopingAnimationClips(
-                  restingPoseClip,
-                  animationClipFromDecoded(sageResidentDecoded, animationRig.skeleton, animationBustScale).clip,
-                  0.4,
-                  'Sage idle',
-                )
-              : restingPoseClip
-            const restingLabel = sageResidentDecoded ? 'Sage idle' : restingDecoded.name || (drawing ? 'Weapon idle' : 'Idle')
+            const restingClip = animationClipFromDecoded(restingDecoded, animationRig.skeleton, animationBustScale).clip
+            const restingLabel = restingDecoded.name || (drawing ? 'Weapon idle' : 'Idle')
             // Play the transition once at 0.7× (slightly slower for readability), then
             // loop into the resting idle at normal speed when it ends.
             playClipOnRig(transitionClip, drawing ? 'Draw weapon' : 'Sheathe weapon', transitionDecoded.blendHint, true, 0.7)
@@ -2021,7 +1970,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       const delta = Math.min(clock.getDelta(), 0.1)
       elapsed += delta
       activeIdleMixer?.update(delta)
-      syncSageWeapon?.()
+      activeSageWeaponMixer?.update(delta)
       animatedMaterials.forEach(({ material, animation, track, color }) => {
         sampleMaterialAnimationTrack(animation, track, elapsed, color)
         material.emissive.setRGB(
@@ -2051,6 +2000,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       playWeaponTransition.current = null
       playExternalMotion.current = null
       activeIdleMixer?.stopAllAction()
+      activeSageWeaponMixer?.stopAllAction()
       if (idleMixer.current === activeIdleMixer) {
         idleMixer.current = null
         idleAction.current = null
