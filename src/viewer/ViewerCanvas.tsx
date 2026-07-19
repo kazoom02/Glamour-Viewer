@@ -63,6 +63,7 @@ import {
   SAGE_IDLE_WEAPON_ANIMATION_PATH,
   SAGE_IDLE_WEAPON_SKELETON_PATH,
   SAGE_IDLE_WEAPON_VERTICAL_OFFSET,
+  SAGE_IDLE_WEAPON_YAW,
 } from './sageWeapon'
 import {
   applyBustDeformation,
@@ -776,10 +777,11 @@ function sageWeaponTarget(
   mount.name = 'mainHand-sage-animated-root'
   const verticalOffset = SAGE_IDLE_WEAPON_VERTICAL_OFFSET * weaponScale
   mount.position.y = verticalOffset
+  mount.rotation.y = SAGE_IDLE_WEAPON_YAW
   character.add(mount)
   return {
     target: mount,
-    diagnostic: `placement=sage-authored-w2702 weaponScale=${weaponScale.toFixed(3)} verticalOffset=${verticalOffset.toFixed(3)}`,
+    diagnostic: `placement=sage-authored-w2702 weaponScale=${weaponScale.toFixed(3)} verticalOffset=${verticalOffset.toFixed(3)} yaw=${THREE.MathUtils.radToDeg(SAGE_IDLE_WEAPON_YAW).toFixed(0)}deg`,
   }
 }
 

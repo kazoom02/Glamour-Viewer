@@ -4,6 +4,7 @@ import {
   SAGE_IDLE_WEAPON_ANIMATION_PATH,
   SAGE_IDLE_WEAPON_SKELETON_PATH,
   SAGE_IDLE_WEAPON_VERTICAL_OFFSET,
+  SAGE_IDLE_WEAPON_YAW,
 } from './sageWeapon'
 
 describe('Sage noulith attachment mapping', () => {
@@ -20,7 +21,8 @@ describe('Sage noulith attachment mapping', () => {
     expect(SAGE_IDLE_WEAPON_ANIMATION_NAME).toBe('cbbw_2fa_2lp')
   })
 
-  it('lifts the drawn formation above the character head', () => {
-    expect(SAGE_IDLE_WEAPON_VERTICAL_OFFSET).toBe(0.12)
+  it('lifts and reverses the complete authored formation', () => {
+    expect(SAGE_IDLE_WEAPON_VERTICAL_OFFSET).toBe(0.85)
+    expect(SAGE_IDLE_WEAPON_YAW).toBe(Math.PI)
   })
 })

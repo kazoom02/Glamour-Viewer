@@ -5,5 +5,8 @@ export const SAGE_IDLE_WEAPON_SKELETON_PATH = 'chara/weapon/w2702/skeleton/base/
 export const SAGE_IDLE_WEAPON_ANIMATION_PATH = 'chara/weapon/w2702/animation/a0001/wp_common/resident/weapon.pap'
 export const SAGE_IDLE_WEAPON_ANIMATION_NAME = 'cbbw_2fa_2lp'
 
-/** Midlander-space lift that keeps the upper noulith pair above the head. */
-export const SAGE_IDLE_WEAPON_VERTICAL_OFFSET = 0.12
+/** Midlander-space lift applied to the complete authored formation. */
+export const SAGE_IDLE_WEAPON_VERTICAL_OFFSET = 0.85
+
+/** Turns the complete authored formation so every noulith points the other way. */
+export const SAGE_IDLE_WEAPON_YAW = Math.PI
