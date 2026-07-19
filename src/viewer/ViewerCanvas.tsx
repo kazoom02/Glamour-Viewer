@@ -9,6 +9,7 @@ import {
   characterModelPlan,
   equipmentModelCandidates,
   faceSkeletonCandidates,
+  animationPapCandidates,
   idleAnimationCandidates,
   skeletonPath,
   weaponRaceScale,
@@ -50,7 +51,7 @@ import {
 } from '../catalog/types'
 import type { CharacterCustomization } from '../customization/types'
 import { activeFaceShapes, faceFeatureMask, faceFeatureVisible } from '../customization/faceShapes'
-import { animationClipFromDecoded } from './idleAnimation'
+import { animationClipFromDecoded, blendLoopingAnimationClips } from './idleAnimation'
 import AnimationPicker from './AnimationPicker'
 import { createAvfxRuntime, type AvfxRuntime } from './avfxRuntime'
 import { subdivideCurvedMesh } from './geometryQuality'
@@ -1390,6 +1391,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       let bustScale: BustScale = [1, 1, 1]
       let baseIdleClip: THREE.AnimationClip | undefined
       let idleAnimationPromise: Promise<DecodedAnimation> | undefined
+      let sageResidentIdlePromise: Promise<DecodedAnimation> | undefined
       let idleReady = false
       if (source.kind === 'local') {
         try {
@@ -1494,6 +1496,12 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           const restingClass = weaponDrawnRef.current && idleWeaponClass !== 'bt_common' ? idleWeaponClass : 'bt_common'
           diagnostics.push(`idle: weaponClass=${idleWeaponClass} drawn=${weaponDrawnRef.current} resting=${restingClass} (mainHand=${idleWeapon?.name ?? 'none'})`)
           idleAnimationPromise = loadLocalIdleAnimation(source, idleAnimationCandidates(raceCode, restingClass))
+          if (restingClass === 'bt_jst_sld') {
+            sageResidentIdlePromise = loadLocalIdleAnimation(
+              source,
+              animationPapCandidates(raceCode, 'bt_jst_sld', 'resident', 'idle'),
+            )
+          }
         } catch (reason) {
           failures.push(`base skeleton: ${reason instanceof Error ? reason.message : String(reason)}`)
           setIdleState('unavailable')
@@ -1735,9 +1743,19 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
         if (idleAnimationPromise && rig) {
           try {
             setStatus(`Preparing ${raceCode} idle animation…`)
-            const decodedAnimation = await idleAnimationPromise
+            const [decodedAnimation, sageResidentAnimation] = await Promise.all([
+              idleAnimationPromise,
+              sageResidentIdlePromise,
+            ])
             if (disposed) return
-            const { clip, boundTracks, totalTracks, channels } = animationClipFromDecoded(decodedAnimation, rig.skeleton)
+            const primaryResult = animationClipFromDecoded(decodedAnimation, rig.skeleton)
+            const residentResult = sageResidentAnimation
+              ? animationClipFromDecoded(sageResidentAnimation, rig.skeleton)
+              : undefined
+            const clip = residentResult
+              ? blendLoopingAnimationClips(primaryResult.clip, residentResult.clip, 0.4, 'Sage idle')
+              : primaryResult.clip
+            const { boundTracks, totalTracks, channels } = primaryResult
             baseIdleClip = clip
             activeIdleMixer = new THREE.AnimationMixer(characterGroup)
             const action = activeIdleMixer.clipAction(clip)
@@ -1756,11 +1774,14 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             idleMixer.current = activeIdleMixer
             idleAction.current = action
             idleReady = true
-            setIdleLabel(decodedAnimation.name || 'Idle')
+            setIdleLabel(residentResult ? 'Sage idle' : decodedAnimation.name || 'Idle')
             setIdleState('playing')
             diagnostics.push(
               `idle animation: ${decodedAnimation.path} name=${decodedAnimation.name} blend=${decodedAnimation.blendHint} duration=${decodedAnimation.duration.toFixed(3)}s frames=${decodedAnimation.times.length} tracks=${decodedAnimation.tracks.length} bound=${boundTracks}/${totalTracks} channels=${channels} rootTranslation=stabilized`,
             )
+            if (sageResidentAnimation) {
+              diagnostics.push(`sage idle blend: pose=${decodedAnimation.path} resident=${sageResidentAnimation.path} weights=0.60/0.40 output=${clip.duration.toFixed(3)}s`)
+            }
           } catch (reason) {
             const detail = reason instanceof Error ? reason.message : String(reason)
             failures.push(`idle animation: ${detail}`)
@@ -1837,14 +1858,26 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             const transitionEntry = toCatalogAnimation(`${weaponClass}-resident-sub-${drawing ? 'cbbp_a_activ' : 'cbbp_a_deact'}`)
             // Drawing settles into the weapon idle; sheathing into the unarmed idle.
             const restingClass = drawing ? weaponClass : 'bt_common'
-            const [transitionDecoded, restingDecoded] = await Promise.all([
+            const sageResidentPromise = restingClass === 'bt_jst_sld'
+              ? loadLocalIdleAnimation(localSource, animationPapCandidates(raceCode, 'bt_jst_sld', 'resident', 'idle'))
+              : undefined
+            const [transitionDecoded, restingDecoded, sageResidentDecoded] = await Promise.all([
               loadLocalAnimation(localSource, catalogAnimationCandidates(transitionEntry, raceCode), transitionEntry.internal || undefined),
               loadLocalIdleAnimation(localSource, idleAnimationCandidates(raceCode, restingClass)),
+              sageResidentPromise,
             ])
             if (disposed) return
             const transitionClip = animationClipFromDecoded(transitionDecoded, animationRig.skeleton, animationBustScale).clip
-            const restingClip = animationClipFromDecoded(restingDecoded, animationRig.skeleton, animationBustScale).clip
-            const restingLabel = restingDecoded.name || (drawing ? 'Weapon idle' : 'Idle')
+            const restingPoseClip = animationClipFromDecoded(restingDecoded, animationRig.skeleton, animationBustScale).clip
+            const restingClip = sageResidentDecoded
+              ? blendLoopingAnimationClips(
+                  restingPoseClip,
+                  animationClipFromDecoded(sageResidentDecoded, animationRig.skeleton, animationBustScale).clip,
+                  0.4,
+                  'Sage idle',
+                )
+              : restingPoseClip
+            const restingLabel = sageResidentDecoded ? 'Sage idle' : restingDecoded.name || (drawing ? 'Weapon idle' : 'Idle')
             // Play the transition once at 0.7× (slightly slower for readability), then
             // loop into the resting idle at normal speed when it ends.
             playClipOnRig(transitionClip, drawing ? 'Draw weapon' : 'Sheathe weapon', transitionDecoded.blendHint, true, 0.7)

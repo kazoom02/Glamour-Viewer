@@ -47,6 +47,78 @@ export interface AnimationClipResult {
   channels: number
 }
 
+function greatestCommonDivisor(a: number, b: number): number {
+  while (b) [a, b] = [b, a % b]
+  return a
+}
+
+/**
+ * Resamples two looping absolute clips into one loop while preserving quaternion
+ * interpolation. The output duration aligns both source loops, so it has no phase
+ * jump when the clips have different lengths (Sage uses 70- and 50-frame loops).
+ */
+export function blendLoopingAnimationClips(
+  primary: THREE.AnimationClip,
+  secondary: THREE.AnimationClip,
+  secondaryWeight: number,
+  name: string,
+  sampleRate = 30,
+): THREE.AnimationClip {
+  const weight = THREE.MathUtils.clamp(secondaryWeight, 0, 1)
+  const primaryFrames = Math.max(1, Math.round(primary.duration * sampleRate))
+  const secondaryFrames = Math.max(1, Math.round(secondary.duration * sampleRate))
+  const commonFrames = Math.min(
+    600,
+    (primaryFrames * secondaryFrames) / greatestCommonDivisor(primaryFrames, secondaryFrames),
+  )
+  const times = Float32Array.from({ length: commonFrames }, (_, frame) => frame / sampleRate)
+  const primaryTracks = new Map(primary.tracks.map((track) => [track.name, track]))
+  const secondaryTracks = new Map(secondary.tracks.map((track) => [track.name, track]))
+  const trackNames = new Set([...primaryTracks.keys(), ...secondaryTracks.keys()])
+  const tracks: THREE.KeyframeTrack[] = []
+
+  for (const trackName of trackNames) {
+    const primaryTrack = primaryTracks.get(trackName)
+    const secondaryTrack = secondaryTracks.get(trackName)
+    const sourceTrack = primaryTrack ?? secondaryTrack
+    if (!sourceTrack) continue
+    const valueSize = sourceTrack.getValueSize()
+    const values = new Float32Array(commonFrames * valueSize)
+    const primaryInterpolant = primaryTrack?.InterpolantFactoryMethodLinear()
+    const secondaryInterpolant = secondaryTrack?.InterpolantFactoryMethodLinear()
+    const quaternion = sourceTrack instanceof THREE.QuaternionKeyframeTrack
+
+    for (let frame = 0; frame < commonFrames; frame += 1) {
+      const primaryTime = (frame % primaryFrames) / sampleRate
+      const secondaryTime = (frame % secondaryFrames) / sampleRate
+      const primaryValue = primaryInterpolant?.evaluate(primaryTime)
+      const secondaryValue = secondaryInterpolant?.evaluate(secondaryTime)
+      const targetOffset = frame * valueSize
+      if (quaternion && primaryValue && secondaryValue) {
+        new THREE.Quaternion()
+          .fromArray(primaryValue)
+          .slerp(new THREE.Quaternion().fromArray(secondaryValue), weight)
+          .normalize()
+          .toArray(values, targetOffset)
+      } else {
+        for (let component = 0; component < valueSize; component += 1) {
+          const primaryComponent = Number(primaryValue?.[component] ?? secondaryValue?.[component] ?? 0)
+          const secondaryComponent = Number(secondaryValue?.[component] ?? primaryValue?.[component] ?? 0)
+          values[targetOffset + component] = THREE.MathUtils.lerp(primaryComponent, secondaryComponent, weight)
+        }
+      }
+    }
+
+    tracks.push(quaternion
+      ? new THREE.QuaternionKeyframeTrack(trackName, times, values)
+      : valueSize === 1
+        ? new THREE.NumberKeyframeTrack(trackName, times, values)
+        : new THREE.VectorKeyframeTrack(trackName, times, values))
+  }
+
+  return new THREE.AnimationClip(name, commonFrames / sampleRate, tracks).optimize()
+}
+
 /**
  * Converts an absolute Havok clip to a stable Three.js inspection clip.
  *
