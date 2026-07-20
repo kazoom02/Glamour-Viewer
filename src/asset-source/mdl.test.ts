@@ -204,7 +204,7 @@ function shapedTriangleMdl(indexBase = 0): ArrayBuffer {
   view.setUint16(shapeOffset + 10, 1, true)
   view.setUint32(shapeMeshOffset, indexBase, true)
   view.setUint32(shapeMeshOffset + 4, 1, true)
-  view.setUint16(shapeValueOffset, indexBase, true)
+  view.setUint16(shapeValueOffset, 0, true)
   view.setUint16(shapeValueOffset + 2, 3, true)
   ;[
     0, 0, 0,
@@ -276,7 +276,7 @@ describe('MDL geometry decoding', () => {
     expect(shaped.shapeReplacements).toBe(1)
   })
 
-  it('converts shared-buffer shape offsets to mesh-local index offsets', () => {
+  it('keeps shape value offsets mesh-local when the mesh starts later in the shared index buffer', () => {
     const shaped = decodeMdl(shapedTriangleMdl(3), ['shp_chk_a'])
     expect(Array.from(shaped.meshes[0]!.indices)).toEqual([3, 1, 2])
     expect(shaped.shapeReplacements).toBe(1)

@@ -534,11 +534,10 @@ export function decodeMdl(mdlBuffer: ArrayBuffer, requestedShapes: readonly stri
         for (let valueIndex = shapeMesh.valueOffset; valueIndex < shapeMesh.valueOffset + shapeMesh.valueCount; valueIndex += 1) {
           const value = shapeValues[valueIndex]
           if (!value || value.replacingVertexIndex >= mesh.vertexCount) continue
-          // Shape values address the shared LOD index buffer. `indices` is the
-          // current mesh-local slice, so remove the shape mesh's global offset.
-          const localBaseIndex = value.baseIndexIndex - shapeMesh.meshIndexOffset
-          if (localBaseIndex < 0 || localBaseIndex >= indices.length) continue
-          indices[localBaseIndex] = value.replacingVertexIndex
+          // The shape mesh offset identifies the mesh's slice in the shared LOD
+          // index buffer, but each 16-bit shape value addresses that slice locally.
+          if (value.baseIndexIndex >= indices.length) continue
+          indices[value.baseIndexIndex] = value.replacingVertexIndex
           shapeReplacementCount += 1
           appliedShapeNames.add(shape.name)
         }

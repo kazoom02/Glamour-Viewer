@@ -390,10 +390,7 @@ function addDecodedModel(
 ): number {
   for (const [index, part] of model.meshes.entries()) {
     if (slot && attributeMask !== undefined && !isVisibleEquipmentPart(part.attributes, slot, attributeMask)) continue
-    if (part.attributes?.some((attribute) => {
-      const normalized = attribute.toLowerCase()
-      return hiddenAttributes.some((hidden) => normalized === hidden || normalized.startsWith(`${hidden}_`))
-    })) continue
+    if (part.attributes?.some((attribute) => hiddenAttributes.includes(attribute.toLowerCase()))) continue
     if (label === 'character-face' && customization && !faceFeatureVisible(part.attributes, faceFeatureMask(customization))) continue
     const materialPath = model.materialPaths[part.materialIndex]?.toLowerCase() ?? ''
     const decodedMaterial = decodedMaterials[materialPath.replaceAll('\\', '/')]
