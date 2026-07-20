@@ -102,12 +102,13 @@ describe('character colorset baking', () => {
 
     expect(Array.from(result.diffuse.rgba.slice(0, 3))).toEqual([255, 255, 255])
     expect(Array.from(result.ao.rgba.slice(0, 3))).toEqual([0, 0, 0])
-    // Mask green 255 is full gloss, so the surface is smooth (floored), not rough.
-    expect(Array.from(result.roughness.rgba.slice(0, 3))).toEqual([64, 64, 64])
+    // Mask green 255 is full gloss, but the colorset/STM roughness remains the
+    // baseline instead of being discarded by the texture.
+    expect(Array.from(result.roughness.rgba.slice(0, 3))).toEqual([128, 128, 128])
     expect(result.specularIntensity.rgba[3]).toBe(16)
   })
 
-  it('reads the Dawntrail mask green channel as roughness, not gloss', () => {
+  it('keeps the colorset roughness as the baseline for a Dawntrail material', () => {
     const rows = Array.from({ length: 32 }, () => ({
       diffuse: [1, 1, 1] as [number, number, number],
       specular: [0, 0, 0] as [number, number, number],
@@ -122,7 +123,24 @@ describe('character colorset baking', () => {
       mask: texture([255, 242, 255, 255]),
     }, 'character.shpk')!
 
-    expect(result.roughness.rgba[0]).toBe(242)
+    expect(result.roughness.rgba[0]).toBe(255)
+  })
+
+  it('does not let a smooth mask erase roughness supplied by a dye row', () => {
+    const rows = Array.from({ length: 32 }, () => ({
+      diffuse: [0.01, 0.01, 0.01] as [number, number, number],
+      specular: [0.1, 0.2, 0.8] as [number, number, number],
+      specularMask: 1,
+      emissive: [0, 0, 0] as [number, number, number],
+      roughness: 0.8,
+      metalness: 0,
+    }))
+    const result = bakeCharacterMaterial({ kind: 'dawntrail', rows }, {
+      index: texture([0, 255, 0, 255]),
+      mask: texture([255, 16, 255, 255]),
+    }, 'character.shpk')!
+
+    expect(result.roughness.rgba[0]).toBe(204)
   })
 
   it('keeps a smooth roughness mask smooth', () => {

@@ -257,7 +257,12 @@ export function bakeCharacterMaterial(
       const textureRoughness = textures.mask
         ? (legacyShader ? 1 - mask[1] / 255 : mask[1] / 255)
         : rowRoughness
-      const pbrRoughness = Math.max(0.25, textureRoughness)
+      // The colorset/STM roughness is the surface baseline and the mask adds
+      // local rough detail. Discarding the row whenever a mask existed also
+      // discarded dye roughness, leaving dark dyes with the original garment's
+      // saturated glossy reflections (Jet Black looked blue on the Mirage
+      // Coatee). Neither source may make the surface smoother than the other.
+      const pbrRoughness = Math.max(0.25, rowRoughness, textureRoughness)
       const rough = clampByte(pbrRoughness)
       const occlusion = textures.mask ? mask[2] : 255
       const rowSpecularMask = legacyShader ? mix(a.specularMask, b.specularMask) : 1
