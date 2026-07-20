@@ -385,9 +385,11 @@ function addDecodedModel(
   animatedMaterials: AnimatedMaterial[] = [],
   facePaintTexture?: MaterialLoadResult['facePaintTexture'],
   customizationAppliers: CustomizationApplier[] = [],
+  suppressedAttributePrefixes: readonly string[] = [],
 ): number {
   for (const [index, part] of model.meshes.entries()) {
     if (slot && attributeMask !== undefined && !isVisibleEquipmentPart(part.attributes, slot, attributeMask)) continue
+    if (part.attributes?.some((attribute) => suppressedAttributePrefixes.some((prefix) => attribute.toLowerCase().startsWith(prefix)))) continue
     if (label === 'character-face' && customization && !faceFeatureVisible(part.attributes, faceFeatureMask(customization))) continue
     const materialPath = model.materialPaths[part.materialIndex]?.toLowerCase() ?? ''
     const decodedMaterial = decodedMaterials[materialPath.replaceAll('\\', '/')]
@@ -422,10 +424,6 @@ function addDecodedModel(
     const alphaMode = decodedMaterial?.alphaMode ?? 'opaque'
     const alphaCutoff = materialAlphaCutoff(shaderPackage, alphaMode, Boolean(diffuse))
     const isIris = decodedMaterial?.shaderPackage.toLowerCase() === 'iris.shpk' || /_iri_[a-z]\.mtrl$/.test(materialPath)
-    // Gloves and body sleeves frequently share nearly identical skinned surface
-    // positions. FFXIV resolves that equipment layer in favour of the gloves;
-    // bias only their depth values so the sleeve cannot z-fight through them.
-    const isHandEquipment = slot === 'hands'
     const isFaceMaterial = /mt_c\d{4}f\d{4}/.test(materialPath)
     // Which appearance color drives this material's tint. Resolved once so the
     // initial build and the live color updates stay in lockstep.
@@ -540,9 +538,9 @@ function addDecodedModel(
         : THREE.FrontSide,
       dithering: true,
       flatShading: false,
-      polygonOffset: isIris || isHandEquipment,
-      polygonOffsetFactor: isIris ? -1 : isHandEquipment ? -2 : 0,
-      polygonOffsetUnits: isIris ? -1 : isHandEquipment ? -2 : 0,
+      polygonOffset: isIris,
+      polygonOffsetFactor: isIris ? -1 : 0,
+      polygonOffsetUnits: isIris ? -1 : 0,
     })
     // MSAA turns the hard cutout boundary into sub-pixel coverage while retaining
     // depth writes between layered hairstyle cards. This avoids both rectangular
@@ -637,7 +635,6 @@ function addDecodedModel(
       : new THREE.Mesh(geometry, material)
     mesh.name = `${label}-${index}`
     if (isIris) mesh.renderOrder = 10
-    else if (isHandEquipment) mesh.renderOrder = 2
     target.add(mesh)
     if (mesh instanceof THREE.SkinnedMesh && rig) {
       target.updateMatrixWorld(true)
@@ -1562,6 +1559,11 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
         }
         if (disposed) return
         const materialsByModel = new Map(materialResults.map((result) => [result.modelPath, result]))
+        const handEquipmentModel = equipmentModels.find(({ plan }) => plan.slot === 'hands')
+        const handMaterialResult = handEquipmentModel
+          ? materialsByModel.get(handEquipmentModel.result.path)
+          : undefined
+        const suppressBodySleeves = handMaterialResult?.handHideElbow || handMaterialResult?.handHideForearm
         diagnostics.push(`face customization: requestedShapes=${selectedFaceShapes.join(',') || 'base'} featureMask=0x${faceFeatureMask(customization).toString(16).padStart(2, '0')}`)
         diagnostics.push(...materialResults.flatMap((result) => result.diagnostics))
         const headEquipmentModel = equipmentModels.find(({ plan }) => plan.slot === 'head')
@@ -1664,6 +1666,9 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               false,
               materialResult?.materialAnimation,
               animatedMaterials,
+              undefined,
+              [],
+              plan.slot === 'body' && suppressBodySleeves ? ['atr_gv_'] : [],
             )
             if (plan.sageMount && weaponRig && sageWeaponAnimationsPromise) {
               try {

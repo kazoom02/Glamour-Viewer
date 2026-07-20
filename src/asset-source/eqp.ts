@@ -7,6 +7,8 @@ const DEFAULT_ENTRY = 0x3fe00070603f00n
 const HEAD_HIDE_SCALP = 1n << 41n
 const HEAD_HIDE_HAIR = 1n << 42n
 const HEAD_SHOW_HAIR_OVERRIDE = 1n << 43n
+const HANDS_HIDE_ELBOW = 1n << 25n
+const HANDS_HIDE_FOREARM = 1n << 26n
 
 export interface HeadEquipmentVisibility {
   hideScalp: boolean
@@ -14,6 +16,11 @@ export interface HeadEquipmentVisibility {
   showHairOverride: boolean
   /** Matches the client rule: Show Hair Override wins over Hide Hair. */
   hairHidden: boolean
+}
+
+export interface HandEquipmentVisibility {
+  hideElbow: boolean
+  hideForearm: boolean
 }
 
 function assertEqp(condition: unknown, message: string): asserts condition {
@@ -53,4 +60,13 @@ export function headEquipmentVisibility(bytes: ArrayBuffer, setId: number): Head
   const hideHair = (entry & HEAD_HIDE_HAIR) !== 0n
   const showHairOverride = (entry & HEAD_SHOW_HAIR_OVERRIDE) !== 0n
   return { hideScalp, hideHair, showHairOverride, hairHidden: hideHair && !showHairOverride }
+}
+
+/** Reads the cross-slot sleeve suppression authored for a hand equipment set. */
+export function handEquipmentVisibility(bytes: ArrayBuffer, setId: number): HandEquipmentVisibility {
+  const entry = equipmentParameterEntry(bytes, setId)
+  return {
+    hideElbow: (entry & HANDS_HIDE_ELBOW) !== 0n,
+    hideForearm: (entry & HANDS_HIDE_FOREARM) !== 0n,
+  }
 }

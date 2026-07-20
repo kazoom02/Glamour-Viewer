@@ -76,4 +76,6 @@ export interface MaterialLoadResult {
   facePaintTexture?: { path: string; texture: DecodedTexture }
   headHairHidden?: boolean
   headScalpHidden?: boolean
+  handHideElbow?: boolean
+  handHideForearm?: boolean
 }

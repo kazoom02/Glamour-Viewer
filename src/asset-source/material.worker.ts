@@ -3,7 +3,7 @@
 import { equipmentMaterialAnimationPath, equipmentVfxPath, readImcEntry } from './imc'
 import { decodeAvfx } from './avfx'
 import { decodeMaterialAnimation, MATERIAL_ANIMATION_SKELETON_PATH } from './materialAnimation'
-import { EQUIPMENT_PARAMETER_PATH, headEquipmentVisibility } from './eqp'
+import { EQUIPMENT_PARAMETER_PATH, handEquipmentVisibility, headEquipmentVisibility } from './eqp'
 import {
   bakeCharacterMaterial,
   bakeHairMaterial,
@@ -188,6 +188,8 @@ async function loadRequest(
   let facePaintTexture: MaterialLoadResult['facePaintTexture']
   let headHairHidden: boolean | undefined
   let headScalpHidden: boolean | undefined
+  let handHideElbow: boolean | undefined
+  let handHideForearm: boolean | undefined
   if (request.imcPath && request.slot && request.variant !== undefined) {
     try {
       const entry = readImcEntry(await reader.read(request.imcPath), request.slot, request.variant)
@@ -219,6 +221,16 @@ async function loadRequest(
       // EQP is optional here because some browser selections do not expose
       // resident metadata files. The dressing room still offers an override.
       diagnostics.push(`head EQP unavailable: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  if (request.slot === 'hands' && request.equipmentSetId !== undefined) {
+    try {
+      const visibility = handEquipmentVisibility(await loadEquipmentParameters(reader, sourceKey), request.equipmentSetId)
+      handHideElbow = visibility.hideElbow
+      handHideForearm = visibility.hideForearm
+      diagnostics.push(`hand EQP: hideElbow=${visibility.hideElbow} hideForearm=${visibility.hideForearm}`)
+    } catch (error) {
+      diagnostics.push(`hand EQP unavailable: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 
@@ -414,6 +426,8 @@ async function loadRequest(
     ...(facePaintTexture ? { facePaintTexture } : {}),
     ...(headHairHidden !== undefined ? { headHairHidden } : {}),
     ...(headScalpHidden !== undefined ? { headScalpHidden } : {}),
+    ...(handHideElbow !== undefined ? { handHideElbow } : {}),
+    ...(handHideForearm !== undefined ? { handHideForearm } : {}),
   }
 }
 

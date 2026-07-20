@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { equipmentParameterEntry, headEquipmentVisibility } from './eqp'
+import { equipmentParameterEntry, handEquipmentVisibility, headEquipmentVisibility } from './eqp'
 
 function fixture(entry: bigint): ArrayBuffer {
   const buffer = new ArrayBuffer(160 * 8)
@@ -22,6 +22,14 @@ describe('equipment parameter hair visibility', () => {
   it('lets Show Hair Override win over the hide bits', () => {
     const flags = (1n << 41n) | (1n << 42n) | (1n << 43n)
     expect(headEquipmentVisibility(fixture(flags), 5).hairHidden).toBe(false)
+  })
+
+  it('reads hand equipment sleeve suppression flags', () => {
+    const flags = (1n << 25n) | (1n << 26n)
+    expect(handEquipmentVisibility(fixture(flags), 5)).toEqual({
+      hideElbow: true,
+      hideForearm: true,
+    })
   })
 
   it('uses the client default for a collapsed block', () => {
