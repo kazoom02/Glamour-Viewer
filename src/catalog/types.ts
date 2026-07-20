@@ -61,6 +61,8 @@ export interface ArmorItem {
   jobs: string
   /** ClassJobCategory row id, used by the class filter. Absent/zero means unrestricted. */
   classJobCategoryId?: number
+  /** Game equip restriction: 1 = male only, 2 = female only. */
+  equipRestriction?: 1 | 2
   /** Applied in-game stain metadata for dye channels 1 and 2. */
   dyes?: [EquipmentDye | null, EquipmentDye | null]
   /** Optional dressing-room override for head equipment hair suppression. */

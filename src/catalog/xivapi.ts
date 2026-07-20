@@ -26,6 +26,7 @@ const FIELDS = [
   'LevelItem.value',
   'ClassJobCategory.value',
   'ClassJobCategory.Name',
+  'EquipRestriction',
 ].join(',')
 
 interface Relationship<T> {
@@ -58,6 +59,7 @@ interface SearchFields {
   LevelEquip?: number
   LevelItem?: Relationship<Record<string, never>>
   ClassJobCategory?: Relationship<{ Name?: string }>
+  EquipRestriction?: number
 }
 
 interface SearchResponse {
@@ -174,6 +176,9 @@ async function fetchArmorPage(url: URL, selectedSlot: EquipmentSlot, signal?: Ab
       itemLevel: fields.LevelItem?.value ?? 0,
       jobs: fields.ClassJobCategory?.fields?.Name ?? 'All classes',
       classJobCategoryId: fields.ClassJobCategory?.value ?? 0,
+      ...((fields.EquipRestriction === 1 || fields.EquipRestriction === 2)
+        ? { equipRestriction: fields.EquipRestriction }
+        : {}),
       ...(subModel?.set ? { weaponSubModel: subModel } : {}),
     }]
   })

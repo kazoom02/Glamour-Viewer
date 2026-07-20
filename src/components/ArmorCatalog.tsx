@@ -20,6 +20,7 @@ import {
   prefetchAllSlots,
 } from '../catalog/catalogCache'
 import DyePicker from './DyePicker'
+import type { CharacterGender } from '../customization/types'
 
 
 
@@ -30,6 +31,7 @@ interface Props {
   onRemove: (slot: EquipmentSlot) => void
   onDye: (slot: EquipmentSlot, channel: 0 | 1, dye: EquipmentDye | null) => void
   onHeadHairVisibility: (visibility: HairVisibility) => void
+  gender: CharacterGender
 }
 
 const LEFT_SLOTS: EquipmentSlot[] = ['mainHand', 'head', 'body', 'hands', 'legs', 'feet']
@@ -48,7 +50,7 @@ const JOB_GROUPS = JOB_GROUP_ORDER.map((group) => ({
   jobs: JOB_FILTERS.filter((job) => job.group === group),
 })).filter((entry) => entry.jobs.length > 0)
 
-export default function ArmorCatalog({ source, equipped, onEquip, onRemove, onDye, onHeadHairVisibility }: Props) {
+export default function ArmorCatalog({ source, equipped, onEquip, onRemove, onDye, onHeadHairVisibility, gender }: Props) {
   const [query, setQuery] = useState('')
   const [selectedSlot, setSelectedSlot] = useState<EquipmentSlot | null>(null)
   const [fullItems, setFullItems] = useState<ArmorItem[]>([])
@@ -131,6 +133,7 @@ export default function ArmorCatalog({ source, equipped, onEquip, onRemove, onDy
 
   const displayed = useMemo(() => {
     let list = fullItems
+    list = list.filter((item) => item.equipRestriction !== (gender === 'female' ? 1 : 2))
     const term = query.trim().toLowerCase()
     if (term.length >= 2) list = list.filter((item) => item.name.toLowerCase().includes(term))
     if (jobFilter) {
@@ -148,7 +151,7 @@ export default function ArmorCatalog({ source, equipped, onEquip, onRemove, onDy
     else if (sortMode === 'ilvl-asc') sorted.sort((a, b) => ilvl(a) - ilvl(b) || a.name.localeCompare(b.name))
     else sorted.sort((a, b) => a.name.localeCompare(b.name))
     return sorted
-  }, [fullItems, query, jobFilter, sortMode, categories])
+  }, [fullItems, query, jobFilter, sortMode, categories, gender])
 
   function openSlot(slot: EquipmentSlot) {
     setQuery('')

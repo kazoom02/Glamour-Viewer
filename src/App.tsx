@@ -42,6 +42,16 @@ export function App() {
   }, [raceCode])
 
   useEffect(() => {
+    const blockedRestriction = customization.gender === 'female' ? 1 : 2
+    setEquipped((current) => {
+      const next = Object.fromEntries(
+        Object.entries(current).filter(([, item]) => item?.equipRestriction !== blockedRestriction),
+      ) as EquippedArmor
+      return Object.keys(next).length === Object.keys(current).length ? current : next
+    })
+  }, [customization.gender])
+
+  useEffect(() => {
     const onHashChange = () => {
       const set = readSharedSet()
       setSharedSet(set)
@@ -215,6 +225,7 @@ export function App() {
                     onRemove={unequip}
                     onDye={dyeEquipment}
                     onHeadHairVisibility={setHeadHairVisibility}
+                    gender={customization.gender}
                   />
                 ) : (
                   <CustomizationPanel
