@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { armorSearchUrl, decodeEquipmentModel, xivapiIconUrl } from './xivapi'
+import { armorSearchUrl, decodeEquipmentModel, equipmentModelValues, xivapiIconUrl } from './xivapi'
 
 describe('XIVAPI catalog helpers', () => {
   it('decodes an equipment model into set and variant identifiers', () => {
@@ -10,6 +10,13 @@ describe('XIVAPI catalog helpers', () => {
   it('rejects unusable model values', () => {
     expect(decodeEquipmentModel(0)).toEqual({ set: 0, base: 0, variant: 0 })
     expect(decodeEquipmentModel(Number.NaN)).toEqual({ set: 0, base: 0, variant: 0 })
+  })
+
+  it('uses ModelSub as the shield and only exposes it as a main-hand secondary', () => {
+    const fields = { ModelMain: 111, ModelSub: 222 }
+    expect(equipmentModelValues(fields, 'mainHand')).toEqual({ primary: 111, secondary: 222 })
+    expect(equipmentModelValues(fields, 'offHand')).toEqual({ primary: 222 })
+    expect(equipmentModelValues(fields, 'body')).toEqual({ primary: 111 })
   })
 
   it('builds a direct XIVAPI image URL', () => {

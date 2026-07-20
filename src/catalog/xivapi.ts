@@ -108,6 +108,17 @@ export function decodeEquipmentModel(
   }
 }
 
+export function equipmentModelValues(
+  fields: Pick<SearchFields, 'ModelMain' | 'ModelSub'>,
+  slot: EquipmentSlot,
+): { primary?: number; secondary?: number } {
+  if (slot === 'offHand') return { primary: fields.ModelSub || fields.ModelMain }
+  return {
+    primary: fields.ModelMain || fields.ModelSub,
+    ...(slot === 'mainHand' && fields.ModelSub ? { secondary: fields.ModelSub } : {}),
+  }
+}
+
 export function xivapiIconUrl(path: string): string {
   const url = xivapiApiUrl('asset')
   url.searchParams.set('path', path)
@@ -152,15 +163,16 @@ async function fetchArmorPage(url: URL, selectedSlot: EquipmentSlot, signal?: Ab
     const id = result.row_id
     const slotFields = fields?.EquipSlotCategory?.fields
     if ((slotFields?.[SLOT_FIELDS[selectedSlot]] ?? 0) <= 0) return []
-    const modelValue = fields?.ModelMain || fields?.ModelSub
+    const models = fields ? equipmentModelValues(fields, selectedSlot) : {}
+    const modelValue = models.primary
     if (!fields?.Name || id === undefined || !modelValue) return []
 
     const model = decodeEquipmentModel(modelValue, selectedSlot)
     if (!model.set) return []
     // Dual-wield weapons (Rogue/Ninja daggers, Viper twinblades) store their
     // off-hand blade in ModelSub; the game renders it in the left hand.
-    const subModel = isWeaponSlot(selectedSlot) && fields.ModelSub
-      ? decodeEquipmentModel(fields.ModelSub, selectedSlot)
+    const subModel = models.secondary
+      ? decodeEquipmentModel(models.secondary, selectedSlot)
       : undefined
     return [{
       id,
