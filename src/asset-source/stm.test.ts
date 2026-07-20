@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MaterialColorTable, MaterialDyeRow } from './mtrl'
-import { applyStains, parseStainingTemplate } from './stm'
+import { applyStainColors, applyStains, parseStainingTemplate } from './stm'
 
 const HALF = { zero: 0x0000, quarter: 0x3400, half: 0x3800, one: 0x3c00 }
 
@@ -67,6 +67,22 @@ describe('FFXIV staining templates', () => {
     expect(result.appliedRows).toBe(1)
     expect(result.table.rows[0]).toMatchObject({ diffuse: [0.5, 0.25, 1], specularMask: 0.5 })
     expect(result.table.rows[0]!.roughness).toBeGreaterThan(0)
+    expect(result.table.rows[1]).toBe(row)
+  })
+
+  it('falls back to the selected catalog color for a dyeable row', () => {
+    const row = {
+      diffuse: [1, 1, 1], specular: [1, 1, 1], emissive: [0, 0, 0],
+      specularMask: 1, roughness: 1, metalness: 0,
+    } as MaterialColorTable['rows'][number]
+    const result = applyStainColors(
+      { kind: 'dawntrail', rows: [row, row] },
+      [{ template: 12, channel: 0, flags: 0x01 }, { template: 12, channel: 1, flags: 0x01 }],
+      [1, 0],
+      [0xff0000, null],
+    )
+    expect(result.appliedRows).toBe(1)
+    expect(result.table.rows[0]!.diffuse).toEqual([1, 0, 0])
     expect(result.table.rows[1]).toBe(row)
   })
 })

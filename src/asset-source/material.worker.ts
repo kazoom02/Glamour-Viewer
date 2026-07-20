@@ -19,6 +19,7 @@ import { materialCandidates } from './materialPath'
 import { materialTexturePriority, parseMtrl, type TextureRole } from './mtrl'
 import { createLocalAssetReader, type LocalAssetReader } from './sqpack'
 import {
+  applyStainColors,
   applyStains,
   DAWNTRAIL_STAIN_TEMPLATE_PATH,
   LEGACY_STAIN_TEMPLATE_PATH,
@@ -332,11 +333,22 @@ async function loadRequest(
         try {
           const stainingTemplate = await loadStainingTemplate(reader, sourceKey, effectiveColorTable.kind)
           const stained = applyStains(effectiveColorTable, parsed.dyeTable, stainingTemplate, request.stains)
-          effectiveColorTable = stained.table
+          const resolved = stained.appliedRows > 0 || !request.stainColors
+            ? stained
+            : applyStainColors(effectiveColorTable, parsed.dyeTable, request.stains, request.stainColors)
+          effectiveColorTable = resolved.table
           if (captureDiagnostics) materialDiagnostics.push(`  STM: ${stmPath} appliedRows=${stained.appliedRows}`)
+          if (captureDiagnostics && resolved !== stained) materialDiagnostics.push(`  fallback dye colors: appliedRows=${resolved.appliedRows}`)
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)
-          errors.push(`[stm] ${stmPath}: ${message}`)
+          if (request.stainColors) {
+            const fallback = applyStainColors(effectiveColorTable, parsed.dyeTable, request.stains, request.stainColors)
+            effectiveColorTable = fallback.table
+            if (captureDiagnostics) materialDiagnostics.push(`  fallback dye colors: appliedRows=${fallback.appliedRows}`)
+            if (fallback.appliedRows === 0) errors.push(`[stm] ${stmPath}: ${message}`)
+          } else {
+            errors.push(`[stm] ${stmPath}: ${message}`)
+          }
           if (captureDiagnostics) materialDiagnostics.push(`  failed STM: ${stmPath} — ${message}`)
         }
       }

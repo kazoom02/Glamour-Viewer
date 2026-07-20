@@ -1544,6 +1544,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             slot: plan.slot,
             variant: plan.asset.variant,
             stains: [plan.item.dyes?.[0]?.id ?? 0, plan.item.dyes?.[1]?.id ?? 0] as [number, number],
+            stainColors: [plan.item.dyes?.[0]?.color ?? null, plan.item.dyes?.[1]?.color ?? null] as [number | null, number | null],
             equipmentSetId: plan.item.modelSet,
           })),
         ]

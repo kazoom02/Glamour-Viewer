@@ -2,15 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AssetSource } from '../asset-source/types'
 import {
   EQUIPMENT_SLOTS,
-  isWeaponSlot,
   SLOT_LABELS,
   type ArmorItem,
   type EquipmentDye,
   type EquipmentSlot,
   type EquippedArmor,
   type HairVisibility,
-  type WeaponPlacement,
-  type WeaponSlot,
 } from '../catalog/types'
 import { dyeCssColor } from '../catalog/stains'
 import { JOB_FILTERS, xivapiIconUrl } from '../catalog/xivapi'
@@ -19,6 +16,7 @@ import {
   getClassJobCategories,
   getSlotCatalog,
   isSlotCached,
+  peekSlotCatalog,
   prefetchAllSlots,
 } from '../catalog/catalogCache'
 import DyePicker from './DyePicker'
@@ -32,7 +30,6 @@ interface Props {
   onRemove: (slot: EquipmentSlot) => void
   onDye: (slot: EquipmentSlot, channel: 0 | 1, dye: EquipmentDye | null) => void
   onHeadHairVisibility: (visibility: HairVisibility) => void
-  onWeaponPlacement: (slot: WeaponSlot, placement: WeaponPlacement) => void
 }
 
 const LEFT_SLOTS: EquipmentSlot[] = ['mainHand', 'head', 'body', 'hands', 'legs', 'feet']
@@ -51,7 +48,7 @@ const JOB_GROUPS = JOB_GROUP_ORDER.map((group) => ({
   jobs: JOB_FILTERS.filter((job) => job.group === group),
 })).filter((entry) => entry.jobs.length > 0)
 
-export default function ArmorCatalog({ source, equipped, onEquip, onRemove, onDye, onHeadHairVisibility, onWeaponPlacement }: Props) {
+export default function ArmorCatalog({ source, equipped, onEquip, onRemove, onDye, onHeadHairVisibility }: Props) {
   const [query, setQuery] = useState('')
   const [selectedSlot, setSelectedSlot] = useState<EquipmentSlot | null>(null)
   const [fullItems, setFullItems] = useState<ArmorItem[]>([])
@@ -88,10 +85,11 @@ export default function ArmorCatalog({ source, equipped, onEquip, onRemove, onDy
   useEffect(() => {
     if (!selectedSlot) return
     let active = true
-    const alreadyCached = isSlotCached(selectedSlot)
+    const cachedItems = peekSlotCatalog(selectedSlot)
+    const alreadyCached = cachedItems !== undefined
     setError(undefined)
-    setFullItems([])
-    setPagesLoaded(0)
+    setFullItems(cachedItems ?? [])
+    if (!alreadyCached) setPagesLoaded(0)
     setCached(alreadyCached)
     setLoading(!alreadyCached)
     getSlotCatalog(selectedSlot, {
@@ -155,6 +153,17 @@ export default function ArmorCatalog({ source, equipped, onEquip, onRemove, onDy
   function openSlot(slot: EquipmentSlot) {
     setQuery('')
     setJobFilter('')
+    const cachedItems = peekSlotCatalog(slot)
+    if (cachedItems) {
+      setFullItems(cachedItems)
+      setCached(true)
+      setLoading(false)
+      setVersion(catalogDataVersion())
+    } else if (!isSlotCached(slot)) {
+      setFullItems([])
+      setCached(false)
+      setLoading(true)
+    }
     setSelectedSlot(slot)
   }
 
@@ -225,19 +234,6 @@ export default function ArmorCatalog({ source, equipped, onEquip, onRemove, onDy
             <a className="item-hover-link" href={`https://ffxiv.consolegameswiki.com/wiki/${encodeURIComponent(item.name.replace(/ /g, '_'))}`} target="_blank" rel="noopener noreferrer">Wiki ↗</a>
             <a className="item-hover-link" href={`https://universalis.app/market/${item.id}`} target="_blank" rel="noopener noreferrer">Universalis ↗</a>
           </div>
-        )}
-        {item && isWeaponSlot(slot) && (
-          <label className="dressing-slot-placement">
-            <span>Placement</span>
-            <select
-              value={item.weaponPlacement ?? 'hand'}
-              onChange={(event) => onWeaponPlacement(slot, event.target.value as WeaponPlacement)}
-              aria-label={`${SLOT_LABELS[slot]} placement`}
-            >
-              <option value="hand">In hand</option>
-              <option value="back">On back</option>
-            </select>
-          </label>
         )}
       </div>
     )

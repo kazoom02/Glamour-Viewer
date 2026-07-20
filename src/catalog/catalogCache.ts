@@ -83,6 +83,11 @@ export function isSlotCached(slot: EquipmentSlot): boolean {
   return completed.has(slot)
 }
 
+/** Returns an already-loaded slot without introducing an asynchronous render. */
+export function peekSlotCatalog(slot: EquipmentSlot): ArmorItem[] | undefined {
+  return completed.get(slot)
+}
+
 /** Warms every slot in the background, one at a time to stay gentle on XIVAPI. */
 export function prefetchAllSlots(): void {
   void EQUIPMENT_SLOTS.reduce<Promise<unknown>>(

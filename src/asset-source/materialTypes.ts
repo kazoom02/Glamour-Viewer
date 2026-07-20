@@ -18,6 +18,8 @@ export interface MaterialLoadRequest {
   variant?: number
   /** In-game Stain row IDs for dye channels 1 and 2. */
   stains?: [number, number]
+  /** Picker RGB colors used only if the local staining template cannot apply a stain. */
+  stainColors?: [number | null, number | null]
   equipmentSetId?: number
   /** CharaMake face-paint FeatureID; zero disables the decal. */
   facePaintId?: number

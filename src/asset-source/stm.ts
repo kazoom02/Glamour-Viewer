@@ -241,3 +241,32 @@ export function applyStains(
   })
   return { table: { ...table, rows }, appliedRows }
 }
+
+function srgbToLinear(value: number): number {
+  const channel = value / 255
+  return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
+}
+
+/** Approximate fallback for installs whose STM is unavailable or unsupported. */
+export function applyStainColors(
+  table: MaterialColorTable,
+  dyeRows: MaterialDyeRow[],
+  stains: readonly number[],
+  colors: readonly (number | null)[],
+): { table: MaterialColorTable; appliedRows: number } {
+  let appliedRows = 0
+  const rows = table.rows.map((original, index) => {
+    const dyeRow = dyeRows[index]
+    const packed = colors[dyeRow?.channel ?? -1]
+    if (!dyeRow?.flags || !(dyeRow.flags & 0x01) || !stains[dyeRow.channel] || packed === null || packed === undefined) return original
+    const row = copyRow(original)
+    row.diffuse = [
+      srgbToLinear((packed >>> 16) & 0xff),
+      srgbToLinear((packed >>> 8) & 0xff),
+      srgbToLinear(packed & 0xff),
+    ]
+    appliedRows += 1
+    return row
+  })
+  return { table: { ...table, rows }, appliedRows }
+}

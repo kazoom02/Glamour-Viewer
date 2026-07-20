@@ -17,8 +17,6 @@ import type {
   EquipmentSlot,
   EquippedArmor,
   HairVisibility,
-  WeaponPlacement,
-  WeaponSlot,
 } from './catalog/types'
 import { CHARACTER_PRESETS, type CharacterRaceCode } from './asset-source/characterPlan'
 import { customizationForRaceCode, type CharacterCustomization } from './customization/types'
@@ -129,12 +127,6 @@ export function App() {
       : current)
   }
 
-  function setWeaponPlacement(slot: WeaponSlot, placement: WeaponPlacement) {
-    setEquipped((current) => current[slot]
-      ? { ...current, [slot]: { ...current[slot], weaponPlacement: placement } }
-      : current)
-  }
-
   return (
     <div className="app-shell">
       <header className="site-header">
@@ -223,7 +215,6 @@ export function App() {
                     onRemove={unequip}
                     onDye={dyeEquipment}
                     onHeadHairVisibility={setHeadHairVisibility}
-                    onWeaponPlacement={setWeaponPlacement}
                   />
                 ) : (
                   <CustomizationPanel
