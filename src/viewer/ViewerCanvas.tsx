@@ -1511,11 +1511,17 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               : handVisibility.hideForearm
                 ? 'shp_ude'
                 : 'shp_hij'
-            equipmentPlans
-              .filter((plan) => plan.slot === 'body')
-              .flatMap((plan) => plan.candidates)
+            const gloveShapePaths = [
+              ...characterPlans
+                .filter((plan) => plan.part === 'torso')
+                .flatMap(characterModelCandidates),
+              ...equipmentPlans
+                .filter((plan) => plan.slot === 'body')
+                .flatMap((plan) => plan.candidates),
+            ]
+            gloveShapePaths
               .forEach((path) => { shapeSelections[path] = [gloveShape] })
-            diagnostics.push(`glove compatibility shape: ${gloveShape} (hideElbow=${handVisibility.hideElbow} hideForearm=${handVisibility.hideForearm})`)
+            diagnostics.push(`glove compatibility shape: ${gloveShape} paths=${gloveShapePaths.length} (hideElbow=${handVisibility.hideElbow} hideForearm=${handVisibility.hideForearm})`)
           } catch (reason) {
             diagnostics.push(`glove compatibility shape unavailable: ${reason instanceof Error ? reason.message : String(reason)}`)
           }
