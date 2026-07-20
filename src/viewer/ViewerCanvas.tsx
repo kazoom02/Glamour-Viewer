@@ -1642,21 +1642,14 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
         }
         // Weapons that move between their drawn mount and a skeleton sheath bone
         // when the draw state changes (sword to the left hip, shield to the back).
-        // The sheath rotation converts the weapon's hand-frame authoring into the
-        // sheath bone's frame: a right-hand blade extends along the bone's -X in
-        // the hand, while the belt bone carries weapons along +X (hilt up, tip
-        // down-back), so the sword flips 180° around Y; the shield's arm-strap
-        // frame holds its face along +Y, which the back bone expects along -Z
-        // (facing out behind the character), a -90° X rotation.
+        // The dedicated sheath bones already carry FFXIV's authored hip/back
+        // orientation, so their weapon mounts remain identity transforms.
         const weaponRestingMounts: Array<{
           slot: EquipmentSlot
           mount: THREE.Group
           drawnTarget: THREE.Object3D
           sheathBoneNames: string[]
-          sheathRotation: THREE.Quaternion
         }> = []
-        const sheathedSwordRotation = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI)
-        const sheathedShieldRotation = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2)
         for (const plan of equipmentPlans) {
           const result = plan.candidates.map((path) => byPath.get(path)).find((candidate) => candidate?.model)
           if (result?.model) {
@@ -1707,7 +1700,6 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
                   sheathBoneNames: plan.slot === 'mainHand'
                     ? ['j_buki_kosi_l', 'j_buki2_kosi_l', 'j_kosi']
                     : ['j_buki_sebo_l', 'j_buki_sebo_r', 'j_sebo_c'],
-                  sheathRotation: plan.slot === 'mainHand' ? sheathedSwordRotation : sheathedShieldRotation,
                 })
               }
             }
@@ -1828,11 +1820,11 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
                 .find(Boolean)
               const sheathed = !drawn && sheathBone
               const target = sheathed ? sheathBone : resting.drawnTarget
-              // add() re-parents while keeping the mount's local transform, so the
-              // weapon takes the new bone's animated pose with its race scale intact.
+              // add() intentionally adopts the new bone's local frame. Both the
+              // hand and dedicated sheath bones already author the final pose.
               if (resting.mount.parent !== target) target.add(resting.mount)
-              if (sheathed) resting.mount.quaternion.copy(resting.sheathRotation)
-              else resting.mount.quaternion.identity()
+              resting.mount.position.set(0, 0, 0)
+              resting.mount.quaternion.identity()
             }
           }
           applyWeaponRestingMounts.current = applyRestingMounts
