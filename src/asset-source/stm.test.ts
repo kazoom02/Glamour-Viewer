@@ -34,6 +34,43 @@ function legacyFixture(): ArrayBuffer {
   return buffer
 }
 
+function compressedLegacyFixture(): ArrayBuffer {
+  const columnLengths = [260, 6, 6, 2, 2]
+  const entryHeaderSize = columnLengths.length * 2
+  const entryDataSize = columnLengths.reduce((sum, length) => sum + length, 0)
+  const buffer = new ArrayBuffer(16 + entryHeaderSize + entryDataSize)
+  const view = new DataView(buffer)
+  view.setUint16(0, 0x534d, true)
+  view.setUint16(2, 0x0101, true)
+  view.setUint16(4, 1, true)
+  view.setUint32(8, 12, true)
+  view.setUint32(12, 0, true)
+  let halfEnd = 0
+  columnLengths.forEach((length, index) => {
+    halfEnd += length / 2
+    view.setUint16(16 + index * 2, halfEnd, true)
+  })
+  let cursor = 16 + entryHeaderSize
+  // One diffuse palette value followed by 254 palette indices.
+  view.setUint16(cursor, HALF.half, true)
+  view.setUint16(cursor + 2, HALF.quarter, true)
+  view.setUint16(cursor + 4, HALF.one, true)
+  cursor += 6
+  view.setUint8(cursor, 1) // stain 1 -> palette entry 1
+  view.setUint8(cursor + 1, 0) // stain 2 -> empty
+  cursor += 254
+  ;[
+    [HALF.quarter, HALF.quarter, HALF.quarter],
+    [HALF.zero, HALF.zero, HALF.zero],
+    [HALF.one],
+    [HALF.half],
+  ].flat().forEach((value) => {
+    view.setUint16(cursor, value, true)
+    cursor += 2
+  })
+  return buffer
+}
+
 describe('FFXIV staining templates', () => {
   it('parses repeated legacy dye packs by template and stain ID', () => {
     const template = parseStainingTemplate(legacyFixture(), 'legacy')
@@ -47,6 +84,13 @@ describe('FFXIV staining templates', () => {
     expect(template.get(12, 128)?.diffuse).toEqual([0.5, 0.25, 1])
     expect(template.get(99, 1)).toBeUndefined()
     expect(template.get(12, 0)).toBeUndefined()
+  })
+
+  it('reads compressed stain indices without shifting them by one dye', () => {
+    const template = parseStainingTemplate(compressedLegacyFixture(), 'legacy')
+    expect(template.get(12, 1)?.diffuse).toEqual([0.5, 0.25, 1])
+    expect(template.get(12, 2)?.diffuse).toEqual([0, 0, 0])
+    expect(template.get(12, 254)?.diffuse).toEqual([0, 0, 0])
   })
 
   it('applies only the fields and channel selected by each MTRL dye row', () => {

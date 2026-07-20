@@ -79,8 +79,9 @@ function column<T>(
     return { value: (index) => index >= 0 && index < STAIN_COUNT ? read(start + index * elementSize) : empty }
   }
 
-  // Compressed columns store a small value palette followed by 254 byte
-  // indices. Index byte zero is a marker; stain 1 starts at byte one.
+  // Compressed columns store a small value palette followed by one byte for
+  // each of the 254 stain rows. `get()` has already converted stain IDs from
+  // one-based to zero-based, so stain 1 reads the first index byte.
   assertStm(byteLength >= STAIN_COUNT && (byteLength - STAIN_COUNT) % elementSize === 0, 'An STM compressed column has an invalid size.')
   const valueCount = (byteLength - STAIN_COUNT) / elementSize
   const values = Array.from({ length: valueCount + 1 }, (_, index) => index === 0 ? empty : read(start + (index - 1) * elementSize))
@@ -88,7 +89,7 @@ function column<T>(
   return {
     value: (index) => {
       if (index < 0 || index >= STAIN_COUNT) return empty
-      const paletteIndex = index < STAIN_COUNT - 1 ? bytes[indicesStart + index + 1]! : 0
+      const paletteIndex = bytes[indicesStart + index]!
       return values[paletteIndex] ?? empty
     },
   }
