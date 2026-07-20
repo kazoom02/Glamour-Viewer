@@ -422,6 +422,10 @@ function addDecodedModel(
     const alphaMode = decodedMaterial?.alphaMode ?? 'opaque'
     const alphaCutoff = materialAlphaCutoff(shaderPackage, alphaMode, Boolean(diffuse))
     const isIris = decodedMaterial?.shaderPackage.toLowerCase() === 'iris.shpk' || /_iri_[a-z]\.mtrl$/.test(materialPath)
+    // Gloves and body sleeves frequently share nearly identical skinned surface
+    // positions. FFXIV resolves that equipment layer in favour of the gloves;
+    // bias only their depth values so the sleeve cannot z-fight through them.
+    const isHandEquipment = slot === 'hands'
     const isFaceMaterial = /mt_c\d{4}f\d{4}/.test(materialPath)
     // Which appearance color drives this material's tint. Resolved once so the
     // initial build and the live color updates stay in lockstep.
@@ -536,9 +540,9 @@ function addDecodedModel(
         : THREE.FrontSide,
       dithering: true,
       flatShading: false,
-      polygonOffset: isIris,
-      polygonOffsetFactor: isIris ? -1 : 0,
-      polygonOffsetUnits: isIris ? -1 : 0,
+      polygonOffset: isIris || isHandEquipment,
+      polygonOffsetFactor: isIris ? -1 : isHandEquipment ? -2 : 0,
+      polygonOffsetUnits: isIris ? -1 : isHandEquipment ? -2 : 0,
     })
     // MSAA turns the hard cutout boundary into sub-pixel coverage while retaining
     // depth writes between layered hairstyle cards. This avoids both rectangular
@@ -633,6 +637,7 @@ function addDecodedModel(
       : new THREE.Mesh(geometry, material)
     mesh.name = `${label}-${index}`
     if (isIris) mesh.renderOrder = 10
+    else if (isHandEquipment) mesh.renderOrder = 2
     target.add(mesh)
     if (mesh instanceof THREE.SkinnedMesh && rig) {
       target.updateMatrixWorld(true)
