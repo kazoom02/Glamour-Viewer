@@ -23,6 +23,11 @@ export interface HandEquipmentVisibility {
   hideForearm: boolean
 }
 
+export interface HandEquipmentBodyCompatibility {
+  shape?: 'shp_hij' | 'shp_ude' | 'shp_kat'
+  hiddenAttributes: string[]
+}
+
 function assertEqp(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
 }
@@ -68,5 +73,25 @@ export function handEquipmentVisibility(bytes: ArrayBuffer, setId: number): Hand
   return {
     hideElbow: (entry & HANDS_HIDE_ELBOW) !== 0n,
     hideForearm: (entry & HANDS_HIDE_FOREARM) !== 0n,
+  }
+}
+
+/** Resolves the body geometry changes triggered by the hand EQP flags. */
+export function handEquipmentBodyCompatibility(
+  visibility: HandEquipmentVisibility,
+): HandEquipmentBodyCompatibility {
+  const shape = visibility.hideElbow && visibility.hideForearm
+    ? 'shp_kat'
+    : visibility.hideForearm
+      ? 'shp_ude'
+      : visibility.hideElbow
+        ? 'shp_hij'
+        : undefined
+  return {
+    ...(shape ? { shape } : {}),
+    hiddenAttributes: [
+      ...(visibility.hideElbow ? ['atr_ude'] : []),
+      ...(visibility.hideForearm ? ['atr_hij'] : []),
+    ],
   }
 }

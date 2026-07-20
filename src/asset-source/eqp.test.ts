@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { equipmentParameterEntry, handEquipmentVisibility, headEquipmentVisibility } from './eqp'
+import { equipmentParameterEntry, handEquipmentBodyCompatibility, handEquipmentVisibility, headEquipmentVisibility } from './eqp'
 
 function fixture(entry: bigint): ArrayBuffer {
   const buffer = new ArrayBuffer(160 * 8)
@@ -29,6 +29,21 @@ describe('equipment parameter hair visibility', () => {
     expect(handEquipmentVisibility(fixture(flags), 5)).toEqual({
       hideElbow: true,
       hideForearm: true,
+    })
+  })
+
+  it('maps glove lengths to body shapes and hidden arm attributes', () => {
+    expect(handEquipmentBodyCompatibility({ hideElbow: true, hideForearm: false })).toEqual({
+      shape: 'shp_hij',
+      hiddenAttributes: ['atr_ude'],
+    })
+    expect(handEquipmentBodyCompatibility({ hideElbow: false, hideForearm: true })).toEqual({
+      shape: 'shp_ude',
+      hiddenAttributes: ['atr_hij'],
+    })
+    expect(handEquipmentBodyCompatibility({ hideElbow: true, hideForearm: true })).toEqual({
+      shape: 'shp_kat',
+      hiddenAttributes: ['atr_ude', 'atr_hij'],
     })
   })
 

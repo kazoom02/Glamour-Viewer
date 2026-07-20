@@ -23,7 +23,7 @@ import { catalogAnimationCandidates, idleWeaponClassForJobs, isCompactHipSubWeap
 import { getClassJobCategories } from '../catalog/catalogCache'
 import { createLocalAssetReader } from '../asset-source/sqpack'
 import { HUMAN_CMP_PATH, loadLocalBustScale, type BustScale } from '../asset-source/cmp'
-import { EQUIPMENT_PARAMETER_PATH, handEquipmentVisibility } from '../asset-source/eqp'
+import { EQUIPMENT_PARAMETER_PATH, handEquipmentBodyCompatibility, handEquipmentVisibility } from '../asset-source/eqp'
 import { equipmentAssetPlan } from '../asset-source/equipmentPlan'
 import {
   loadLocalMaterials,
@@ -386,9 +386,11 @@ function addDecodedModel(
   animatedMaterials: AnimatedMaterial[] = [],
   facePaintTexture?: MaterialLoadResult['facePaintTexture'],
   customizationAppliers: CustomizationApplier[] = [],
+  hiddenAttributes: readonly string[] = [],
 ): number {
   for (const [index, part] of model.meshes.entries()) {
     if (slot && attributeMask !== undefined && !isVisibleEquipmentPart(part.attributes, slot, attributeMask)) continue
+    if (part.attributes?.some((attribute) => hiddenAttributes.includes(attribute.toLowerCase()))) continue
     if (label === 'character-face' && customization && !faceFeatureVisible(part.attributes, faceFeatureMask(customization))) continue
     const materialPath = model.materialPaths[part.materialIndex]?.toLowerCase() ?? ''
     const decodedMaterial = decodedMaterials[materialPath.replaceAll('\\', '/')]
@@ -1494,6 +1496,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           ...equipmentPlans.flatMap((plan) => plan.candidates),
         ])]
         const selectedFaceShapes = activeFaceShapes(customization)
+        let hiddenArmAttributes: string[] = []
         const shapeSelections = Object.fromEntries(
           characterPlans
             .filter((plan) => plan.part === 'face')
@@ -1506,22 +1509,14 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               await createLocalAssetReader(source).read(EQUIPMENT_PARAMETER_PATH),
               handItem.modelSet,
             )
-            const gloveShape = handVisibility.hideElbow
-              ? 'shp_kat'
-              : handVisibility.hideForearm
-                ? 'shp_ude'
-                : 'shp_hij'
-            const gloveShapePaths = [
-              ...characterPlans
-                .filter((plan) => plan.part === 'torso')
-                .flatMap(characterModelCandidates),
-              ...equipmentPlans
+            const compatibility = handEquipmentBodyCompatibility(handVisibility)
+            hiddenArmAttributes = compatibility.hiddenAttributes
+            const gloveShapePaths = equipmentPlans
                 .filter((plan) => plan.slot === 'body')
-                .flatMap((plan) => plan.candidates),
-            ]
-            gloveShapePaths
-              .forEach((path) => { shapeSelections[path] = [gloveShape] })
-            diagnostics.push(`glove compatibility shape: ${gloveShape} paths=${gloveShapePaths.length} (hideElbow=${handVisibility.hideElbow} hideForearm=${handVisibility.hideForearm})`)
+                .flatMap((plan) => plan.candidates)
+            if (compatibility.shape) gloveShapePaths
+              .forEach((path) => { shapeSelections[path] = [compatibility.shape!] })
+            diagnostics.push(`glove compatibility: shape=${compatibility.shape ?? 'base'} hidden=${hiddenArmAttributes.join(',') || 'none'} (hideElbow=${handVisibility.hideElbow} hideForearm=${handVisibility.hideForearm})`)
           } catch (reason) {
             diagnostics.push(`glove compatibility shape unavailable: ${reason instanceof Error ? reason.message : String(reason)}`)
           }
@@ -1620,6 +1615,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               animatedMaterials,
               plan.part === 'face' ? materialResult?.facePaintTexture : undefined,
               customizationAppliers.current,
+              plan.part === 'torso' ? hiddenArmAttributes : [],
             )
             if (result.warning) failures.push(`${plan.part}: ${result.warning}`)
             if (materialResult?.errors.length) failures.push(...materialResult.errors.map((error) => `${plan.part} ${error}`))
@@ -1687,6 +1683,9 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               false,
               materialResult?.materialAnimation,
               animatedMaterials,
+              undefined,
+              [],
+              plan.slot === 'body' ? hiddenArmAttributes : [],
             )
             if (plan.sageMount && weaponRig && sageWeaponAnimationsPromise) {
               try {
