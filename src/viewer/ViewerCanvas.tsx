@@ -1652,11 +1652,11 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           sheathRotation: THREE.Quaternion
         }> = []
         const sheathedSwordRotation = new THREE.Quaternion().setFromAxisAngle(
-          new THREE.Vector3(1, 0, 0),
+          new THREE.Vector3(0, 0, 1),
           Math.PI,
         )
         const sheathedShieldRotation = new THREE.Quaternion().setFromEuler(
-          new THREE.Euler(0, Math.PI, Math.PI / 2),
+          new THREE.Euler(0, Math.PI, Math.PI),
         )
         for (const plan of equipmentPlans) {
           const result = plan.candidates.map((path) => byPath.get(path)).find((candidate) => candidate?.model)
