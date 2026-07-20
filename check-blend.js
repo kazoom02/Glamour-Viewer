@@ -1,5 +1,0 @@
-const fs = require('fs')
-const buf = fs.readFileSync('public/animation-catalog.json')
-const catalog = JSON.parse(buf)
-const res = catalog.filter(e => e.label.includes('instrument03'))
-console.log(res)

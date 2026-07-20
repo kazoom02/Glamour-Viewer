@@ -1642,14 +1642,22 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
         }
         // Weapons that move between their drawn mount and a skeleton sheath bone
         // when the draw state changes (sword to the left hip, shield to the back).
-        // The dedicated sheath bones already carry FFXIV's authored hip/back
-        // orientation, so their weapon mounts remain identity transforms.
+        // Small model-frame corrections turn the sword tip downward and orient
+        // the shield face outward on FFXIV's hip/back sheath bones.
         const weaponRestingMounts: Array<{
           slot: EquipmentSlot
           mount: THREE.Group
           drawnTarget: THREE.Object3D
           sheathBoneNames: string[]
+          sheathRotation: THREE.Quaternion
         }> = []
+        const sheathedSwordRotation = new THREE.Quaternion().setFromAxisAngle(
+          new THREE.Vector3(1, 0, 0),
+          Math.PI,
+        )
+        const sheathedShieldRotation = new THREE.Quaternion().setFromEuler(
+          new THREE.Euler(0, Math.PI, Math.PI / 2),
+        )
         for (const plan of equipmentPlans) {
           const result = plan.candidates.map((path) => byPath.get(path)).find((candidate) => candidate?.model)
           if (result?.model) {
@@ -1700,6 +1708,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
                   sheathBoneNames: plan.slot === 'mainHand'
                     ? ['j_buki_kosi_l', 'j_buki2_kosi_l', 'j_kosi']
                     : ['j_buki_sebo_l', 'j_buki_sebo_r', 'j_sebo_c'],
+                  sheathRotation: plan.slot === 'mainHand' ? sheathedSwordRotation : sheathedShieldRotation,
                 })
               }
             }
@@ -1820,11 +1829,12 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
                 .find(Boolean)
               const sheathed = !drawn && sheathBone
               const target = sheathed ? sheathBone : resting.drawnTarget
-              // add() intentionally adopts the new bone's local frame. Both the
-              // hand and dedicated sheath bones already author the final pose.
+              // add() intentionally adopts the new bone's local frame; the
+              // correction only converts each weapon model into that frame.
               if (resting.mount.parent !== target) target.add(resting.mount)
               resting.mount.position.set(0, 0, 0)
-              resting.mount.quaternion.identity()
+              if (sheathed) resting.mount.quaternion.copy(resting.sheathRotation)
+              else resting.mount.quaternion.identity()
             }
           }
           applyWeaponRestingMounts.current = applyRestingMounts
