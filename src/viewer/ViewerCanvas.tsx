@@ -1655,14 +1655,14 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           new THREE.Euler(-Math.PI / 2, 0, Math.PI),
         )
         sheathedSwordRotation.premultiply(new THREE.Quaternion().setFromAxisAngle(
-          new THREE.Vector3(1, 0, 0),
-          Math.PI / 4,
+          new THREE.Vector3(0, 0, 1),
+          Math.PI / 2,
         ))
         const sheathedShieldRotation = new THREE.Quaternion().setFromEuler(
           new THREE.Euler(-Math.PI / 2, Math.PI, Math.PI),
         )
         sheathedShieldRotation.premultiply(new THREE.Quaternion().setFromAxisAngle(
-          new THREE.Vector3(1, 0, 0),
+          new THREE.Vector3(0, 0, 1),
           Math.PI / 2,
         ))
         for (const plan of equipmentPlans) {
