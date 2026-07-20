@@ -168,7 +168,7 @@ function attributedSubmeshMdl(): ArrayBuffer {
   return buffer
 }
 
-function shapedTriangleMdl(): ArrayBuffer {
+function shapedTriangleMdl(indexBase = 0): ArrayBuffer {
   const names = new TextEncoder().encode('shp_chk_a\0')
   const modelHeaderOffset = 212 + names.length
   const lodOffset = modelHeaderOffset + 56
@@ -178,7 +178,7 @@ function shapedTriangleMdl(): ArrayBuffer {
   const shapeValueOffset = shapeMeshOffset + 12
   const vertexOffset = shapeValueOffset + 4
   const indexOffset = vertexOffset + 48
-  const buffer = new ArrayBuffer(indexOffset + 6)
+  const buffer = new ArrayBuffer(indexOffset + (indexBase + 3) * 2)
   const view = new DataView(buffer)
   view.setUint16(12, 1, true)
   view.setUint32(16, vertexOffset, true)
@@ -197,12 +197,14 @@ function shapedTriangleMdl(): ArrayBuffer {
   view.setUint16(lodOffset + 2, 1, true)
   view.setUint16(meshOffset, 4, true)
   view.setUint32(meshOffset + 4, 3, true)
+  view.setUint32(meshOffset + 16, indexBase, true)
   view.setUint8(meshOffset + 32, 12)
   view.setUint8(meshOffset + 35, 1)
   view.setUint32(shapeOffset, 0, true)
   view.setUint16(shapeOffset + 10, 1, true)
+  view.setUint32(shapeMeshOffset, indexBase, true)
   view.setUint32(shapeMeshOffset + 4, 1, true)
-  view.setUint16(shapeValueOffset, 0, true)
+  view.setUint16(shapeValueOffset, indexBase, true)
   view.setUint16(shapeValueOffset + 2, 3, true)
   ;[
     0, 0, 0,
@@ -210,7 +212,7 @@ function shapedTriangleMdl(): ArrayBuffer {
     0, 1, 0,
     2, 0, 0,
   ].forEach((value, index) => view.setFloat32(vertexOffset + index * 4, value, true))
-  ;[0, 1, 2].forEach((value, index) => view.setUint16(indexOffset + index * 2, value, true))
+  ;[0, 1, 2].forEach((value, index) => view.setUint16(indexOffset + (indexBase + index) * 2, value, true))
   return buffer
 }
 
@@ -271,6 +273,12 @@ describe('MDL geometry decoding', () => {
     expect(Array.from(shaped.meshes[0]!.indices)).toEqual([3, 1, 2])
     expect(shaped.availableShapes).toEqual(['shp_chk_a'])
     expect(shaped.activeShapes).toEqual(['shp_chk_a'])
+    expect(shaped.shapeReplacements).toBe(1)
+  })
+
+  it('converts shared-buffer shape offsets to mesh-local index offsets', () => {
+    const shaped = decodeMdl(shapedTriangleMdl(3), ['shp_chk_a'])
+    expect(Array.from(shaped.meshes[0]!.indices)).toEqual([3, 1, 2])
     expect(shaped.shapeReplacements).toBe(1)
   })
 
