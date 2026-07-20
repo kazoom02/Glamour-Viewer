@@ -51,13 +51,15 @@ function compressedLegacyFixture(): ArrayBuffer {
     view.setUint16(16 + index * 2, halfEnd, true)
   })
   let cursor = 16 + entryHeaderSize
-  // One diffuse palette value followed by 254 palette indices.
+  // One diffuse palette value followed by 254 stain-indexed palette bytes.
   view.setUint16(cursor, HALF.half, true)
   view.setUint16(cursor + 2, HALF.quarter, true)
   view.setUint16(cursor + 4, HALF.one, true)
   cursor += 6
-  view.setUint8(cursor, 1) // stain 1 -> palette entry 1
-  view.setUint8(cursor + 1, 0) // stain 2 -> empty
+  view.setUint8(cursor, 0xff) // position 0 is the "no stain" sentinel
+  view.setUint8(cursor + 1, 1) // stain 1 -> palette entry 1
+  view.setUint8(cursor + 2, 0) // stain 2 -> empty
+  view.setUint8(cursor + 3, 9) // stain 3 -> out-of-range palette byte
   cursor += 254
   ;[
     [HALF.quarter, HALF.quarter, HALF.quarter],
@@ -68,6 +70,28 @@ function compressedLegacyFixture(): ArrayBuffer {
     view.setUint16(cursor, value, true)
     cursor += 2
   })
+  return buffer
+}
+
+function dawntrailFixture(): ArrayBuffer {
+  // One entry keyed 1200 with a single diffuse value and empty remaining columns.
+  const columnCount = 12
+  const entryHeaderSize = columnCount * 2
+  const buffer = new ArrayBuffer(16 + entryHeaderSize + 6)
+  const view = new DataView(buffer)
+  view.setUint16(0, 0x534d, true)
+  view.setUint16(2, 0x0201, true)
+  view.setUint16(4, 1, true)
+  view.setUint8(6, 3)
+  view.setUint8(7, 9)
+  view.setUint32(8, 1200, true)
+  view.setUint32(12, 0, true)
+  for (let index = 0; index < columnCount; index += 1) {
+    view.setUint16(16 + index * 2, 3, true) // every column ends after the 3-half diffuse value
+  }
+  view.setUint16(16 + entryHeaderSize, HALF.half, true)
+  view.setUint16(16 + entryHeaderSize + 2, HALF.quarter, true)
+  view.setUint16(16 + entryHeaderSize + 4, HALF.one, true)
   return buffer
 }
 
@@ -90,7 +114,15 @@ describe('FFXIV staining templates', () => {
     const template = parseStainingTemplate(compressedLegacyFixture(), 'legacy')
     expect(template.get(12, 1)?.diffuse).toEqual([0.5, 0.25, 1])
     expect(template.get(12, 2)?.diffuse).toEqual([0, 0, 0])
+    expect(template.get(12, 3)?.diffuse).toEqual([0, 0, 0])
     expect(template.get(12, 254)?.diffuse).toEqual([0, 0, 0])
+  })
+
+  it('resolves legacy-range Dawntrail templates against their +1000 keys', () => {
+    const template = parseStainingTemplate(dawntrailFixture(), 'dawntrail')
+    expect(template.get(200, 1)?.diffuse).toEqual([0.5, 0.25, 1])
+    expect(template.get(1200, 1)?.diffuse).toEqual([0.5, 0.25, 1])
+    expect(template.get(300, 1)).toBeUndefined()
   })
 
   it('applies only the fields and channel selected by each MTRL dye row', () => {

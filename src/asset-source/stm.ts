@@ -7,7 +7,8 @@ const STAIN_COUNT = 254
 type Color = [number, number, number]
 
 interface Column<T> {
-  value(index: number): T
+  /** Resolves the column's value for a one-based stain ID (1-254). */
+  value(stain: number): T
 }
 
 interface StainingTemplateEntry {
@@ -76,20 +77,22 @@ function column<T>(
     return { value: () => single }
   }
   if (byteLength === STAIN_COUNT * elementSize) {
-    return { value: (index) => index >= 0 && index < STAIN_COUNT ? read(start + index * elementSize) : empty }
+    return { value: (stain) => stain >= 1 && stain <= STAIN_COUNT ? read(start + (stain - 1) * elementSize) : empty }
   }
 
   // Compressed columns store a small value palette followed by one byte for
-  // each of the 254 stain rows. `get()` has already converted stain IDs from
-  // one-based to zero-based, so stain 1 reads the first index byte.
+  // each of the 254 stain rows. That byte array is indexed by the RAW stain
+  // ID: position 0 is a "no stain" sentinel (0xff in the shipped files), so
+  // stain 1 reads the second byte. Palette bytes are one-based; zero or an
+  // out-of-range byte leaves the stain undyed for this channel.
   assertStm(byteLength >= STAIN_COUNT && (byteLength - STAIN_COUNT) % elementSize === 0, 'An STM compressed column has an invalid size.')
   const valueCount = (byteLength - STAIN_COUNT) / elementSize
   const values = Array.from({ length: valueCount + 1 }, (_, index) => index === 0 ? empty : read(start + (index - 1) * elementSize))
   const indicesStart = start + valueCount * elementSize
   return {
-    value: (index) => {
-      if (index < 0 || index >= STAIN_COUNT) return empty
-      const paletteIndex = bytes[indicesStart + index]!
+    value: (stain) => {
+      if (stain < 1 || stain >= STAIN_COUNT) return empty
+      const paletteIndex = bytes[indicesStart + stain]!
       return values[paletteIndex] ?? empty
     },
   }
@@ -168,11 +171,15 @@ export function parseStainingTemplate(bytes: ArrayBuffer, kind: MaterialColorTab
     entries,
     get(template, stain) {
       if (!Number.isSafeInteger(stain) || stain <= 0 || stain > STAIN_COUNT) return undefined
-      const entry = entries.get(template)
+      // Equipment converted from the legacy colorset keeps its legacy template
+      // ID (< 1000); the Dawntrail staining template keys those same rows at
+      // +1000 (legacy 200 -> gud 1200). Native Dawntrail materials already
+      // store the full four-digit ID.
+      const key = kind === 'dawntrail' && template < 1000 ? template + 1000 : template
+      const entry = entries.get(key)
       if (!entry) return undefined
-      const index = stain - 1
-      const colors = entry.colors.map((item) => item.value(index))
-      const scalars = entry.scalars.map((item) => item.value(index))
+      const colors = entry.colors.map((item) => item.value(stain))
+      const scalars = entry.scalars.map((item) => item.value(stain))
       const common = {
         diffuse: colors[0] ?? [0, 0, 0],
         specular: colors[1] ?? [0, 0, 0],
