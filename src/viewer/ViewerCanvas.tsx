@@ -23,6 +23,7 @@ import { catalogAnimationCandidates, idleWeaponClassForJobs, isCompactHipSubWeap
 import { getClassJobCategories } from '../catalog/catalogCache'
 import { createLocalAssetReader } from '../asset-source/sqpack'
 import { HUMAN_CMP_PATH, loadLocalBustScale, type BustScale } from '../asset-source/cmp'
+import { EQUIPMENT_PARAMETER_PATH, handEquipmentVisibility } from '../asset-source/eqp'
 import { equipmentAssetPlan } from '../asset-source/equipmentPlan'
 import {
   loadLocalMaterials,
@@ -385,11 +386,9 @@ function addDecodedModel(
   animatedMaterials: AnimatedMaterial[] = [],
   facePaintTexture?: MaterialLoadResult['facePaintTexture'],
   customizationAppliers: CustomizationApplier[] = [],
-  suppressedAttributePrefixes: readonly string[] = [],
 ): number {
   for (const [index, part] of model.meshes.entries()) {
     if (slot && attributeMask !== undefined && !isVisibleEquipmentPart(part.attributes, slot, attributeMask)) continue
-    if (part.attributes?.some((attribute) => suppressedAttributePrefixes.some((prefix) => attribute.toLowerCase().startsWith(prefix)))) continue
     if (label === 'character-face' && customization && !faceFeatureVisible(part.attributes, faceFeatureMask(customization))) continue
     const materialPath = model.materialPaths[part.materialIndex]?.toLowerCase() ?? ''
     const decodedMaterial = decodedMaterials[materialPath.replaceAll('\\', '/')]
@@ -1495,15 +1494,36 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           ...equipmentPlans.flatMap((plan) => plan.candidates),
         ])]
         const selectedFaceShapes = activeFaceShapes(customization)
-        const faceShapeSelections = Object.fromEntries(
+        const shapeSelections = Object.fromEntries(
           characterPlans
             .filter((plan) => plan.part === 'face')
             .flatMap((plan) => characterModelCandidates(plan).map((path) => [path, selectedFaceShapes])),
         )
+        const handItem = equipped.hands
+        if (handItem) {
+          try {
+            const handVisibility = handEquipmentVisibility(
+              await createLocalAssetReader(source).read(EQUIPMENT_PARAMETER_PATH),
+              handItem.modelSet,
+            )
+            const gloveShape = handVisibility.hideElbow
+              ? 'shp_kat'
+              : handVisibility.hideForearm
+                ? 'shp_ude'
+                : 'shp_hij'
+            equipmentPlans
+              .filter((plan) => plan.slot === 'body')
+              .flatMap((plan) => plan.candidates)
+              .forEach((path) => { shapeSelections[path] = [gloveShape] })
+            diagnostics.push(`glove compatibility shape: ${gloveShape} (hideElbow=${handVisibility.hideElbow} hideForearm=${handVisibility.hideForearm})`)
+          } catch (reason) {
+            diagnostics.push(`glove compatibility shape unavailable: ${reason instanceof Error ? reason.message : String(reason)}`)
+          }
+        }
         const byPath = resultMap(await loadLocalModels(source, paths, decodedSkeleton ? {
           targetRaceCode: raceCode,
           skeleton: decodedSkeleton,
-        } : undefined, faceShapeSelections))
+        } : undefined, shapeSelections))
         if (disposed) return
 
         const characterModels = characterPlans.flatMap((plan) => {
@@ -1559,11 +1579,6 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
         }
         if (disposed) return
         const materialsByModel = new Map(materialResults.map((result) => [result.modelPath, result]))
-        const handEquipmentModel = equipmentModels.find(({ plan }) => plan.slot === 'hands')
-        const handMaterialResult = handEquipmentModel
-          ? materialsByModel.get(handEquipmentModel.result.path)
-          : undefined
-        const suppressBodySleeves = handMaterialResult?.handHideElbow || handMaterialResult?.handHideForearm
         diagnostics.push(`face customization: requestedShapes=${selectedFaceShapes.join(',') || 'base'} featureMask=0x${faceFeatureMask(customization).toString(16).padStart(2, '0')}`)
         diagnostics.push(...materialResults.flatMap((result) => result.diagnostics))
         const headEquipmentModel = equipmentModels.find(({ plan }) => plan.slot === 'head')
@@ -1666,9 +1681,6 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               false,
               materialResult?.materialAnimation,
               animatedMaterials,
-              undefined,
-              [],
-              plan.slot === 'body' && suppressBodySleeves ? ['atr_gv_'] : [],
             )
             if (plan.sageMount && weaponRig && sageWeaponAnimationsPromise) {
               try {
