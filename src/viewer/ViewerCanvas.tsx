@@ -1066,6 +1066,10 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
   // survives customization changes without re-sheathing. Defaults to drawn so an
   // equipped weapon shows its weapon-specific idle on load.
   const weaponDrawnRef = useRef(true)
+  // Re-parents the held weapons between their drawn mounts (hands/arm) and the
+  // skeleton's sheath bones (sword to the hip, shield to the back). Set during
+  // the build for classes with authored sheathed placements; null otherwise.
+  const applyWeaponRestingMounts = useRef<((drawn: boolean) => void) | null>(null)
   // Gear-visibility toggles are held in refs too so the (visibility-agnostic)
   // character rebuild can re-apply them to the freshly built group.
   const weaponsHiddenRef = useRef(false)
@@ -1132,6 +1136,9 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       await play(weaponClass, drawing)
       setWeaponDrawn(drawing)
     } catch {
+      // The draw path re-mounts weapons into the hands up front; put them back
+      // where the (unchanged) draw state says they belong.
+      applyWeaponRestingMounts.current?.(weaponDrawnRef.current)
       setAnimNotice(`Could not ${drawing ? 'draw' : 'sheathe'} the weapon for this class.`)
     } finally {
       setAnimBusy(false)
@@ -1364,6 +1371,9 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       let characterParts = 0
       let equippedItems = 0
       let rig: CharacterRig | undefined
+      // Sword-and-shield classes rest their weapons on the body (belt + back)
+      // rather than staying in the hands when sheathed.
+      let sheathUsesBodyMounts = false
       let decodedSkeleton: DecodedSkeleton | undefined
       let sageWeaponSkeleton: DecodedSkeleton | undefined
       let bustScale: BustScale = [1, 1, 1]
@@ -1450,6 +1460,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             }
           }
           idleWeaponClassRef.current = idleWeaponClass
+          sheathUsesBodyMounts = mainHandUsesShield
           // Dual-wield jobs get the second weapon in the off hand; single-weapon jobs
           // (e.g. Samurai) get their ModelSub as a left-hip scabbard instead.
           for (const plan of equipmentPlans) {
@@ -1629,6 +1640,14 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
         if (characterModels.length) {
           diagnostics.push('character render refinement: solid organic parts curved subdivision level=1; hair=authored alpha-card geometry')
         }
+        // Weapons that move between their drawn mount and a skeleton sheath bone
+        // when the draw state changes (sword to the left hip, shield to the back).
+        const weaponRestingMounts: Array<{
+          slot: EquipmentSlot
+          mount: THREE.Group
+          drawnTarget: THREE.Object3D
+          sheathBoneNames: string[]
+        }> = []
         for (const plan of equipmentPlans) {
           const result = plan.candidates.map((path) => byPath.get(path)).find((candidate) => candidate?.model)
           if (result?.model) {
@@ -1667,6 +1686,19 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               renderTarget = mount
               if (plan.sageMount && sageWeaponSkeleton) {
                 weaponRig = addCharacterRig(mount, sageWeaponSkeleton)
+              }
+              // The game sheathes weapons by re-attaching their root to dedicated
+              // skeleton bones the idle keeps posed: j_buki_kosi_* at the belt and
+              // j_buki_sebo_* on the back. Mirror that for sword-and-shield.
+              if (sheathUsesBodyMounts && rig && !plan.sageMount) {
+                weaponRestingMounts.push({
+                  slot: plan.slot,
+                  mount,
+                  drawnTarget: attachment.target,
+                  sheathBoneNames: plan.slot === 'mainHand'
+                    ? ['j_buki_kosi_l', 'j_buki2_kosi_l', 'j_kosi']
+                    : ['j_buki_sebo_l', 'j_buki_sebo_r', 'j_sebo_c'],
+                })
               }
             }
             addDecodedModel(
@@ -1775,6 +1807,27 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             const attempted = plan.candidates.map((path) => byPath.get(path)?.error).filter(Boolean).join(' / ')
             failures.push(`${plan.item.name}: ${attempted || 'model not found'}`)
           }
+        }
+        applyWeaponRestingMounts.current = null
+        if (weaponRestingMounts.length && rig) {
+          const bones = rig.skeleton.bones
+          const applyRestingMounts = (drawn: boolean) => {
+            for (const resting of weaponRestingMounts) {
+              const sheathBone = resting.sheathBoneNames
+                .map((name) => bones.find((bone) => bone.name === name))
+                .find(Boolean)
+              const target = drawn || !sheathBone ? resting.drawnTarget : sheathBone
+              // add() re-parents while keeping the mount's local transform, so the
+              // weapon takes the new bone's animated pose with its race scale intact.
+              if (resting.mount.parent !== target) target.add(resting.mount)
+            }
+          }
+          applyWeaponRestingMounts.current = applyRestingMounts
+          applyRestingMounts(weaponDrawnRef.current)
+          diagnostics.push(`sheathed placement: drawn=${weaponDrawnRef.current} ${weaponRestingMounts.map((resting) => {
+            const bone = resting.sheathBoneNames.map((name) => bones.find((candidate) => candidate.name === name)).find(Boolean)
+            return `${resting.slot}→${bone?.name ?? 'drawn-mount-only'}`
+          }).join(' ')}`)
         }
         if (idleAnimationPromise && rig) {
           try {
@@ -1935,6 +1988,9 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               restingPromise,
             ])
             if (disposed) return
+            // Drawing puts the weapons back in the hands before the reach begins;
+            // sheathing re-mounts them onto the sheath bones when the clip finishes.
+            if (drawing) applyWeaponRestingMounts.current?.(true)
             const transitionClip = animationClipFromDecoded(transitionDecoded, animationRig.skeleton, animationBustScale).clip
             const restingClip = animationClipFromDecoded(restingDecoded, animationRig.skeleton, animationBustScale).clip
             const restingLabel = restingDecoded.name || (drawing ? 'Weapon idle' : 'Idle')
@@ -1975,6 +2031,10 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
                 if (!characterFinished || !weaponFinished) return
                 // Skip if the rig was torn down or another clip took over meanwhile.
                 if (!disposed && idleAction.current === transitionAction) {
+                  // The sheathe animation actually completed: rest the weapons on
+                  // their sheath bones. (Not in finish() — that also runs when a
+                  // newer transition preempts this one and owns the mounts.)
+                  if (!drawing) applyWeaponRestingMounts.current?.(false)
                   playClipOnRig(restingClip, restingLabel, restingDecoded.blendHint, false)
                   if (sageTransition) settleSageWeapon(drawing)
                 }
