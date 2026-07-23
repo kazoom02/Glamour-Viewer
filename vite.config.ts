@@ -1,5 +1,7 @@
+// @ts-nocheck
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import fs from 'node:fs'
 
 export default defineConfig({
   base: '/',
@@ -20,5 +22,20 @@ export default defineConfig({
       },
     },
   },
-  plugins: [react()],
+  plugins: [
+    react(),
+    {
+      name: 'bone-logger',
+      configureServer(server) {
+        server.middlewares.use('/api/bones', (req, res) => {
+          let body = '';
+          req.on('data', chunk => body += chunk.toString());
+          req.on('end', () => {
+            fs.writeFileSync('bones.txt', body);
+            res.end('ok');
+          });
+        });
+      }
+    }
+  ],
 })

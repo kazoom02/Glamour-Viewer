@@ -190,7 +190,7 @@ export function faceSkeletonPath(raceCode: CharacterRaceCode): string {
 /** Face extra-skeleton IDs vary by race family and are not always the face model ID. */
 export function faceSkeletonCandidates(raceCode: CharacterRaceCode): string[] {
   const ids = raceCode === 'c0501'
-    ? ['0001', '0002', '0101']
+    ? ['0101', '0001', '0002']
     : raceCode === 'c0301'
       ? ['0101', '0002', '0001']
       : ['0002', '0001', '0101']

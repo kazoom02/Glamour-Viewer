@@ -116,9 +116,11 @@ export function locateIndex2Entry(indexBytes: ArrayBuffer, gamePath: string): Sq
 
 function fallbackFile(source: Extract<AssetSource, { kind: 'local' }>, repository: string, name: string): File | undefined {
   const suffix = `/${repository}/${name}`.toLowerCase()
+  const nameLower = name.toLowerCase()
   const file = source.files?.find((candidate) => {
-    const path = candidate.webkitRelativePath.replaceAll('\\', '/').toLowerCase()
-    return path === suffix.slice(1) || path.endsWith(suffix)
+    const path = (candidate.webkitRelativePath || candidate.name).replaceAll('\\', '/').toLowerCase()
+    const fileName = candidate.name.toLowerCase()
+    return path === suffix.slice(1) || path.endsWith(suffix) || path === nameLower || path.endsWith('/' + nameLower) || path === fileName && nameLower.endsWith('/' + fileName)
   })
   return file
 }

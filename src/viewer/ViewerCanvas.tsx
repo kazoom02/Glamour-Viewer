@@ -1,3 +1,4 @@
+import { DebugWeaponTransform } from './DebugWeaponTransform';
 import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
@@ -1260,6 +1261,12 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       activate: THREE.AnimationClip
       deactivate: THREE.AnimationClip
     } | undefined
+    let activeBookWeaponMixer: THREE.AnimationMixer | undefined
+    let bookWeaponRuntime: {
+      mixer: THREE.AnimationMixer
+      open: THREE.AnimationClip
+      close: THREE.AnimationClip
+    } | undefined
     const animatedMaterials: AnimatedMaterial[] = []
     const avfxRuntimes: AvfxRuntime[] = []
     // Rebuilt below as character materials are created; the color effect reads this.
@@ -1380,6 +1387,8 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       let baseIdleClip: THREE.AnimationClip | undefined
       let idleAnimationPromise: Promise<DecodedAnimation> | undefined
       let sageWeaponAnimationsPromise: Promise<readonly [DecodedAnimation, DecodedAnimation, DecodedAnimation]> | undefined
+      let bookWeaponAnimationsPromise: Promise<readonly [DecodedAnimation, DecodedAnimation]> | undefined
+      const weaponSkeletons = new Map<EquipmentSlot, DecodedSkeleton>()
       let idleReady = false
       if (source.kind === 'local') {
         try {
@@ -1460,7 +1469,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             }
           }
           idleWeaponClassRef.current = idleWeaponClass
-          sheathUsesBodyMounts = mainHandUsesShield
+          sheathUsesBodyMounts = true; // Enabled for all weapons now
           // Dual-wield jobs get the second weapon in the off hand; single-weapon jobs
           // (e.g. Samurai) get their ModelSub as a left-hip scabbard instead.
           for (const plan of equipmentPlans) {
@@ -1468,18 +1477,33 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             if (plan.slot === 'mainHand' && mainHandUsesLeftHand) plan.leftHandMount = true
             if (plan.slot === 'mainHand' && mainHandUsesSageFormation) plan.sageMount = true
           }
-          if (mainHandUsesSageFormation && idleWeapon) {
-            const path = SAGE_IDLE_WEAPON_SKELETON_PATH
+          for (const item of [equipped.mainHand, equipped.offHand]) {
+            if (!item || !['mainHand', 'offHand'].includes(item.slot)) continue
+            const set = String(item.modelSet).padStart(4, '0')
+            const path = `chara/weapon/w${set}/skeleton/base/b0001/skl_w${set}b0001.sklb`
             try {
-              sageWeaponSkeleton = await loadLocalSkeleton(source, path)
-              sageWeaponAnimationsPromise = Promise.all([
-                loadLocalAnimation(source, [SAGE_IDLE_WEAPON_ANIMATION_PATH], SAGE_IDLE_WEAPON_ANIMATION_NAME, path),
-                loadLocalAnimation(source, [SAGE_IDLE_WEAPON_ANIMATION_PATH], SAGE_WEAPON_ACTIVATE_ANIMATION_NAME, path),
-                loadLocalAnimation(source, [SAGE_IDLE_WEAPON_ANIMATION_PATH], SAGE_WEAPON_DEACTIVATE_ANIMATION_NAME, path),
-              ] as const)
-              diagnostics.push(`sage weapon skeleton: ${path} bones=${sageWeaponSkeleton.bones.length}`)
+              const skel = await loadLocalSkeleton(source, path)
+              weaponSkeletons.set(item.slot, skel)
+              if (item.slot === 'mainHand' && (idleWeaponClassRef.current === 'bt_2bk_emp')) {
+                const bookPapPath = 'chara/weapon/w1701/animation/a0001/wp_common/resident/weapon.pap';
+                bookWeaponAnimationsPromise = Promise.all([
+                  loadLocalAnimation(source, [bookPapPath], 'cbbw_close', path),
+                  loadLocalAnimation(source, [bookPapPath], 'cbbw_open', path),
+                ] as const);
+              }
+              if (item.slot === 'mainHand' && mainHandUsesSageFormation) {
+                sageWeaponSkeleton = skel
+                sageWeaponAnimationsPromise = Promise.all([
+                  loadLocalAnimation(source, [SAGE_IDLE_WEAPON_ANIMATION_PATH], SAGE_IDLE_WEAPON_ANIMATION_NAME, path),
+                  loadLocalAnimation(source, [SAGE_IDLE_WEAPON_ANIMATION_PATH], SAGE_WEAPON_ACTIVATE_ANIMATION_NAME, path),
+                  loadLocalAnimation(source, [SAGE_IDLE_WEAPON_ANIMATION_PATH], SAGE_WEAPON_DEACTIVATE_ANIMATION_NAME, path),
+                ] as const)
+                diagnostics.push(`sage weapon skeleton: ${path} bones=${skel.bones.length}`)
+              }
             } catch (reason) {
-              failures.push(`sage weapon skeleton: ${reason instanceof Error ? reason.message : String(reason)}`)
+              if (item.slot === 'mainHand' && mainHandUsesSageFormation) {
+                failures.push(`sage weapon skeleton: ${reason instanceof Error ? reason.message : String(reason)}`)
+              }
             }
           }
           addSubWeaponOffHand(!mainHandDualWield && !subWeaponUsesCompactHip, subWeaponUsesCompactHip, mainHandUsesShield)
@@ -1650,20 +1674,22 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           drawnTarget: THREE.Object3D
           sheathBoneNames: string[]
           sheathRotation: THREE.Quaternion
+          weaponScale: number
+          rig?: CharacterRig
         }> = []
         const sheathedSwordRotation = new THREE.Quaternion().setFromEuler(
-          new THREE.Euler(-Math.PI / 2, 0, Math.PI),
+          new THREE.Euler(0, Math.PI, -Math.PI / 2),
         )
         sheathedSwordRotation.premultiply(new THREE.Quaternion().setFromAxisAngle(
           new THREE.Vector3(0, 0, 1),
-          Math.PI / 2,
+          Math.PI,
         ))
         const sheathedShieldRotation = new THREE.Quaternion().setFromEuler(
-          new THREE.Euler(-Math.PI / 2, Math.PI, Math.PI),
+          new THREE.Euler(0, Math.PI, Math.PI / 2),
         )
         sheathedShieldRotation.premultiply(new THREE.Quaternion().setFromAxisAngle(
           new THREE.Vector3(0, 0, 1),
-          Math.PI / 2,
+          Math.PI,
         ))
         for (const plan of equipmentPlans) {
           const result = plan.candidates.map((path) => byPath.get(path)).find((candidate) => candidate?.model)
@@ -1701,8 +1727,9 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               if (weaponScale !== 1) mount.scale.setScalar(weaponScale)
               attachment.target.add(mount)
               renderTarget = mount
-              if (plan.sageMount && sageWeaponSkeleton) {
-                weaponRig = addCharacterRig(mount, sageWeaponSkeleton)
+              const skel = weaponSkeletons.get(plan.slot)
+              if (skel) {
+                weaponRig = addCharacterRig(mount, skel)
               }
               // The game sheathes weapons by re-attaching their root to dedicated
               // skeleton bones the idle keeps posed: j_buki_kosi_* at the belt and
@@ -1713,11 +1740,16 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
                   mount,
                   drawnTarget: attachment.target,
                   sheathBoneNames: plan.slot === 'mainHand'
-                    ? ['j_buki_kosi_l', 'j_buki2_kosi_l', 'j_kosi']
+                    ? (['bt_2gb_emp', 'bt_2sw_emp', 'bt_2ax_emp', 'bt_2hs_emp', 'bt_2ls_emp', 'bt_2hg_emp', 'bt_2hb_emp', 'bt_2hc_emp', 'bt_stf_sld'].includes(idleWeaponClassRef.current) 
+                       ? ['j_buki_sebo_c', 'j_sebo_c'] 
+                       : ['j_buki_kosi_l', 'j_buki2_kosi_l', 'j_kosi'])
                     : ['j_buki_sebo_l', 'j_buki_sebo_r', 'j_sebo_c'],
                   sheathRotation: plan.slot === 'mainHand' ? sheathedSwordRotation : sheathedShieldRotation,
+                  weaponScale: weaponScale,
+                  rig: weaponRig,
                 })
               }
+
             }
             addDecodedModel(
               renderTarget,
@@ -1737,6 +1769,32 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               [],
               plan.slot === 'body' ? hiddenArmAttributes : [],
             )
+            if (idleWeaponClassRef.current === 'bt_2bk_emp' && weaponRig && bookWeaponAnimationsPromise && plan.slot === 'mainHand') {
+              try {
+                const [decodedClose, decodedOpen] = await bookWeaponAnimationsPromise
+                if (disposed) return
+                const closeClip = animationClipFromDecoded(decodedClose, weaponRig.skeleton)
+                const openClip = animationClipFromDecoded(decodedOpen, weaponRig.skeleton)
+                activeBookWeaponMixer?.stopAllAction()
+                activeBookWeaponMixer = new THREE.AnimationMixer(renderTarget)
+                bookWeaponRuntime = {
+                  mixer: activeBookWeaponMixer,
+                  open: openClip.clip,
+                  close: closeClip.clip,
+                }
+                const initialClip = weaponDrawnRef.current ? openClip.clip : closeClip.clip
+                const weaponAction = activeBookWeaponMixer.clipAction(initialClip)
+                weaponAction.setLoop(THREE.LoopOnce, 1)
+                weaponAction.clampWhenFinished = true
+                weaponAction.play()
+                // Fast-forward to the end of the open/close animation so it starts fully open/closed
+                weaponAction.time = initialClip.duration
+                weaponAction.paused = true
+                activeBookWeaponMixer.update(0)
+              } catch (reason) {
+                failures.push(`book weapon animation: ${reason instanceof Error ? reason.message : String(reason)}`)
+              }
+            }
             if (plan.sageMount && weaponRig && sageWeaponAnimationsPromise) {
               try {
                 const [decodedIdle, decodedActivate, decodedDeactivate] = await sageWeaponAnimationsPromise
@@ -1831,20 +1889,108 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           const bones = rig.skeleton.bones
           const applyRestingMounts = (drawn: boolean) => {
             for (const resting of weaponRestingMounts) {
-              const sheathBone = resting.sheathBoneNames
+              let targetBoneNames = resting.sheathBoneNames;
+              if (resting.slot === 'mainHand' && (window as any).debugMainBone) {
+                targetBoneNames = [(window as any).debugMainBone, ...resting.sheathBoneNames];
+              } else if (resting.slot === 'offHand' && (window as any).debugOffBone) {
+                targetBoneNames = [(window as any).debugOffBone, ...resting.sheathBoneNames];
+              }
+
+              const sheathBone = targetBoneNames
                 .map((name) => bones.find((bone) => bone.name === name))
                 .find(Boolean)
               const sheathed = !drawn && sheathBone
               const target = sheathed ? sheathBone : resting.drawnTarget
+
               // add() intentionally adopts the new bone's local frame; the
               // correction only converts each weapon model into that frame.
               if (resting.mount.parent !== target) target.add(resting.mount)
               resting.mount.position.set(0, 0, 0)
-              if (sheathed) resting.mount.quaternion.copy(resting.sheathRotation)
-              else resting.mount.quaternion.identity()
+
+              if (sheathed) {
+                let defaultPos = { swordX: -0.15, swordY: -0.04, swordZ: 0, swordScale: 0.88, shieldX: 0.19, shieldY: 0.01, shieldZ: 0.01, shieldScale: 0.9 };
+                let defaultRot = { swordRotX: 0, swordRotY: 180, swordRotZ: -90, swordPreZ: 180, shieldRotX: 0, shieldRotY: 180, shieldRotZ: 90, shieldPreZ: 180 };
+                
+                if (idleWeaponClassRef.current === 'bt_2ax_emp') {
+                  defaultPos.swordX = -0.14;
+                  defaultPos.swordY = -0.18;
+                  defaultPos.swordZ = -0.04;
+                  defaultPos.swordScale = 0.90;
+                  defaultRot.swordRotX = -83;
+                  defaultRot.swordRotY = -180;
+                  defaultRot.swordRotZ = -70;
+                  defaultRot.swordPreZ = 180;
+                } else if (idleWeaponClassRef.current === 'bt_2sw_emp') {
+                  defaultPos.swordX = 0.25;
+                  defaultPos.swordY = -0.18;
+                  defaultPos.swordZ = -0.04;
+                  defaultPos.swordScale = 0.90;
+                  defaultRot.swordRotX = 89;
+                  defaultRot.swordRotY = 13;
+                  defaultRot.swordRotZ = 70;
+                  defaultRot.swordPreZ = -16;
+                } else if (idleWeaponClassRef.current === 'bt_2gb_emp') {
+                  defaultPos.swordX = 0.25;
+                  defaultPos.swordY = -0.14;
+                  defaultPos.swordZ = -0.14;
+                  defaultPos.swordScale = 0.83;
+                  defaultRot.swordRotX = -89;
+                  defaultRot.swordRotY = 0;
+                  defaultRot.swordRotZ = 108;
+                  defaultRot.swordPreZ = 0;
+                } else if (idleWeaponClassRef.current === 'bt_2bk_emp') {
+                  defaultPos.swordX = -0.04;
+                  defaultPos.swordY = -0.11;
+                  defaultPos.swordZ = -0.04;
+                  defaultPos.swordScale = 0.79;
+                  defaultRot.swordRotX = -86;
+                  defaultRot.swordRotY = 112;
+                  defaultRot.swordRotZ = 10;
+                  defaultRot.swordPreZ = 0;
+                }
+                
+                const dbgRot = (window as any).debugRot || defaultRot;
+                const dbgPos = (window as any).debugPos || defaultPos;
+                
+                if (resting.slot === 'mainHand') {
+                  const q = new THREE.Quaternion().setFromEuler(new THREE.Euler((dbgRot.swordRotX * Math.PI) / 180, (dbgRot.swordRotY * Math.PI) / 180, (dbgRot.swordRotZ * Math.PI) / 180));
+                  q.premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), (dbgRot.swordPreZ * Math.PI) / 180));
+                  resting.mount.quaternion.copy(q);
+                  
+                  resting.mount.position.set(dbgPos.swordX, dbgPos.swordY, dbgPos.swordZ);
+                  resting.mount.scale.setScalar(dbgPos.swordScale * resting.weaponScale);
+                } else if (resting.slot === 'offHand') {
+                  const q = new THREE.Quaternion().setFromEuler(new THREE.Euler((dbgRot.shieldRotX * Math.PI) / 180, (dbgRot.shieldRotY * Math.PI) / 180, (dbgRot.shieldRotZ * Math.PI) / 180));
+                  q.premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), (dbgRot.shieldPreZ * Math.PI) / 180));
+                  resting.mount.quaternion.copy(q);
+                  
+                  resting.mount.position.set(dbgPos.shieldX, dbgPos.shieldY, dbgPos.shieldZ);
+                  resting.mount.scale.setScalar(dbgPos.shieldScale * resting.weaponScale);
+                } else {
+                  resting.mount.quaternion.copy(resting.sheathRotation);
+                  resting.mount.position.set(0, 0, 0);
+                  resting.mount.scale.setScalar(resting.weaponScale);
+                }
+              } else {
+                resting.mount.quaternion.identity();
+                resting.mount.position.set(0, 0, 0);
+                const dbgPos = (window as any).debugPos || { swordScale: 0.88, shieldScale: 0.9 };
+                if (resting.slot === 'mainHand') {
+                  resting.mount.scale.setScalar(dbgPos.swordScale * resting.weaponScale);
+                } else if (resting.slot === 'offHand') {
+                  resting.mount.scale.setScalar(dbgPos.shieldScale * resting.weaponScale);
+                } else {
+                  resting.mount.scale.setScalar(resting.weaponScale);
+                }
+              }
             }
           }
-          applyWeaponRestingMounts.current = applyRestingMounts
+          applyWeaponRestingMounts.current = (drawn) => {
+            applyRestingMounts(drawn);
+            // The book weapon mixer handles cover rotation now.
+          }
+
+          ;(window as any).applyWeaponRestingMounts = () => applyRestingMounts(weaponDrawnRef.current);
           applyRestingMounts(weaponDrawnRef.current)
           diagnostics.push(`sheathed placement: drawn=${weaponDrawnRef.current} ${weaponRestingMounts.map((resting) => {
             const bone = resting.sheathBoneNames.map((name) => bones.find((candidate) => candidate.name === name)).find(Boolean)
@@ -1904,10 +2050,6 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               activeIdleMixer = mixer
             }
             const previous = idleAction.current
-            if (previous) {
-              previous.stop()
-              mixer.uncacheClip(previous.getClip())
-            }
             const action = mixer.clipAction(clip)
             if (blendHint === 'additive') {
               action.blendMode = THREE.AdditiveAnimationBlendMode
@@ -1916,7 +2058,19 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             action.clampWhenFinished = once
             action.setEffectiveWeight(1)
             action.setEffectiveTimeScale(timeScale)
-            action.play()
+            action.reset()
+            if (previous && previous !== action) {
+              action.play()
+              action.crossFadeFrom(previous, 0.5, true)
+              setTimeout(() => {
+                if (idleAction.current !== previous && idleMixer.current === mixer) {
+                  previous.stop()
+                  mixer?.uncacheClip(previous.getClip())
+                }
+              }, 550)
+            } else {
+              action.play()
+            }
             idleAction.current = action
             setIdleLabel(label)
             setIdleState('playing')
@@ -1952,6 +2106,19 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             setAnimDiag(diag)
             playClipOnRig(clip, entry.label, decoded.blendHint, options?.once)
           }
+          const playBookWeaponClip = (clip: THREE.AnimationClip, once: boolean, timeScale = 1): THREE.AnimationAction | undefined => {
+            const runtime = bookWeaponRuntime
+            if (!runtime) return undefined
+            runtime.mixer.stopAllAction()
+            const action = runtime.mixer.clipAction(clip)
+            action.reset()
+            action.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, once ? 1 : Infinity)
+            action.clampWhenFinished = once
+            action.setEffectiveWeight(1)
+            action.setEffectiveTimeScale(timeScale)
+            action.play()
+            return action
+          }
           const playSageWeaponClip = (clip: THREE.AnimationClip, once: boolean, timeScale = 1): THREE.AnimationAction | undefined => {
             const runtime = sageWeaponRuntime
             if (!runtime) return undefined
@@ -1964,6 +2131,15 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             action.setEffectiveTimeScale(timeScale)
             action.play()
             return action
+          }
+          const settleBookWeapon = (drawing: boolean) => {
+            const runtime = bookWeaponRuntime
+            if (!runtime) return
+            const action = playBookWeaponClip(drawing ? runtime.open : runtime.close, true)
+            if (!action) return
+            action.time = drawing ? runtime.open.duration : runtime.close.duration
+            action.paused = true
+            runtime.mixer.update(0)
           }
           const settleSageWeapon = (drawing: boolean) => {
             const runtime = sageWeaponRuntime
@@ -1980,6 +2156,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           }
           playWeaponTransition.current = async (weaponClass: string, drawing: boolean) => {
             const sageTransition = weaponClass === 'bt_jst_sld' ? sageWeaponRuntime : undefined
+            const bookTransition = weaponClass === 'bt_2bk_emp' ? bookWeaponRuntime : undefined
             const transitionName = drawing ? 'cbbp_a_activ' : 'cbbp_a_deact'
             const transitionEntry = toCatalogAnimation(`${weaponClass}-resident-sub-${transitionName}`)
             // Drawing settles into the weapon idle; sheathing into the unarmed idle.
@@ -2019,11 +2196,17 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             const sageWeaponClip = sageTransition
               ? drawing ? sageTransition.activate : sageTransition.deactivate
               : undefined
+            const bookWeaponClip = bookTransition
+              ? drawing ? bookTransition.open : bookTransition.close
+              : undefined
             const transitionTimeScale = sageTransition && drawing
               ? SAGE_DRAW_ANIMATION_TIME_SCALE
               : 1
             const sageWeaponAction = sageWeaponClip
               ? playSageWeaponClip(sageWeaponClip, true, transitionTimeScale)
+              : undefined
+            const bookWeaponAction = bookWeaponClip
+              ? playBookWeaponClip(bookWeaponClip, true, transitionTimeScale)
               : undefined
             // Keep the Sage character and noulith draw clips at the same faster
             // rate, then wait for both mixers before switching to resting idles.
@@ -2040,9 +2223,10 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             weaponTransitionCleanup.current = null
             if (!mixer || !transitionAction) return
             await new Promise<void>((resolve) => {
-              const weaponMixer = sageTransition?.mixer
+              const weaponMixer = sageTransition?.mixer || bookTransition?.mixer
+              const externalWeaponAction = sageWeaponAction || bookWeaponAction
               let characterFinished = false
-              let weaponFinished = !sageWeaponAction || !weaponMixer
+              let weaponFinished = !externalWeaponAction || !weaponMixer
               const finish = () => {
                 mixer.removeEventListener('finished', onCharacterFinished)
                 weaponMixer?.removeEventListener('finished', onWeaponFinished)
@@ -2059,6 +2243,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
                   if (!drawing) applyWeaponRestingMounts.current?.(false)
                   playClipOnRig(restingClip, restingLabel, restingDecoded.blendHint, false)
                   if (sageTransition) settleSageWeapon(drawing)
+                  if (bookTransition) settleBookWeapon(drawing)
                 }
                 finish()
               }
@@ -2068,12 +2253,12 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
                 settleWhenReady()
               }
               const onWeaponFinished = (event: { action: THREE.AnimationAction }) => {
-                if (event.action !== sageWeaponAction) return
+                if (event.action !== externalWeaponAction) return
                 weaponFinished = true
                 settleWhenReady()
               }
               mixer.addEventListener('finished', onCharacterFinished)
-              if (sageWeaponAction && weaponMixer) {
+              if (externalWeaponAction && weaponMixer) {
                 weaponMixer.addEventListener('finished', onWeaponFinished)
               }
               weaponTransitionCleanup.current = finish
@@ -2192,6 +2377,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       elapsed += delta
       activeIdleMixer?.update(delta)
       activeSageWeaponMixer?.update(delta)
+      activeBookWeaponMixer?.update(delta)
       animatedMaterials.forEach(({ material, animation, track, color }) => {
         sampleMaterialAnimationTrack(animation, track, elapsed, color)
         material.emissive.setRGB(
@@ -2222,6 +2408,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       playExternalMotion.current = null
       activeIdleMixer?.stopAllAction()
       activeSageWeaponMixer?.stopAllAction()
+      activeBookWeaponMixer?.stopAllAction()
       if (idleMixer.current === activeIdleMixer) {
         idleMixer.current = null
         idleAction.current = null
@@ -2302,6 +2489,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
 
   return (
     <div className="viewer-canvas-wrap">
+        <DebugWeaponTransform />
       <div className="viewer-canvas" ref={container} aria-label="Three-dimensional FFXIV character and armor inspection view" />
       {previewItems.length > 0 && (
         <details className="viewer-selection" aria-label="Selected preview armor">

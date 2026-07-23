@@ -38,7 +38,9 @@ export function loadLocalMaterials(
     }
     activeWorker.addEventListener('message', onMessage)
     activeWorker.addEventListener('error', onError)
+    
     activeWorker.postMessage({ id, source, requests })
+  
   })
 }
 

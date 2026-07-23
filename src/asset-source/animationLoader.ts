@@ -34,7 +34,9 @@ export function loadLocalAnimation(
       worker.terminate()
       reject(new Error(event.message || 'The animation worker failed.'))
     }
+    
     worker.postMessage({ id, source, paths, preferName, skeletonPathOverride })
+  
   })
 }
 

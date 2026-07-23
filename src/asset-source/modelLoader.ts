@@ -41,7 +41,9 @@ export function loadLocalModels(
       worker.terminate()
       reject(new Error(event.message || 'The FFXIV model worker failed.'))
     }
+    
     worker.postMessage({ id, source, paths, deformation, shapeSelections })
+  
   })
 }
 
