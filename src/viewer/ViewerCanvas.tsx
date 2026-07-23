@@ -677,6 +677,11 @@ interface EquipmentAttachment {
 
 const SHIELD_ARM_NUDGE = 0.035
 
+// Crossfade used when the draw/sheath reach settles into its destination idle
+// (weapon idle when drawn, unarmed idle when sheathed). Longer than the default
+// 0.5s blend so the arms ease into the idle pose instead of snapping.
+const IDLE_SETTLE_FADE_SECONDS = 0.8
+
 function handWeaponTarget(
   character: THREE.Group,
   rig: CharacterRig | undefined,
@@ -2253,7 +2258,9 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
                   // their sheath bones. (Not in finish() — that also runs when a
                   // newer transition preempts this one and owns the mounts.)
                   if (!drawing) applyWeaponRestingMounts.current?.(false)
-                  playClipOnRig(restingClip, restingLabel, restingDecoded.blendHint, false)
+                  // Ease the arms from the end of the reach into the destination
+                  // idle with a longer-than-default crossfade for a natural settle.
+                  playClipOnRig(restingClip, restingLabel, restingDecoded.blendHint, false, 1, IDLE_SETTLE_FADE_SECONDS)
                   if (sageTransition) settleSageWeapon(drawing)
                   if (bookTransition) settleBookWeapon(drawing)
                 }
