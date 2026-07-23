@@ -2231,18 +2231,35 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             const bookWeaponAction = bookWeaponClip
               ? playBookWeaponClip(bookWeaponClip, true, transitionTimeScale)
               : undefined
-            // Body layer: crossfade the destination idle's body from whatever is
-            // currently driving the body (the live idle, or a still-running body
-            // layer if a previous draw/sheath is being preempted) so there is no
-            // pop. warp=false keeps each idle at its authored speed while blending.
-            const previousBody = weaponIdleBodyAction.current ?? idleAction.current
-            if (previousBody) idleAction.current = previousBody
+            // Reduce whatever is currently driving the body to a BODY-ONLY layer at
+            // the same phase, so the arm reach owns the arms with nothing blending
+            // against it. If we crossfaded from the full idle instead, its arm tracks
+            // would fade out over the blend and dilute the reach for that half-second,
+            // which reads as a mushy, weird-feeling reach. The body still crossfades
+            // to the destination idle below (warp=false keeps each at authored speed).
             weaponReachAction.current?.stop()
             weaponReachAction.current = null
-            weaponIdleBodyAction.current = null
-            const bodyIdleAction = playClipOnRig(bodyIdleClip, restingLabel, restingDecoded.blendHint, false, 1, 0.5, false)
             const mixer = idleMixer.current
-            if (!mixer || !bodyIdleAction) return
+            if (!mixer) return
+            const priorLayer = weaponIdleBodyAction.current ?? idleAction.current
+            let bodyFadeSource: THREE.AnimationAction | null = null
+            if (priorLayer === weaponIdleBodyAction.current) {
+              bodyFadeSource = priorLayer // already body-only (a preempted transition)
+            } else if (priorLayer) {
+              const bodyOnly = mixer.clipAction(withoutArmBoneClip(priorLayer.getClip()))
+              bodyOnly.setLoop(THREE.LoopRepeat, Infinity)
+              bodyOnly.setEffectiveWeight(1)
+              bodyOnly.setEffectiveTimeScale(1)
+              bodyOnly.reset()
+              bodyOnly.time = priorLayer.time
+              bodyOnly.play()
+              priorLayer.stop()
+              bodyFadeSource = bodyOnly
+            }
+            weaponIdleBodyAction.current = null
+            idleAction.current = bodyFadeSource
+            const bodyIdleAction = playClipOnRig(bodyIdleClip, restingLabel, restingDecoded.blendHint, false, 1, 0.5, false)
+            if (!bodyIdleAction) return
             weaponIdleBodyAction.current = bodyIdleAction
             // Arm layer: the reach, on top, starting instantly (no blend-in) and once.
             const transitionAction = mixer.clipAction(armReachClip)
