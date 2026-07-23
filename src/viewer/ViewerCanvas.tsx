@@ -2294,23 +2294,34 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
                   // their sheath bones. (Not in finish() — that also runs when a
                   // newer transition preempts this one and owns the mounts.)
                   if (!drawing) applyWeaponRestingMounts.current?.(false)
-                  // Collapse the two layers into the single full destination idle:
-                  // crossfade it in from the arm reach so the arms rejoin the idle,
-                  // phase-locked to the body layer so the body doesn't hitch, then
-                  // retire the body-only loop once the full idle has blended in.
+                  // Collapse the two layers into the single full destination idle
+                  // with a hard cut (no crossfade): the reach already ends on the
+                  // idle's arm pose, so blending only smears it. Phase-lock the full
+                  // idle to the body layer so the body doesn't hitch, then retire the
+                  // reach and body-only layers immediately.
                   const bodyLayer = weaponIdleBodyAction.current
-                  const fullIdleAction = playClipOnRig(restingClip, restingLabel, restingDecoded.blendHint, false, 1, 0.5, false)
-                  weaponReachAction.current = null
-                  if (bodyLayer && fullIdleAction) {
+                  const settleMixer = idleMixer.current
+                  if (bodyLayer && settleMixer) {
+                    const fullIdleAction = settleMixer.clipAction(restingClip)
+                    fullIdleAction.setLoop(THREE.LoopRepeat, Infinity)
+                    fullIdleAction.clampWhenFinished = false
+                    fullIdleAction.setEffectiveWeight(1)
+                    fullIdleAction.setEffectiveTimeScale(1)
+                    fullIdleAction.reset()
                     fullIdleAction.time = bodyLayer.time
-                    const retireMixer = idleMixer.current
-                    setTimeout(() => {
-                      if (weaponIdleBodyAction.current === bodyLayer && idleAction.current !== bodyLayer) {
-                        bodyLayer.stop()
-                        retireMixer?.uncacheClip(bodyLayer.getClip())
-                        weaponIdleBodyAction.current = null
-                      }
-                    }, 0.5 * 1000 + 50)
+                    fullIdleAction.play()
+                    weaponReachAction.current?.stop()
+                    settleMixer.uncacheClip(armReachClip)
+                    bodyLayer.stop()
+                    settleMixer.uncacheClip(bodyLayer.getClip())
+                    idleAction.current = fullIdleAction
+                    weaponIdleBodyAction.current = null
+                    weaponReachAction.current = null
+                    setIdleLabel(restingLabel)
+                    setIdleState('playing')
+                  } else {
+                    playClipOnRig(restingClip, restingLabel, restingDecoded.blendHint, false)
+                    weaponReachAction.current = null
                   }
                   if (sageTransition) settleSageWeapon(drawing)
                   if (bookTransition) settleBookWeapon(drawing)
