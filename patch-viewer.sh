@@ -1,1 +1,0 @@
-sed -i 's/const diag = `animation/const hairInBase = baseIdleClip ? baseIdleClip.tracks.filter(t => t.name.includes("kami")).length : 0; const hairInClip = clip.tracks.filter(t => t.name.includes("kami")).length; const diag = `[Hair: base=${hairInBase}, clip=${hairInClip}] animation/g' src/viewer/ViewerCanvas.tsx
