@@ -2042,7 +2042,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           // Swaps a clip onto the character mixer (reused idle mixer) and plays it.
           // A one-shot clip (draw/sheath) plays once and holds its final frame;
           // `timeScale` < 1 slows it down (used to ease the draw/sheath transitions).
-          const playClipOnRig = (clip: THREE.AnimationClip, label: string, blendHint?: 'normal' | 'additive', once = false, timeScale = 1) => {
+          const playClipOnRig = (clip: THREE.AnimationClip, label: string, blendHint?: 'normal' | 'additive', once = false, timeScale = 1, fadeDuration = 0.5) => {
             let mixer = idleMixer.current
             if (!mixer) {
               mixer = new THREE.AnimationMixer(characterGroup)
@@ -2059,16 +2059,21 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             action.setEffectiveWeight(1)
             action.setEffectiveTimeScale(timeScale)
             action.reset()
-            if (previous && previous !== action) {
+            if (previous && previous !== action && fadeDuration > 0) {
               action.play()
-              action.crossFadeFrom(previous, 0.5, true)
+              action.crossFadeFrom(previous, fadeDuration, true)
               setTimeout(() => {
                 if (idleAction.current !== previous && idleMixer.current === mixer) {
                   previous.stop()
                   mixer?.uncacheClip(previous.getClip())
                 }
-              }, 550)
+              }, fadeDuration * 1000 + 50)
             } else {
+              // fadeDuration <= 0: start the clip immediately with no blend-in.
+              if (previous && previous !== action) {
+                previous.stop()
+                mixer.uncacheClip(previous.getClip())
+              }
               action.play()
             }
             idleAction.current = action
@@ -2215,12 +2220,14 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
               : undefined
             // Keep the Sage character and noulith draw clips at the same faster
             // rate, then wait for both mixers before switching to resting idles.
+            // fadeDuration 0 so the draw/sheath starts instantly with no blend-in.
             playClipOnRig(
               transitionClip,
               drawing ? 'Draw weapon' : 'Sheathe weapon',
               transitionDecoded.blendHint,
               true,
               transitionTimeScale,
+              0,
             )
             const mixer = idleMixer.current
             const transitionAction = idleAction.current
