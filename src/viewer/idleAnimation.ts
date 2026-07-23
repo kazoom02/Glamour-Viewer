@@ -38,6 +38,49 @@ function scaledValues(values: Float32Array, multiplier: readonly [number, number
   return result
 }
 
+/**
+ * FFXIV arm-chain joints on both sides: clavicle/shoulder → upper arm → forearm →
+ * hand → fingers, plus the elbow/shoulder helper bones and the held-weapon mounts
+ * that ride on the hands. Matching is by prefix so every `_l`/`_r` pair and every
+ * finger segment (`_a`/`_b`) is covered. The trailing underscore on `j_ko_` is what
+ * keeps the hip (`j_kosi`) out of the pinky (`j_ko_a_l`) match.
+ */
+const ARM_BONE_PREFIXES = [
+  'j_kata_', 'n_hkata_', 'n_sako_', // clavicle / shoulder (+ helper)
+  'j_ude_', 'n_hhiji_', 'n_hijisoubi_', // upper + fore arm, elbow helpers
+  'j_te_', 'n_hte_', // hand (+ helper)
+  'j_oya_', 'j_hito_', 'j_naka_', 'j_kusu_', 'j_ko_', // thumb, index, middle, ring, pinky
+  'j_buki', 'n_buki_', // weapon mounts carried by the hands
+] as const
+
+/** Whether a bone belongs to either arm chain (see {@link ARM_BONE_PREFIXES}). */
+export function isArmBone(boneName: string): boolean {
+  return ARM_BONE_PREFIXES.some((prefix) => boneName.startsWith(prefix))
+}
+
+/**
+ * Builds a draw/sheath clip that only moves the arms: arm-chain tracks come from
+ * the authored full-body `transition`, every other bone (spine, legs, head, hips)
+ * comes from the `restingIdle` the character settles into afterward. Playing this
+ * as a one-shot lets the arms reach for the weapon while the rest of the body keeps
+ * looping its idle, with no track driven by both sources. If the transition has no
+ * arm tracks, the original full-body clip is returned unchanged.
+ */
+export function composeArmTransition(
+  transition: THREE.AnimationClip,
+  restingIdle: THREE.AnimationClip,
+): THREE.AnimationClip {
+  const boneOf = (track: THREE.KeyframeTrack) => track.name.split('.')[0] ?? ''
+  const armTracks = transition.tracks.filter((track) => isArmBone(boneOf(track)))
+  if (!armTracks.length) return transition
+  const bodyTracks = restingIdle.tracks.filter((track) => !isArmBone(boneOf(track)))
+  return new THREE.AnimationClip(
+    transition.name || 'Draw weapon',
+    transition.duration,
+    [...bodyTracks, ...armTracks],
+  )
+}
+
 export interface AnimationClipResult {
   clip: THREE.AnimationClip
   totalTracks: number

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
-import { animationClipFromDecoded } from './idleAnimation'
+import { animationClipFromDecoded, composeArmTransition, isArmBone } from './idleAnimation'
 import type { DecodedAnimation, DecodedAnimationTrack } from '../asset-source/animationLoader'
 
 function track(overrides: Partial<DecodedAnimationTrack> = {}): DecodedAnimationTrack {
@@ -104,6 +104,49 @@ describe('idle animation clip', () => {
     expect(totalTracks).toBe(2)
     expect(boundTracks).toBe(1)
     expect(unboundTracks).toBe(1)
+  })
+
+  it('classifies the arm chain and only the arm chain', () => {
+    for (const arm of [
+      'j_kata_l', 'j_kata_r', 'j_ude_a_l', 'j_ude_b_r', 'n_hhiji_l', 'n_hijisoubi_r',
+      'j_te_l', 'j_te_r', 'j_oya_a_l', 'j_hito_b_r', 'j_naka_a_l', 'j_kusu_b_r', 'j_ko_a_l',
+      'j_buki_l', 'n_buki_r',
+    ]) {
+      expect(isArmBone(arm), arm).toBe(true)
+    }
+    for (const body of [
+      'n_root', 'n_hara', 'j_kosi', 'j_kubi', 'j_sebo_a', 'j_asi_a_l', 'j_mune_l', 'j_kao',
+    ]) {
+      expect(isArmBone(body), body).toBe(false)
+    }
+  })
+
+  it('composes a draw clip with arms from the transition and body from the idle', () => {
+    const armTrack = new THREE.QuaternionKeyframeTrack('j_ude_b_l.quaternion', [0, 1], [0, 0, 0, 1, 0, 0.1, 0, 0.995])
+    const transitionSpine = new THREE.QuaternionKeyframeTrack('j_sebo_a.quaternion', [0, 1], [0, 0, 0, 1, 0, 0.2, 0, 0.98])
+    const transition = new THREE.AnimationClip('cbbp_a_activ', 0.8, [armTrack, transitionSpine])
+    const idleSpine = new THREE.QuaternionKeyframeTrack('j_sebo_a.quaternion', [0, 2], [0, 0, 0, 1, 0, 0, 0, 1])
+    const idleArm = new THREE.QuaternionKeyframeTrack('j_ude_b_l.quaternion', [0, 2], [0, 0, 0, 1, 0, 0, 0, 1])
+    const resting = new THREE.AnimationClip('idle', 2, [idleSpine, idleArm])
+
+    const composed = composeArmTransition(transition, resting)
+    expect(composed.duration).toBe(0.8)
+    // Arm comes from the transition (its values), spine comes from the idle.
+    const arm = composed.tracks.find((t) => t.name === 'j_ude_b_l.quaternion')!
+    const spine = composed.tracks.find((t) => t.name === 'j_sebo_a.quaternion')!
+    expect(Array.from(arm.values)).toEqual(Array.from(armTrack.values))
+    expect(Array.from(spine.values)).toEqual(Array.from(idleSpine.values))
+    // No bone is driven twice.
+    expect(composed.tracks.filter((t) => t.name === 'j_ude_b_l.quaternion')).toHaveLength(1)
+  })
+
+  it('returns the full transition unchanged when it has no arm tracks', () => {
+    const spine = new THREE.QuaternionKeyframeTrack('j_sebo_a.quaternion', [0, 1], [0, 0, 0, 1, 0, 0.2, 0, 0.98])
+    const transition = new THREE.AnimationClip('cbbp_a_activ', 0.8, [spine])
+    const resting = new THREE.AnimationClip('idle', 2, [
+      new THREE.QuaternionKeyframeTrack('j_sebo_a.quaternion', [0, 2], [0, 0, 0, 1, 0, 0, 0, 1]),
+    ])
+    expect(composeArmTransition(transition, resting)).toBe(transition)
   })
 
   it('drops generic and hairstyle-specific secondary-hair tracks', () => {

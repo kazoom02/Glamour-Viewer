@@ -55,7 +55,7 @@ import {
 } from '../catalog/types'
 import type { CharacterCustomization } from '../customization/types'
 import { activeFaceShapes, faceFeatureMask, faceFeatureVisible } from '../customization/faceShapes'
-import { animationClipFromDecoded } from './idleAnimation'
+import { animationClipFromDecoded, composeArmTransition } from './idleAnimation'
 import AnimationPicker from './AnimationPicker'
 import { createAvfxRuntime, type AvfxRuntime } from './avfxRuntime'
 import { subdivideCurvedMesh } from './geometryQuality'
@@ -2190,8 +2190,13 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             // Drawing puts the weapons back in the hands before the reach begins;
             // sheathing re-mounts them onto the sheath bones when the clip finishes.
             if (drawing) applyWeaponRestingMounts.current?.(true)
-            const transitionClip = animationClipFromDecoded(transitionDecoded, animationRig.skeleton, animationBustScale).clip
             const restingClip = animationClipFromDecoded(restingDecoded, animationRig.skeleton, animationBustScale).clip
+            // The draw/sheath is authored full-body, but we only want the arms to
+            // reach for the weapon: keep the arm-chain tracks from the transition and
+            // source every other bone from the resting idle, so spine/legs/head stay
+            // in their idle loop while the hands do the drawing/sheathing.
+            const fullTransitionClip = animationClipFromDecoded(transitionDecoded, animationRig.skeleton, animationBustScale).clip
+            const transitionClip = composeArmTransition(fullTransitionClip, restingClip)
             const restingLabel = restingDecoded.name || (drawing ? 'Weapon idle' : 'Idle')
             const sageWeaponClip = sageTransition
               ? drawing ? sageTransition.activate : sageTransition.deactivate
