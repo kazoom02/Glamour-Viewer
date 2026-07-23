@@ -81,6 +81,26 @@ export function composeArmTransition(
   )
 }
 
+/** The arm-chain tracks of a clip (see {@link isArmBone}) as a standalone clip. */
+export function onlyArmBoneClip(clip: THREE.AnimationClip): THREE.AnimationClip {
+  const boneOf = (track: THREE.KeyframeTrack) => track.name.split('.')[0] ?? ''
+  return new THREE.AnimationClip(
+    clip.name || 'arms',
+    clip.duration,
+    clip.tracks.filter((track) => isArmBone(boneOf(track))),
+  )
+}
+
+/** A clip with its arm-chain tracks removed — keeps spine, legs, head and hips. */
+export function withoutArmBoneClip(clip: THREE.AnimationClip): THREE.AnimationClip {
+  const boneOf = (track: THREE.KeyframeTrack) => track.name.split('.')[0] ?? ''
+  return new THREE.AnimationClip(
+    clip.name || 'body',
+    clip.duration,
+    clip.tracks.filter((track) => !isArmBone(boneOf(track))),
+  )
+}
+
 export interface AnimationClipResult {
   clip: THREE.AnimationClip
   totalTracks: number

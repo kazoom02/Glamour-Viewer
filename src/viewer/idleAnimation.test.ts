@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
-import { animationClipFromDecoded, composeArmTransition, isArmBone } from './idleAnimation'
+import { animationClipFromDecoded, composeArmTransition, isArmBone, onlyArmBoneClip, withoutArmBoneClip } from './idleAnimation'
 import type { DecodedAnimation, DecodedAnimationTrack } from '../asset-source/animationLoader'
 
 function track(overrides: Partial<DecodedAnimationTrack> = {}): DecodedAnimationTrack {
@@ -138,6 +138,24 @@ describe('idle animation clip', () => {
     expect(Array.from(spine.values)).toEqual(Array.from(idleSpine.values))
     // No bone is driven twice.
     expect(composed.tracks.filter((t) => t.name === 'j_ude_b_l.quaternion')).toHaveLength(1)
+  })
+
+  it('splits a clip into disjoint arm-only and body-only layers', () => {
+    const arm = new THREE.QuaternionKeyframeTrack('j_ude_b_l.quaternion', [0, 1], [0, 0, 0, 1, 0, 0.1, 0, 0.995])
+    const hand = new THREE.QuaternionKeyframeTrack('j_te_r.quaternion', [0, 1], [0, 0, 0, 1, 0, 0.1, 0, 0.995])
+    const spine = new THREE.QuaternionKeyframeTrack('j_sebo_a.quaternion', [0, 1], [0, 0, 0, 1, 0, 0.2, 0, 0.98])
+    const hips = new THREE.VectorKeyframeTrack('n_hara.position', [0, 1], [0, 1, 0, 0, 1.1, 0])
+    const clip = new THREE.AnimationClip('idle', 1.5, [arm, hand, spine, hips])
+
+    const arms = onlyArmBoneClip(clip)
+    const body = withoutArmBoneClip(clip)
+    expect(arms.duration).toBe(1.5)
+    expect(body.duration).toBe(1.5)
+    expect(arms.tracks.map((t) => t.name).sort()).toEqual(['j_te_r.quaternion', 'j_ude_b_l.quaternion'])
+    expect(body.tracks.map((t) => t.name).sort()).toEqual(['j_sebo_a.quaternion', 'n_hara.position'])
+    // No bone appears in both layers.
+    const armBones = new Set(arms.tracks.map((t) => t.name.split('.')[0]))
+    expect(body.tracks.every((t) => !armBones.has(t.name.split('.')[0]!))).toBe(true)
   })
 
   it('returns the full transition unchanged when it has no arm tracks', () => {

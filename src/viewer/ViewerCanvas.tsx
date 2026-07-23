@@ -55,7 +55,7 @@ import {
 } from '../catalog/types'
 import type { CharacterCustomization } from '../customization/types'
 import { activeFaceShapes, faceFeatureMask, faceFeatureVisible } from '../customization/faceShapes'
-import { animationClipFromDecoded, composeArmTransition } from './idleAnimation'
+import { animationClipFromDecoded, onlyArmBoneClip, withoutArmBoneClip } from './idleAnimation'
 import AnimationPicker from './AnimationPicker'
 import { createAvfxRuntime, type AvfxRuntime } from './avfxRuntime'
 import { subdivideCurvedMesh } from './geometryQuality'
@@ -677,11 +677,6 @@ interface EquipmentAttachment {
 
 const SHIELD_ARM_NUDGE = 0.035
 
-// Crossfade used when the draw/sheath reach settles into its destination idle
-// (weapon idle when drawn, unarmed idle when sheathed). Longer than the default
-// 0.5s blend so the arms ease into the idle pose instead of snapping.
-const IDLE_SETTLE_FADE_SECONDS = 0.8
-
 function handWeaponTarget(
   character: THREE.Group,
   rig: CharacterRig | undefined,
@@ -1064,6 +1059,14 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
   const playWeaponTransition = useRef<((weaponClass: string, drawing: boolean) => Promise<void>) | null>(null)
   // Removes any pending "transition finished → resting idle" listener.
   const weaponTransitionCleanup = useRef<(() => void) | null>(null)
+  // During a draw/sheath, the destination idle plays split in two layers: this
+  // body-only loop (spine/legs/head) crossfades between the combat and normal
+  // idles, while a separate arm-only action plays the reach on top. Held so it can
+  // be retired once the full idle takes back over, and stopped if preempted.
+  const weaponIdleBodyAction = useRef<THREE.AnimationAction | null>(null)
+  // The arm-only reach action playing on top of the body idle layer above. Tracked
+  // so a lingering reach can be stopped when a new draw/sheath preempts this one.
+  const weaponReachAction = useRef<THREE.AnimationAction | null>(null)
   // The live character group and the resolved idle weapon class, so the display
   // buttons can toggle gear visibility and play the draw/sheath transition.
   const characterGroupRef = useRef<THREE.Group | null>(null)
@@ -1278,6 +1281,8 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
     customizationAppliers.current = []
     idleAction.current = null
     idleMixer.current = null
+    weaponIdleBodyAction.current = null
+    weaponReachAction.current = null
     playCatalogAnimation.current = null
     playWeaponTransition.current = null
     playExternalMotion.current = null
@@ -2047,7 +2052,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
           // Swaps a clip onto the character mixer (reused idle mixer) and plays it.
           // A one-shot clip (draw/sheath) plays once and holds its final frame;
           // `timeScale` < 1 slows it down (used to ease the draw/sheath transitions).
-          const playClipOnRig = (clip: THREE.AnimationClip, label: string, blendHint?: 'normal' | 'additive', once = false, timeScale = 1, fadeDuration = 0.5) => {
+          const playClipOnRig = (clip: THREE.AnimationClip, label: string, blendHint?: 'normal' | 'additive', once = false, timeScale = 1, fadeDuration = 0.5, warp = true) => {
             let mixer = idleMixer.current
             if (!mixer) {
               mixer = new THREE.AnimationMixer(characterGroup)
@@ -2066,7 +2071,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             action.reset()
             if (previous && previous !== action && fadeDuration > 0) {
               action.play()
-              action.crossFadeFrom(previous, fadeDuration, true)
+              action.crossFadeFrom(previous, fadeDuration, warp)
               setTimeout(() => {
                 if (idleAction.current !== previous && idleMixer.current === mixer) {
                   previous.stop()
@@ -2084,6 +2089,7 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             idleAction.current = action
             setIdleLabel(label)
             setIdleState('playing')
+            return action
           }
           playCatalogAnimation.current = async (entry: CatalogAnimation, options?: { once?: boolean }) => {
             const decoded = await loadLocalAnimation(
@@ -2201,12 +2207,14 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             // sheathing re-mounts them onto the sheath bones when the clip finishes.
             if (drawing) applyWeaponRestingMounts.current?.(true)
             const restingClip = animationClipFromDecoded(restingDecoded, animationRig.skeleton, animationBustScale).clip
-            // The draw/sheath is authored full-body, but we only want the arms to
-            // reach for the weapon: keep the arm-chain tracks from the transition and
-            // source every other bone from the resting idle, so spine/legs/head stay
-            // in their idle loop while the hands do the drawing/sheathing.
             const fullTransitionClip = animationClipFromDecoded(transitionDecoded, animationRig.skeleton, animationBustScale).clip
-            const transitionClip = composeArmTransition(fullTransitionClip, restingClip)
+            // Play the draw/sheath in two layers. The arm-chain tracks come from the
+            // authored reach; every other bone from the destination idle. The body
+            // layer crossfades the combat idle (cbbm_id0) and normal idle (cbnm_id0)
+            // into each other for a natural idle-to-idle transition, while the arm
+            // layer plays the reach cleanly on top with nothing blending against it.
+            const armReachClip = onlyArmBoneClip(fullTransitionClip)
+            const bodyIdleClip = withoutArmBoneClip(restingClip)
             const restingLabel = restingDecoded.name || (drawing ? 'Weapon idle' : 'Idle')
             const sageWeaponClip = sageTransition
               ? drawing ? sageTransition.activate : sageTransition.deactivate
@@ -2223,22 +2231,33 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
             const bookWeaponAction = bookWeaponClip
               ? playBookWeaponClip(bookWeaponClip, true, transitionTimeScale)
               : undefined
-            // Keep the Sage character and noulith draw clips at the same faster
-            // rate, then wait for both mixers before switching to resting idles.
-            // fadeDuration 0 so the draw/sheath starts instantly with no blend-in.
-            playClipOnRig(
-              transitionClip,
-              drawing ? 'Draw weapon' : 'Sheathe weapon',
-              transitionDecoded.blendHint,
-              true,
-              transitionTimeScale,
-              0,
-            )
+            // Body layer: crossfade the destination idle's body from whatever is
+            // currently driving the body (the live idle, or a still-running body
+            // layer if a previous draw/sheath is being preempted) so there is no
+            // pop. warp=false keeps each idle at its authored speed while blending.
+            const previousBody = weaponIdleBodyAction.current ?? idleAction.current
+            if (previousBody) idleAction.current = previousBody
+            weaponReachAction.current?.stop()
+            weaponReachAction.current = null
+            weaponIdleBodyAction.current = null
+            const bodyIdleAction = playClipOnRig(bodyIdleClip, restingLabel, restingDecoded.blendHint, false, 1, 0.5, false)
             const mixer = idleMixer.current
-            const transitionAction = idleAction.current
+            if (!mixer || !bodyIdleAction) return
+            weaponIdleBodyAction.current = bodyIdleAction
+            // Arm layer: the reach, on top, starting instantly (no blend-in) and once.
+            const transitionAction = mixer.clipAction(armReachClip)
+            transitionAction.setLoop(THREE.LoopOnce, 1)
+            transitionAction.clampWhenFinished = true
+            transitionAction.setEffectiveWeight(1)
+            transitionAction.setEffectiveTimeScale(transitionTimeScale)
+            transitionAction.reset()
+            transitionAction.play()
+            weaponReachAction.current = transitionAction
+            // Anchor the finish listener + settle guard on the arm reach.
+            idleAction.current = transitionAction
+            setIdleLabel(drawing ? 'Draw weapon' : 'Sheathe weapon')
             weaponTransitionCleanup.current?.()
             weaponTransitionCleanup.current = null
-            if (!mixer || !transitionAction) return
             await new Promise<void>((resolve) => {
               const weaponMixer = sageTransition?.mixer || bookTransition?.mixer
               const externalWeaponAction = sageWeaponAction || bookWeaponAction
@@ -2258,9 +2277,24 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
                   // their sheath bones. (Not in finish() — that also runs when a
                   // newer transition preempts this one and owns the mounts.)
                   if (!drawing) applyWeaponRestingMounts.current?.(false)
-                  // Ease the arms from the end of the reach into the destination
-                  // idle with a longer-than-default crossfade for a natural settle.
-                  playClipOnRig(restingClip, restingLabel, restingDecoded.blendHint, false, 1, IDLE_SETTLE_FADE_SECONDS)
+                  // Collapse the two layers into the single full destination idle:
+                  // crossfade it in from the arm reach so the arms rejoin the idle,
+                  // phase-locked to the body layer so the body doesn't hitch, then
+                  // retire the body-only loop once the full idle has blended in.
+                  const bodyLayer = weaponIdleBodyAction.current
+                  const fullIdleAction = playClipOnRig(restingClip, restingLabel, restingDecoded.blendHint, false, 1, 0.5, false)
+                  weaponReachAction.current = null
+                  if (bodyLayer && fullIdleAction) {
+                    fullIdleAction.time = bodyLayer.time
+                    const retireMixer = idleMixer.current
+                    setTimeout(() => {
+                      if (weaponIdleBodyAction.current === bodyLayer && idleAction.current !== bodyLayer) {
+                        bodyLayer.stop()
+                        retireMixer?.uncacheClip(bodyLayer.getClip())
+                        weaponIdleBodyAction.current = null
+                      }
+                    }, 0.5 * 1000 + 50)
+                  }
                   if (sageTransition) settleSageWeapon(drawing)
                   if (bookTransition) settleBookWeapon(drawing)
                 }
@@ -2422,6 +2456,8 @@ export default function ViewerCanvas({ source, equipped, raceCode, customization
       avfxRuntimes.forEach((runtime) => runtime.dispose())
       weaponTransitionCleanup.current?.()
       weaponTransitionCleanup.current = null
+      weaponIdleBodyAction.current = null
+      weaponReachAction.current = null
       playCatalogAnimation.current = null
       playWeaponTransition.current = null
       playExternalMotion.current = null
